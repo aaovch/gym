@@ -30,7 +30,9 @@ export const workoutView = derived(database, ($database) => {
 	const entries = sessionsToEntries($database.sessions);
 	const computed = buildWorkoutData(entries);
 	return {
-		...computed,
+		entries,
+		summary: computed.summary,
+		trend: computed.trend,
 		sessions: $database.sessions,
 		updatedAt: $database.updatedAt
 	};
