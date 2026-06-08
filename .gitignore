@@ -1,3 +1,7 @@
 __pycache__/
 *.py[cod]
 summary_plots/
+web/node_modules/
+web/.svelte-kit/
+web/build/
+web/static/data/workouts.json
