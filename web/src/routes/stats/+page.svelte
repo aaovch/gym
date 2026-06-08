@@ -1,14 +1,26 @@
 <script lang="ts">
 	import { fmtNum, fmtSet, formatDateRu } from '$lib/format';
+	import { withPendingEntries } from '$lib/merged-data';
+	import { pendingStore } from '$lib/pending';
 	import type { StrengthSummary, TrendPoint } from '$lib/types';
 
 	let { data } = $props();
 
 	let query = $state('');
 	let selectedExercise = $state<string | null>(null);
+	let pending = $state<import('$lib/pending').PendingEntry[]>([]);
+
+	$effect(() => {
+		const unsubscribe = pendingStore.subscribe((items) => {
+			pending = items;
+		});
+		return unsubscribe;
+	});
+
+	const viewData = $derived(withPendingEntries(data.data, pending));
 
 	const strengthSummary = $derived(
-		data.data.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
+		viewData.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
 	);
 
 	const filtered = $derived(
@@ -16,7 +28,7 @@
 	);
 
 	const trendPoints = $derived<TrendPoint[]>(
-		selectedExercise ? (data.data.trend[selectedExercise] ?? []) : []
+		selectedExercise ? (viewData.trend[selectedExercise] ?? []) : []
 	);
 
 	function selectExercise(name: string) {
@@ -29,6 +41,9 @@
 		<div>
 			<h2>Статистика по упражнениям</h2>
 			<p class="muted">Сводка по силовым упражнениям из markdown-лога.</p>
+			{#if pending.length > 0}
+				<p class="pending-note">Учтены локально добавленные записи: {pending.length}</p>
+			{/if}
 		</div>
 		<input class="search" type="search" placeholder="Фильтр..." bind:value={query} />
 	</div>
@@ -147,6 +162,12 @@
 
 	h2 {
 		margin: 0 0 0.25rem;
+	}
+
+	.pending-note {
+		margin: 0.35rem 0 0;
+		color: var(--accent-2);
+		font-size: 0.9rem;
 	}
 
 	.search {

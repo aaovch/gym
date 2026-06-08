@@ -1,19 +1,31 @@
 <script lang="ts">
 	import { formatDateRu, todayIso } from '$lib/format';
+	import { withPendingEntries } from '$lib/merged-data';
+	import { pendingStore } from '$lib/pending';
 	import type { WorkoutEntry } from '$lib/types';
 
 	let { data } = $props();
 
 	let selectedDate = $state(todayIso());
+	let pending = $state<import('$lib/pending').PendingEntry[]>([]);
+
+	$effect(() => {
+		const unsubscribe = pendingStore.subscribe((items) => {
+			pending = items;
+		});
+		return unsubscribe;
+	});
+
+	const viewData = $derived(withPendingEntries(data.data, pending));
 
 	const entriesForDate = $derived(
-		data.data.entries
+		viewData.entries
 			.filter((entry: WorkoutEntry) => entry.date === selectedDate)
 			.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
 	);
 
 	const availableDates = $derived(
-		[...new Set(data.data.entries.map((entry: WorkoutEntry) => entry.date))].sort().reverse()
+		[...new Set(viewData.entries.map((entry: WorkoutEntry) => entry.date))].sort().reverse()
 	);
 </script>
 
@@ -22,6 +34,9 @@
 		<div>
 			<h2>План на дату</h2>
 			<p class="muted">Выберите дату или оставьте сегодняшнюю.</p>
+			{#if pending.length > 0}
+				<p class="pending-note">Локально добавлено записей: {pending.length}</p>
+			{/if}
 		</div>
 		<label class="date-field">
 			<span>Дата</span>
@@ -54,7 +69,7 @@
 </section>
 
 <section class="card muted meta">
-	Обновлено: {new Date(data.data.generatedAt).toLocaleString('ru-RU')}
+	Обновлено: {new Date(viewData.generatedAt).toLocaleString('ru-RU')}
 </section>
 
 <style>
@@ -69,6 +84,12 @@
 
 	h2 {
 		margin: 0 0 0.25rem;
+	}
+
+	.pending-note {
+		margin: 0.35rem 0 0;
+		color: var(--accent-2);
+		font-size: 0.9rem;
 	}
 
 	.date-field {

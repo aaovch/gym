@@ -7,7 +7,8 @@
 
 	const tabs = [
 		{ href: `${base}/`, label: 'Сегодня', exact: true },
-		{ href: `${base}/stats`, label: 'Статистика', exact: false }
+		{ href: `${base}/stats`, label: 'Статистика', exact: false },
+		{ href: `${base}/add`, label: 'Добавить', exact: false }
 	];
 </script>
 
