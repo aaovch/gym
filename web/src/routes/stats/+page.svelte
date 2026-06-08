@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { fmtNum, fmtSet, formatDateRu } from '$lib/format';
 	import { workoutView } from '$lib/workout-store';
 	import type { StrengthSummary, TrendPoint } from '$lib/types';
@@ -48,9 +49,14 @@
 				{#each filtered as item}
 					<tr class:selected={selectedExercise === item.exercise}>
 						<td data-label="Упражнение">
-							<button class="linkish" onclick={() => selectExercise(item.exercise)}>
-								{item.exercise}
-							</button>
+							<div class="name-cell">
+								<button class="linkish" onclick={() => selectExercise(item.exercise)}>
+									{item.exercise}
+								</button>
+								<a class="history-link" href="{base}/history?exercise={encodeURIComponent(item.exercise)}">
+									история
+								</a>
+							</div>
 						</td>
 						<td data-label="Сессий">{item.sessions}</td>
 						<td data-label="1ПМ (Эпли)">
@@ -179,6 +185,21 @@
 		text-align: left;
 		text-decoration: underline;
 		text-decoration-color: rgba(110, 231, 168, 0.35);
+	}
+
+	.name-cell {
+		display: grid;
+		gap: 0.2rem;
+	}
+
+	.history-link {
+		font-size: 0.8rem;
+		color: var(--muted);
+		text-decoration: none;
+	}
+
+	.history-link:hover {
+		color: var(--accent-2);
 	}
 
 	.ghost {
