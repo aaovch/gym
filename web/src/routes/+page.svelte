@@ -1,42 +1,45 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { formatDateRu, todayIso } from '$lib/format';
-	import { withPendingEntries } from '$lib/merged-data';
-	import { pendingStore } from '$lib/pending';
-	import type { WorkoutEntry } from '$lib/types';
-
-	let { data } = $props();
+	import { deleteSession, workoutView } from '$lib/workout-store';
+	import { getGitHubToken } from '$lib/auth';
 
 	let selectedDate = $state(todayIso());
-	let pending = $state<import('$lib/pending').PendingEntry[]>([]);
-
-	$effect(() => {
-		const unsubscribe = pendingStore.subscribe((items) => {
-			pending = items;
-		});
-		return unsubscribe;
-	});
-
-	const viewData = $derived(withPendingEntries(data.data, pending));
+	let busyId = $state<string | null>(null);
+	let error = $state('');
 
 	const entriesForDate = $derived(
-		viewData.entries
-			.filter((entry: WorkoutEntry) => entry.date === selectedDate)
+		$workoutView.entries
+			.filter((entry) => entry.date === selectedDate)
 			.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
 	);
 
 	const availableDates = $derived(
-		[...new Set(viewData.entries.map((entry: WorkoutEntry) => entry.date))].sort().reverse()
+		[...new Set($workoutView.entries.map((entry) => entry.date))].sort().reverse()
 	);
+
+	async function removeEntry(id: string | undefined) {
+		if (!id || !getGitHubToken()) {
+			error = 'Для удаления нужен GitHub token в настройках.';
+			return;
+		}
+		busyId = id;
+		error = '';
+		try {
+			await deleteSession(id);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Не удалось удалить';
+		} finally {
+			busyId = null;
+		}
+	}
 </script>
 
 <section class="card">
 	<div class="toolbar">
 		<div>
 			<h2>План на дату</h2>
-			<p class="muted">Выберите дату или оставьте сегодняшнюю.</p>
-			{#if pending.length > 0}
-				<p class="pending-note">Локально добавлено записей: {pending.length}</p>
-			{/if}
+			<p class="muted">Все данные хранятся в JSON на GitHub.</p>
 		</div>
 		<label class="date-field">
 			<span>Дата</span>
@@ -55,21 +58,40 @@
 		<div class="plan-list">
 			{#each entriesForDate as entry}
 				<article class="plan-item">
-					<h3>{entry.exercise}</h3>
+					<div class="plan-head">
+						<h3>{entry.exercise}</h3>
+						{#if entry.id}
+							<a class="edit-link" href="{base}/add?id={entry.id}">Изменить</a>
+						{/if}
+					</div>
 					<p>{entry.parts.join(' ')}</p>
 					<div class="sets">
 						{#each entry.sets as [weight, reps]}
 							<span class="badge">{weight}×{reps}</span>
 						{/each}
 					</div>
+					{#if entry.id && getGitHubToken()}
+						<button
+							type="button"
+							class="ghost danger"
+							disabled={busyId === entry.id}
+							onclick={() => removeEntry(entry.id)}
+						>
+							{busyId === entry.id ? 'Удаляем...' : 'Удалить'}
+						</button>
+					{/if}
 				</article>
 			{/each}
 		</div>
 	{/if}
 </section>
 
+{#if error}
+	<section class="card error">{error}</section>
+{/if}
+
 <section class="card muted meta">
-	Обновлено: {new Date(viewData.generatedAt).toLocaleString('ru-RU')}
+	Обновлено: {new Date($workoutView.updatedAt || Date.now()).toLocaleString('ru-RU')}
 </section>
 
 <style>
@@ -84,12 +106,6 @@
 
 	h2 {
 		margin: 0 0 0.25rem;
-	}
-
-	.pending-note {
-		margin: 0.35rem 0 0;
-		color: var(--accent-2);
-		font-size: 0.9rem;
 	}
 
 	.date-field {
@@ -124,9 +140,20 @@
 		border: 1px solid var(--border);
 	}
 
+	.plan-head {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		align-items: start;
+	}
+
 	.plan-item h3 {
 		margin: 0 0 0.35rem;
 		font-size: 1.05rem;
+	}
+
+	.edit-link {
+		font-size: 0.9rem;
 	}
 
 	.plan-item p {
@@ -138,6 +165,23 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.4rem;
+		margin-bottom: 0.75rem;
+	}
+
+	button.ghost {
+		background: transparent;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		color: var(--text);
+		padding: 0.45rem 0.75rem;
+	}
+
+	button.danger {
+		color: var(--danger);
+	}
+
+	.error {
+		color: var(--danger);
 	}
 
 	.meta {

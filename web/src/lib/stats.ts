@@ -165,22 +165,3 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 
 	return { summary, trend };
 }
-
-export function mergeEntries(baseEntries: WorkoutEntry[], extraEntries: WorkoutEntry[]): WorkoutEntry[] {
-	const merged = [...baseEntries];
-	for (const entry of extraEntries) {
-		const index = merged.findIndex(
-			(item) => item.exercise === entry.exercise && item.date === entry.date
-		);
-		if (index === -1) {
-			merged.push(entry);
-			continue;
-		}
-		merged[index] = {
-			...merged[index],
-			parts: [...merged[index].parts, ...entry.parts],
-			sets: [...merged[index].sets, ...entry.sets]
-		};
-	}
-	return merged;
-}

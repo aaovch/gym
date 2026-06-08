@@ -1,6 +1,8 @@
+import type { WorkoutDatabase } from './types';
+
 export const GITHUB_OWNER = 'aaovch';
 export const GITHUB_REPO = 'gym';
-export const MARKDOWN_PATH = 'План тренировок в качалке.md';
+export const DATA_PATH = 'data/workouts.json';
 
 const API = 'https://api.github.com';
 
@@ -22,9 +24,20 @@ function base64ToUtf8(base64: string): string {
 	return new TextDecoder().decode(bytes);
 }
 
-export async function fetchMarkdownFile(token: string): Promise<{ content: string; sha: string }> {
+export async function verifyGitHubToken(token: string): Promise<string> {
+	const response = await fetch(`${API}/user`, { headers: authHeaders(token) });
+	if (!response.ok) {
+		throw new Error('Не удалось проверить токен GitHub');
+	}
+	const user = await response.json();
+	return user.login as string;
+}
+
+export async function fetchWorkoutDatabase(
+	token: string
+): Promise<{ db: WorkoutDatabase; sha: string }> {
 	const response = await fetch(
-		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(MARKDOWN_PATH)}`,
+		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(DATA_PATH)}`,
 		{ headers: authHeaders(token) }
 	);
 
@@ -35,19 +48,19 @@ export async function fetchMarkdownFile(token: string): Promise<{ content: strin
 
 	const payload = await response.json();
 	return {
-		content: base64ToUtf8(payload.content),
+		db: JSON.parse(base64ToUtf8(payload.content)) as WorkoutDatabase,
 		sha: payload.sha
 	};
 }
 
-export async function commitMarkdownFile(
+export async function saveWorkoutDatabase(
 	token: string,
-	content: string,
+	db: WorkoutDatabase,
 	sha: string,
 	message: string
-): Promise<void> {
+): Promise<string> {
 	const response = await fetch(
-		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(MARKDOWN_PATH)}`,
+		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(DATA_PATH)}`,
 		{
 			method: 'PUT',
 			headers: {
@@ -56,7 +69,7 @@ export async function commitMarkdownFile(
 			},
 			body: JSON.stringify({
 				message,
-				content: utf8ToBase64(content),
+				content: utf8ToBase64(JSON.stringify(db, null, 2)),
 				sha
 			})
 		}
@@ -66,13 +79,7 @@ export async function commitMarkdownFile(
 		const error = await response.json().catch(() => ({}));
 		throw new Error(error.message ?? `GitHub API error ${response.status}`);
 	}
-}
 
-export async function verifyGitHubToken(token: string): Promise<string> {
-	const response = await fetch(`${API}/user`, { headers: authHeaders(token) });
-	if (!response.ok) {
-		throw new Error('Не удалось проверить токен GitHub');
-	}
-	const user = await response.json();
-	return user.login as string;
+	const payload = await response.json();
+	return payload.content.sha as string;
 }

@@ -449,14 +449,14 @@ def print_trend(trend: dict[str, list[dict]]) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Показать статистику по тренировкам из markdown-таблиц"
+        description="Показать статистику по тренировкам из JSON-базы"
     )
     parser.add_argument(
         "file",
         nargs="?",
         type=Path,
         default=None,
-        help="Путь к markdown (по умолчанию рядом со скриптом: 'План тренировок в качалке.md')",
+        help="Путь к JSON-базе (по умолчанию: data/workouts.json)",
     )
     parser.add_argument("--from", dest="date_from", help="С какой даты (YYYY-MM-DD)")
     parser.add_argument("--to", dest="date_to", help="По какую дату (YYYY-MM-DD)")
@@ -506,11 +506,14 @@ def main() -> None:
         date_to = None
 
     if args.file is not None:
-        md_path = args.file
+        db_path = args.file
     else:
-        md_path = Path(__file__).with_name("План тренировок в качалке.md")
+        db_path = Path(__file__).resolve().parent / "data" / "workouts.json"
 
-    entries = parse_markdown(md_path.read_text(encoding="utf-8"))
+    from workout_data import load_database, sessions_to_entries
+
+    db = load_database(db_path)
+    entries = sessions_to_entries(db["sessions"])
     entries = _filter_entries(entries, args.exercise, date_from, date_to)
 
     if args.mode == "summary":

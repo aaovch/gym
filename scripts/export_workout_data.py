@@ -1,23 +1,23 @@
-"""Export workout markdown to JSON for the Svelte site."""
+"""Build static workout snapshot for the Svelte site from JSON database."""
 
 from __future__ import annotations
 
 import json
 import sys
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from workout_data import load_database, sessions_to_entries  # noqa: E402
 from workout_stats import (  # noqa: E402
     _exercise_chart_kind,
     aggregate_by_exercise,
     build_trend,
-    parse_markdown,
 )
 
-MD_PATH = ROOT / "План тренировок в качалке.md"
+DB_PATH = ROOT / "data" / "workouts.json"
 OUT_PATH = ROOT / "web" / "static" / "data" / "workouts.json"
 
 
@@ -103,15 +103,18 @@ def _serialize_trend(trend: dict[str, list[dict]]) -> dict[str, list[dict]]:
 
 
 def main() -> None:
-    md_text = MD_PATH.read_text(encoding="utf-8")
-    entries = parse_markdown(md_text)
+    db = load_database(DB_PATH)
+    entries = sessions_to_entries(db["sessions"])
     groups = aggregate_by_exercise(entries)
     trend = build_trend(entries)
 
     payload = {
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
+        "updatedAt": db.get("updatedAt"),
+        "sessions": db["sessions"],
         "entries": [
             {
+                "id": e.get("id"),
                 "exercise": e["exercise"],
                 "date": e["date"],
                 "parts": e["parts"],
