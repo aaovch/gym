@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { page } from '$app/stores';
-	import { mesocyclePlanForDate, microcyclePlanForDate } from '$lib/cycle-plan';
+	import { mesocyclePlanForDate, microcyclePlanForDate, exerciseTargetOnMicro } from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
 	import { deleteSession, workoutView } from '$lib/workout-store';
@@ -33,11 +33,20 @@
 	);
 
 	const protocolHints = $derived.by(() => {
-		if (!microcycle) return new Map<string, (typeof microcycle.intensityByExercise)[number]>();
-		const hints = new Map<string, (typeof microcycle.intensityByExercise)[number]>();
+		if (!mesocycle || !microcycle) {
+			return new Map<string, NonNullable<ReturnType<typeof exerciseTargetOnMicro>>>();
+		}
+		const hints = new Map<string, NonNullable<ReturnType<typeof exerciseTargetOnMicro>>>();
 		for (const entry of entriesForDate) {
-			const row = microcycle.intensityByExercise.find(
-				(item) => item.exercise === entry.exercise && !item.plannedOnly
+			const anchor = mesocycle.anchorInfo[entry.exercise]?.anchor;
+			if (!anchor) continue;
+			const row = exerciseTargetOnMicro(
+				$workoutView.cyclePlanForCalc,
+				mesocycle.plan,
+				microcycle.plan,
+				entry.exercise,
+				anchor,
+				entry
 			);
 			if (row) hints.set(entry.exercise, row);
 		}
@@ -85,9 +94,6 @@
 			<span class="muted">
 				· {mesocycle.plan.label} · {formatDateRu(mesocycle.plan.startDate)} — {formatDateRu(mesocycle.plan.endDate)}
 				· микро {microcycle?.plan.indexInMeso ?? '—'}/{mesocycle.microcycles.length}
-				{#if microcycle?.phase}
-					· {microcycle.phase.label} ({microcycle.targetPct}% 1ПМ)
-				{/if}
 			</span>
 		</div>
 	{/if}
@@ -105,9 +111,6 @@
 				<p class="cycle-meta muted">
 					Микроцикл μ{microcycle.plan.indexInMeso}
 					· {microcycle.complete ? 'полный A+B' : 'неполный'}
-					{#if microcycle.targetPct != null}
-						· цель {microcycle.targetPct}% 1ПМ
-					{/if}
 				</p>
 			{/if}
 		</div>
@@ -134,9 +137,8 @@
 					{#if protocolHints.has(entry.exercise)}
 						{@const hint = protocolHints.get(entry.exercise)!}
 						<p class="protocol-hint" class:match={Math.abs(hint.maxPct - hint.targetPct) <= 3}>
-							{hint.protocolLabel ? `${hint.protocolLabel}: ` : 'Протокол: '}
-							цель ~{fmtNum(hint.targetWeight)} кг ({hint.targetPct}% 1ПМ)
-							· факт пик {fmtNum(hint.maxPct)}%
+							{hint.protocolLabel}: 1ПМ {fmtNum(hint.anchor1rm)} кг · цель ~{fmtNum(hint.targetWeight)} кг
+							({hint.targetPct}%) · факт пик {fmtNum(hint.maxPct)}%
 						</p>
 					{/if}
 					{#if entry.id}

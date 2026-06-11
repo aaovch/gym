@@ -7,6 +7,7 @@ import {
 	refreshAllMesoAnchors,
 	type CyclePlan
 } from './cycle-plan';
+import { DEFAULT_PROTOCOL_TEMPLATE, STABLE_PROTOCOL_TEMPLATE } from './protocol';
 import { sessionsToEntries } from './database';
 import { fetchWorkoutDatabase, saveWorkoutDatabase, verifyGitHubToken } from './github';
 import {
@@ -56,6 +57,13 @@ export const workoutView = derived([database, cyclePlan], ([$database, $cyclePla
 		cyclePlanView.usingManualPlan && cyclePlanView.mesocycles.length > 0
 			? cyclePlanView.mesocycles
 			: autoMesocyclesAsView(microcycles, entries);
+	const cyclePlanForCalc: CyclePlan =
+		$cyclePlan ?? {
+			version: 1,
+			updatedAt: '',
+			templates: [structuredClone(DEFAULT_PROTOCOL_TEMPLATE), structuredClone(STABLE_PROTOCOL_TEMPLATE)],
+			mesocycles: []
+		};
 
 	return {
 		entries,
@@ -65,6 +73,7 @@ export const workoutView = derived([database, cyclePlan], ([$database, $cyclePla
 		updatedAt: $database.updatedAt,
 		microcycles,
 		cyclePlan: $cyclePlan,
+		cyclePlanForCalc,
 		cyclePlanView: { ...cyclePlanView, mesocycles },
 		allDates
 	};

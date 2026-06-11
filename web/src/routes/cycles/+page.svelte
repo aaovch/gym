@@ -12,7 +12,6 @@
 		unassignDate,
 		updateExerciseProtocol,
 		updateMesocycle,
-		updateMicroIntensity,
 		updateTemplate,
 		type EnrichedMesocycle,
 		type ExerciseAnchorInfo
@@ -36,6 +35,7 @@
 
 	let editMode = $state(false);
 	let showProtocolEditor = $state(false);
+	let selectedTemplateId = $state(DEFAULT_PROTOCOL_TEMPLATE.id);
 
 	const { templates, mesocycles, cyclePlanView } = $derived($workoutView);
 	const plan = $derived(cyclePlanView.plan);
@@ -43,7 +43,11 @@
 	const usingManual = $derived(cyclePlanView.usingManualPlan);
 	const unassigned = $derived(cyclePlanView.unassignedDates);
 	const microCount = $derived(displayMesos.reduce((sum, meso) => sum + meso.microcycles.length, 0));
-	const activeTemplate = $derived(plan?.templates[0] ?? DEFAULT_PROTOCOL_TEMPLATE);
+	const activeTemplate = $derived(
+		plan?.templates.find((item) => item.id === selectedTemplateId) ??
+			plan?.templates[0] ??
+			DEFAULT_PROTOCOL_TEMPLATE
+	);
 
 	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
 		const names = new Set<string>();
@@ -128,13 +132,6 @@
 		save(markAnchorManual(plan, meso.plan.id, exercise, parsed));
 	}
 
-	function handleMicroIntensity(mesoId: string, microId: string, value: string) {
-		if (!plan) return;
-		const trimmed = value.trim();
-		const parsed = trimmed ? Number(trimmed.replace(',', '.')) : undefined;
-		save(updateMicroIntensity(plan, mesoId, microId, parsed));
-	}
-
 	function handleSyncExercises(meso: EnrichedMesocycle) {
 		if (!plan) return;
 		save(
@@ -188,9 +185,9 @@
 	<div>
 		<h2>Мезо- и микроциклы</h2>
 		<p class="muted">
-			<strong>Микроцикл</strong> — пара A + B. <strong>Мезоцикл</strong> — блок из ~{MESOCYCLE_TARGET_MICROS}
-			микроциклов. Якорный 1ПМ — на <strong>старт</strong> блока (лучший Эпли до первой
-			тренировки мезо, т.е. с учётом прошлого блока). Внутри мезо якорь не меняется.
+			<strong>Микроцикл</strong> — пара A + B. У каждого упражнения свой <strong>1ПМ</strong> и свой
+			<strong>протокол</strong> (% по μ). Якорный 1ПМ фиксируется на старт мезо и берётся из прошлого
+			блока.
 		</p>
 	</div>
 	<div class="intro-actions">
@@ -218,10 +215,16 @@
 
 {#if showProtocolEditor && plan}
 	<section class="card protocol-editor">
-		<h3>Шаблон: {activeTemplate.name}</h3>
+		<div class="protocol-editor-head">
+			<h3>Редактор шаблона протокола</h3>
+			<select bind:value={selectedTemplateId} class="proto-select">
+				{#each plan.templates as tpl}
+					<option value={tpl.id}>{tpl.name}</option>
+				{/each}
+			</select>
+		</div>
 		<p class="muted">
-			Фазы задают целевой %1ПМ для микроциклов μ1…μN. Якорный 1ПМ берётся на старт мезоблока (можно
-			править вручную).
+			Шаблон назначается каждому упражнению отдельно в блоке ниже. Фазы — целевой % от <em>его</em> 1ПМ.
 		</p>
 		<div class="phase-table">
 			{#each activeTemplate.phases as phase, index}
@@ -428,19 +431,33 @@
 					</div>
 				{/if}
 
-				<div class="protocol-bar" title="Протокол %1ПМ по микроциклам">
-					{#each meso.microcycles as micro}
-						{@const pct = micro.targetPct ?? micro.phase?.intensityPct}
-						<div
-							class="proto-micro"
-							class:has-data={micro.plan.dates.length > 0}
-							style="width: {100 / Math.max(totalMicros, 1)}%"
-							title="{micro.phase?.label ?? '—'} · {pct ?? '—'}%"
-						>
-							<span>{pct != null ? `${pct}%` : '—'}</span>
-							<small>μ{micro.plan.indexInMeso}</small>
-						</div>
-					{/each}
+				<div class="protocol-matrix-wrap">
+					<table class="protocol-matrix">
+						<thead>
+							<tr>
+								<th>Упражнение</th>
+								<th>1ПМ</th>
+								<th>Протокол</th>
+								{#each meso.microcycles as micro}
+									<th>μ{micro.plan.indexInMeso}</th>
+								{/each}
+							</tr>
+						</thead>
+						<tbody>
+							{#each meso.protocolMatrix as row}
+								<tr>
+									<td title={row.exercise}>{shortExerciseName(row.exercise)}</td>
+									<td>{fmtNum(row.anchor)}</td>
+									<td class="proto-cell">{row.templateName}</td>
+									{#each row.cells as cell}
+										<td class="pct-cell" title={cell.label ?? ''}>
+											{cell.pct != null ? `${cell.pct}%` : '—'}
+										</td>
+									{/each}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
 				</div>
 
 				<div class="micro-list">
@@ -448,26 +465,7 @@
 						<div class="micro-card" class:complete={micro.complete}>
 							<div class="micro-head">
 								<span class="micro-index">μ{micro.plan.indexInMeso}</span>
-								{#if micro.phase}
-									<span class="phase-tag">{micro.phase.label}</span>
-								{/if}
-								{#if micro.targetPct != null}
-									<span class="pct-tag">{micro.targetPct}% 1ПМ</span>
-								{/if}
 								{#if editMode && plan}
-									<label class="micro-intensity">
-										<span>%</span>
-										<input
-											type="number"
-											step="2.5"
-											placeholder={micro.phase?.intensityPct != null
-												? String(micro.phase.intensityPct)
-												: ''}
-											value={micro.plan.intensityPct ?? ''}
-											onchange={(e) =>
-												handleMicroIntensity(meso.plan.id, micro.plan.id, e.currentTarget.value)}
-										/>
-									</label>
 									<button
 										type="button"
 										class="ghost tiny danger-text"
@@ -485,13 +483,14 @@
 								<div class="intensity-rows">
 									{#each micro.intensityByExercise as row}
 										<div class="intensity-row">
-											<span>{shortExerciseName(row.exercise)}</span>
+											<span class="exercise-col">{shortExerciseName(row.exercise)}</span>
+											<span class="muted">1ПМ {fmtNum(row.anchor1rm)} кг</span>
 											<span class="muted">
 												{row.protocolLabel ? `${row.protocolLabel} · ` : ''}цель {fmtNum(row.targetWeight)}
 												кг ({row.targetPct}%)
 											</span>
 											{#if row.plannedOnly}
-												<span class="muted">нет записи в μ</span>
+												<span class="muted">не было в этот μ</span>
 											{:else}
 												<span class:match={Math.abs(row.maxPct - row.targetPct) <= 3}>
 													факт {fmtNum(row.maxPct)}%
@@ -500,6 +499,8 @@
 										</div>
 									{/each}
 								</div>
+							{:else}
+								<p class="muted micro-empty">Нет упражнений с якорным 1ПМ в этом μ</p>
 							{/if}
 
 							<div class="cycle-days">
@@ -645,8 +646,7 @@
 		color: var(--muted);
 	}
 
-	.protocol-preview,
-	.protocol-bar {
+	.protocol-preview {
 		display: flex;
 		gap: 2px;
 		border-radius: 8px;
@@ -654,8 +654,7 @@
 		min-height: 2rem;
 	}
 
-	.proto-seg,
-	.proto-micro {
+	.proto-seg {
 		display: grid;
 		place-content: center;
 		text-align: center;
@@ -665,20 +664,7 @@
 		padding: 0.2rem;
 	}
 
-	.proto-micro {
-		background: rgba(148, 163, 184, 0.12);
-		border-color: rgba(148, 163, 184, 0.2);
-		opacity: 0.55;
-	}
-
-	.proto-micro.has-data {
-		opacity: 1;
-		background: rgba(167, 139, 250, 0.18);
-		border-color: rgba(167, 139, 250, 0.3);
-	}
-
-	.proto-seg small,
-	.proto-micro small {
+	.proto-seg small {
 		color: var(--muted);
 		font-size: 0.65rem;
 	}
@@ -881,8 +867,68 @@
 		padding: 0.15rem 0.3rem;
 	}
 
-	.protocol-bar {
-		margin-bottom: 0.65rem;
+	.protocol-editor-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.protocol-editor-head h3 {
+		margin: 0;
+	}
+
+	.protocol-matrix-wrap {
+		overflow-x: auto;
+		margin-bottom: 0.75rem;
+	}
+
+	.protocol-matrix {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.78rem;
+	}
+
+	.protocol-matrix th,
+	.protocol-matrix td {
+		padding: 0.35rem 0.45rem;
+		border: 1px solid var(--border);
+		text-align: center;
+	}
+
+	.protocol-matrix th:first-child,
+	.protocol-matrix td:first-child {
+		text-align: left;
+		min-width: 5.5rem;
+	}
+
+	.protocol-matrix th {
+		color: var(--muted);
+		font-weight: 600;
+		background: var(--surface);
+	}
+
+	.protocol-matrix .proto-cell {
+		text-align: left;
+		color: #c4b5fd;
+		font-size: 0.72rem;
+		max-width: 7rem;
+	}
+
+	.protocol-matrix .pct-cell {
+		font-weight: 600;
+		color: var(--accent-2);
+	}
+
+	.micro-empty {
+		margin: 0 0 0.45rem;
+		font-size: 0.78rem;
+	}
+
+	.exercise-col {
+		font-weight: 600;
+		min-width: 5rem;
 	}
 
 	.micro-list {
@@ -913,36 +959,6 @@
 	.micro-index {
 		font-weight: 800;
 		color: var(--muted);
-	}
-
-	.phase-tag {
-		font-size: 0.72rem;
-		padding: 0.12rem 0.4rem;
-		border-radius: 999px;
-		background: rgba(167, 139, 250, 0.15);
-		color: #c4b5fd;
-	}
-
-	.pct-tag {
-		font-size: 0.72rem;
-		color: var(--accent-2);
-	}
-
-	.micro-intensity {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.25rem;
-		font-size: 0.72rem;
-		color: var(--muted);
-	}
-
-	.micro-intensity input {
-		width: 3.2rem;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		color: var(--text);
-		padding: 0.15rem 0.25rem;
 	}
 
 	.micro-status {

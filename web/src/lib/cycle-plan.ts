@@ -55,9 +55,24 @@ export type EnrichedMicrocycle = {
 	dayA: TrainingDay | null;
 	dayB: TrainingDay | null;
 	complete: boolean;
+	/** @deprecated используй intensityByExercise — фаза дефолтного шаблона мезо */
 	phase: ProtocolPhase | null;
+	/** @deprecated используй intensityByExercise */
 	targetPct: number | null;
 	intensityByExercise: ReturnType<typeof sessionIntensity>[];
+};
+
+export type ProtocolMatrixCell = {
+	microIndex: number;
+	pct: number | null;
+	label: string | null;
+};
+
+export type ProtocolMatrixRow = {
+	exercise: string;
+	anchor: number;
+	templateName: string;
+	cells: ProtocolMatrixCell[];
 };
 
 export type ExerciseAnchorInfo = {
@@ -75,6 +90,7 @@ export type EnrichedMesocycle = {
 	index: number;
 	microcycles: EnrichedMicrocycle[];
 	anchorInfo: Record<string, ExerciseAnchorInfo>;
+	protocolMatrix: ProtocolMatrixRow[];
 	completeMicrocycles: number;
 	durationDays: number;
 	gapAfterDays: number | null;
@@ -203,8 +219,69 @@ export function targetPctForExercise(
 ): { pct: number | null; phase: ProtocolPhase | null; template: ProtocolTemplate } {
 	const template = templateForExercise(plan, meso, exercise);
 	const phase = phaseForMicro(template, micro.indexInMeso);
-	const pct = micro.intensityPct ?? phase?.intensityPct ?? null;
+	const pct = phase?.intensityPct ?? null;
 	return { pct, phase, template };
+}
+
+export function exercisesInMicro(
+	micro: MicrocyclePlan,
+	dayA: TrainingDay | null,
+	dayB: TrainingDay | null,
+	meso: MesocyclePlan,
+	entries: WorkoutEntry[]
+): string[] {
+	const names = new Set<string>();
+	for (const day of [dayA, dayB]) {
+		if (!day) continue;
+		for (const exercise of day.exercises) names.add(exercise);
+	}
+	for (const entry of entries) {
+		if (micro.dates.includes(entry.date)) names.add(entry.exercise);
+	}
+	return pickMesoExercises([...names]).filter((exercise) => meso.anchor1rm[exercise] != null);
+}
+
+export function buildProtocolMatrix(
+	mesoPlan: MesocyclePlan,
+	microPlans: MicrocyclePlan[],
+	cyclePlan: CyclePlan,
+	anchorInfo: Record<string, ExerciseAnchorInfo>
+): ProtocolMatrixRow[] {
+	return Object.keys(anchorInfo)
+		.sort((a, b) => a.localeCompare(b, 'ru'))
+		.map((exercise) => {
+			const template = templateForExercise(cyclePlan, mesoPlan, exercise);
+			const cells = microPlans.map((micro) => {
+				const { pct, phase } = targetPctForExercise(cyclePlan, mesoPlan, micro, exercise);
+				return { microIndex: micro.indexInMeso, pct, label: phase?.label ?? null };
+			});
+			return {
+				exercise,
+				anchor: anchorInfo[exercise].anchor,
+				templateName: template.name,
+				cells
+			};
+		});
+}
+
+export function exerciseTargetOnMicro(
+	cyclePlan: CyclePlan,
+	meso: MesocyclePlan,
+	micro: MicrocyclePlan,
+	exercise: string,
+	anchor: number,
+	entry?: WorkoutEntry
+): ReturnType<typeof sessionIntensity> | null {
+	const { pct, phase, template } = targetPctForExercise(cyclePlan, meso, micro, exercise);
+	if (pct == null || !anchor) return null;
+	const label = phase ? `${template.name} · ${phase.label}` : template.name;
+	if (entry?.sets.length) {
+		const row = sessionIntensity(entry, anchor, pct);
+		if (!row) return null;
+		row.protocolLabel = label;
+		return row;
+	}
+	return plannedSessionIntensity(exercise, anchor, pct, label);
 }
 
 export function importPlanFromAuto(
@@ -274,27 +351,18 @@ function enrichMicro(
 	const targetPct = plan.intensityPct ?? defaultPhase?.intensityPct ?? null;
 
 	const intensityByExercise: ReturnType<typeof sessionIntensity>[] = [];
-	for (const exercise of Object.keys(meso.anchor1rm)) {
+	const microExercises = exercisesInMicro(plan, dayA, dayB, meso, entries);
+
+	for (const exercise of microExercises) {
 		const anchor = meso.anchor1rm[exercise];
-		const { pct, phase, template } = targetPctForExercise(cyclePlan, meso, plan, exercise);
-		if (pct === null) continue;
+		if (anchor == null) continue;
 
 		const entry = entries
 			.filter((item) => item.exercise === exercise && plan.dates.includes(item.date))
 			.sort((a, b) => b.date.localeCompare(a.date))[0];
 
-		if (entry) {
-			const row = sessionIntensity(entry, anchor, pct);
-			if (row) {
-				row.protocolLabel = template.name;
-				if (phase && phase.label !== defaultPhase?.label) row.protocolLabel += ` · ${phase.label}`;
-				intensityByExercise.push(row);
-			}
-		} else {
-			intensityByExercise.push(
-				plannedSessionIntensity(exercise, anchor, pct, template.name)
-			);
-		}
+		const row = exerciseTargetOnMicro(cyclePlan, meso, plan, exercise, anchor, entry ?? undefined);
+		if (row) intensityByExercise.push(row);
 	}
 
 	intensityByExercise.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
@@ -363,6 +431,12 @@ export function buildCyclePlanView(
 			template,
 			index: index + 1,
 			anchorInfo,
+			protocolMatrix: buildProtocolMatrix(
+				effectiveMeso,
+				normalized.microcycles,
+				plan,
+				anchorInfo
+			),
 			microcycles,
 			completeMicrocycles: microcycles.filter((m) => m.complete).length,
 			durationDays: startDate && endDate ? daysBetween(startDate, endDate) : 0,
@@ -685,6 +759,7 @@ export function autoMesocyclesAsView(
 			template: defaultTemplate,
 			index: index + 1,
 			anchorInfo,
+			protocolMatrix: buildProtocolMatrix(plan, plan.microcycles, cyclePlan, anchorInfo),
 			microcycles,
 			completeMicrocycles: meso.completeMicrocycles,
 			durationDays: meso.durationDays,
