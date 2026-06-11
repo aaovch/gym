@@ -1,5 +1,6 @@
-import type { SetPair } from './markdown';
 import type { StrengthSummary, TrendPoint, WorkoutEntry } from './types';
+
+type SetPair = [number, number];
 
 function epley1rm(weight: number, reps: number): number {
 	return weight * (1 + reps / 30);

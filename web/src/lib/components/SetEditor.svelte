@@ -34,15 +34,15 @@
 	</div>
 
 	<div class="sets-grid">
-		{#each row.sets as _, index}
+		{#each row.sets as set, index (index)}
 			<div class="set-item">
 				<label>
 					<span>Вес</span>
-					<input bind:value={row.sets[index].weight} inputmode="decimal" placeholder="100" />
+					<input bind:value={set.weight} inputmode="decimal" placeholder="100" />
 				</label>
 				<label>
 					<span>Повт</span>
-					<input bind:value={row.sets[index].reps} inputmode="numeric" placeholder="5" />
+					<input bind:value={set.reps} inputmode="numeric" placeholder="5" />
 				</label>
 				<button type="button" class="ghost danger" onclick={() => removeSet(index)} aria-label="Удалить подход">
 					×
