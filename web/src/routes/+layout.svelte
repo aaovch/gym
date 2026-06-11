@@ -1,20 +1,23 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { getGitHubToken, setGitHubToken } from '$lib/auth';
-	import { connectGitHub, pushToGitHub, resetToBundled, workoutStore } from '$lib/workout-store';
+	import {
+		connectGitHub,
+		pushToGitHub,
+		resetToBundled,
+		workoutStore
+	} from '$lib/workout-store';
 
 	let { data, children } = $props();
 
 	let githubToken = $state(getGitHubToken());
 	let showSettings = $state(false);
 
-	$effect(() => {
+	onMount(() => {
 		workoutStore.bootstrap(data.bundled);
-	});
-
-	$effect(() => {
 		workoutStore.connectIfTokenSaved();
 	});
 

@@ -107,7 +107,7 @@ class WorkoutStore {
 	}
 
 	applyDatabase(db: WorkoutDatabase, source: SyncState['source']) {
-		this.database = db;
+		this.database = structuredClone(db);
 		this.patchSync({ source });
 	}
 

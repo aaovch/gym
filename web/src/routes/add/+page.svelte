@@ -26,10 +26,7 @@
 	const editId = $derived.by(() => (browser ? page.url.searchParams.get('id') : null));
 
 	$effect(() => {
-		if (!editId) {
-			if (editingId) resetForm();
-			return;
-		}
+		if (!editId) return;
 		const session = view.sessions.find((item) => item.id === editId);
 		if (session && editingId !== editId) loadSession(session);
 	});
