@@ -5,14 +5,17 @@
 		assignDate,
 		emptyCyclePlan,
 		markAnchorManual,
+		removeMacrocycle,
 		removeMesocycle,
 		removeMicrocycle,
 		removeExerciseFromMeso,
 		syncMesoExercises,
 		unassignDate,
 		updateExerciseProtocol,
+		updateMacrocycle,
 		updateMesocycle,
 		updateTemplate,
+		type EnrichedMacrocycle,
 		type EnrichedMesocycle,
 		type ExerciseAnchorInfo
 	} from '$lib/cycle-plan';
@@ -27,6 +30,12 @@
 		suggestedMicroCount,
 		type MesoExerciseSetup
 	} from '$lib/meso-constructor';
+	import {
+		createMacrocycleFromConstructor,
+		defaultMacroStartDate,
+		previewMacroPlan,
+		type MacroBlockInput
+	} from '$lib/macro-constructor';
 	import { DEFAULT_PROTOCOL_TEMPLATE } from '$lib/protocol';
 	import {
 		clearCyclePlanState,
@@ -47,14 +56,28 @@
 		anchorSource: string;
 	};
 
+	type MacroBlockDraft = {
+		id: string;
+		label: string;
+		microCount: number;
+		defaultProtocolId: string;
+	};
+
 	let editMode = $state(false);
 	let showHelp = $state(false);
 	let showMoreActions = $state(false);
 	let showProtocolEditor = $state(false);
+	let showMacroConstructor = $state(false);
 	let showMesoConstructor = $state(false);
 	let mesoTab = $state<MesoTab>('plan');
+	let macroPick = $state<string | null>(null);
 	let mesoPick = $state<string | null>(null);
+	let mesoConstructorMacroId = $state<string | null>(null);
 	let selectedTemplateId = $state(DEFAULT_PROTOCOL_TEMPLATE.id);
+
+	let macroLabel = $state('Макро 1');
+	let macroStart = $state('');
+	let macroBlocks = $state<MacroBlockDraft[]>([]);
 
 	let constructorLabel = $state('Новый блок');
 	let constructorStart = $state('');
@@ -66,17 +89,35 @@
 	const workoutTemplates = $derived(view.workoutTemplates);
 	const cyclePlanView = $derived(view.cyclePlanView);
 	const plan = $derived(cyclePlanView.plan);
+	const displayMacros = $derived(cyclePlanView.macrocycles ?? []);
+	const displayOrphans = $derived(cyclePlanView.orphanMesocycles ?? []);
 	const displayMesos = $derived(cyclePlanView.mesocycles);
 	const usingManual = $derived(cyclePlanView.usingManualPlan);
 	const unassigned = $derived(cyclePlanView.unassignedDates);
 
-	const selectedMeso = $derived.by(() => {
-		if (displayMesos.length === 0) return null;
+	const selectedMacro = $derived.by((): EnrichedMacrocycle | null => {
+		if (displayMacros.length === 0) return null;
 		const pick =
-			mesoPick && displayMesos.some((meso) => meso.plan.id === mesoPick)
+			macroPick && displayMacros.some((macro) => macro.plan.id === macroPick)
+				? macroPick
+				: displayMacros[displayMacros.length - 1].plan.id;
+		return displayMacros.find((macro) => macro.plan.id === pick) ?? null;
+	});
+
+	const scopedMesos = $derived.by((): EnrichedMesocycle[] => {
+		if (selectedMacro) return selectedMacro.mesocycles;
+		if (displayMacros.length > 0) return displayOrphans;
+		return displayMesos;
+	});
+
+	const selectedMeso = $derived.by(() => {
+		const mesos = scopedMesos;
+		if (mesos.length === 0) return null;
+		const pick =
+			mesoPick && mesos.some((meso) => meso.plan.id === mesoPick)
 				? mesoPick
-				: displayMesos[displayMesos.length - 1].plan.id;
-		return displayMesos.find((meso) => meso.plan.id === pick) ?? null;
+				: mesos[mesos.length - 1].plan.id;
+		return mesos.find((meso) => meso.plan.id === pick) ?? null;
 	});
 
 	const activeTemplate = $derived(
@@ -114,6 +155,27 @@
 	const constructorSuggestedMicros = $derived.by(() => {
 		if (!plan || constructorExercises.length === 0) return 4;
 		return suggestedMicroCount(plan.templates, constructorExercises);
+	});
+
+	const macroBlockInputs = $derived.by((): MacroBlockInput[] =>
+		macroBlocks.map((block) => ({
+			label: block.label,
+			microCount: block.microCount,
+			defaultProtocolId: block.defaultProtocolId,
+			exercises: constructorExercises.map((row) => ({
+				...row,
+				protocolId: block.defaultProtocolId
+			}))
+		}))
+	);
+
+	const macroPreview = $derived.by(() => {
+		if (!plan || !showMacroConstructor || constructorExercises.length === 0) return [];
+		return previewMacroPlan(plan, {
+			label: macroLabel,
+			startDate: macroStart || defaultMacroStartDate(view.entries),
+			blocks: macroBlockInputs
+		});
 	});
 
 	function patchConstructorRow(exercise: string, patch: Partial<ConstructorRow>) {
@@ -166,11 +228,94 @@
 		return Boolean(workoutStore.cyclePlan);
 	}
 
-	function openMesoConstructor() {
+	function initMacroBlocks() {
+		macroBlocks = [
+			{
+				id: crypto.randomUUID(),
+				label: 'Блок 1 — накопление',
+				microCount: 4,
+				defaultProtocolId: 'submax-effort'
+			},
+			{
+				id: crypto.randomUUID(),
+				label: 'Блок 2 — интенсификация',
+				microCount: 4,
+				defaultProtocolId: 'max-effort'
+			}
+		];
+	}
+
+	function addMacroBlock() {
+		const num = macroBlocks.length + 1;
+		macroBlocks = [
+			...macroBlocks,
+			{
+				id: crypto.randomUUID(),
+				label: `Блок ${num}`,
+				microCount: 4,
+				defaultProtocolId: 'submax-effort'
+			}
+		];
+	}
+
+	function removeMacroBlock(id: string) {
+		if (macroBlocks.length <= 1) return;
+		macroBlocks = macroBlocks.filter((block) => block.id !== id);
+	}
+
+	function patchMacroBlock(id: string, patch: Partial<Omit<MacroBlockDraft, 'id'>>) {
+		macroBlocks = macroBlocks.map((block) => (block.id === id ? { ...block, ...patch } : block));
+	}
+
+	function openMacroConstructor() {
 		if (!ensurePlanForConstructor()) return;
 		editMode = true;
-		const blockNum = (workoutStore.cyclePlan?.mesocycles.length ?? 0) + 1;
-		constructorLabel = `Блок ${blockNum}`;
+		const macroNum = (workoutStore.cyclePlan?.macrocycles.length ?? 0) + 1;
+		macroLabel = `Макро ${macroNum}`;
+		macroStart = defaultMacroStartDate(view.entries);
+		initMacroBlocks();
+		initConstructorSelection();
+		showMacroConstructor = true;
+	}
+
+	function closeMacroConstructor() {
+		showMacroConstructor = false;
+	}
+
+	function confirmMacroConstructor() {
+		if (!plan || constructorExercises.length === 0 || macroBlockInputs.length === 0) return;
+		const next = createMacrocycleFromConstructor(plan, {
+			label: macroLabel,
+			startDate: macroStart || defaultMacroStartDate(view.entries),
+			blocks: macroBlockInputs
+		});
+		save(next);
+		const macro = next.macrocycles[next.macrocycles.length - 1];
+		macroPick = macro?.id ?? null;
+		mesoPick = macro?.mesoIds[macro.mesoIds.length - 1] ?? null;
+		mesoTab = 'plan';
+		showMacroConstructor = false;
+	}
+
+	function handleRemoveMacro(macroId: string) {
+		if (!plan || !confirm('Удалить макроцикл и все его мезо-блоки?')) return;
+		save(removeMacrocycle(plan, macroId));
+		if (macroPick === macroId) macroPick = null;
+	}
+
+	function handleMacroLabel(macro: EnrichedMacrocycle, label: string) {
+		if (!plan) return;
+		save(updateMacrocycle(plan, macro.plan.id, { label }));
+	}
+
+	function openMesoConstructor(macroId: string | null = null) {
+		if (!ensurePlanForConstructor()) return;
+		editMode = true;
+		mesoConstructorMacroId = macroId;
+		const scopeMesos = macroId
+			? (plan?.mesocycles.filter((meso) => meso.macroId === macroId).length ?? 0)
+			: (workoutStore.cyclePlan?.mesocycles.length ?? 0);
+		constructorLabel = `Блок ${scopeMesos + 1}`;
 		constructorStart = defaultMesoStartDate(view.entries);
 		constructorMicroCount = 4;
 		initConstructorSelection();
@@ -179,6 +324,7 @@
 
 	function closeMesoConstructor() {
 		showMesoConstructor = false;
+		mesoConstructorMacroId = null;
 	}
 
 	function applySuggestedMicroCount() {
@@ -192,12 +338,16 @@
 			startDate: constructorStart || defaultMesoStartDate(view.entries),
 			microCount: constructorMicroCount,
 			defaultProtocolId: 'submax-effort',
-			exercises: constructorExercises
+			exercises: constructorExercises,
+			macroId: mesoConstructorMacroId ?? undefined
 		});
 		save(next);
-		mesoPick = next.mesocycles[next.mesocycles.length - 1]?.id ?? null;
+		const meso = next.mesocycles[next.mesocycles.length - 1];
+		if (meso?.macroId) macroPick = meso.macroId;
+		mesoPick = meso?.id ?? null;
 		mesoTab = 'plan';
 		showMesoConstructor = false;
+		mesoConstructorMacroId = null;
 	}
 
 	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
@@ -327,12 +477,204 @@
 
 <div class="cycles-page">
 
+{#if showMacroConstructor && plan}
+	<div class="constructor-backdrop" role="presentation" onclick={closeMacroConstructor}></div>
+	<section class="card macro-constructor" aria-labelledby="macro-constructor-title">
+		<div class="constructor-head">
+			<div>
+				<h3 id="macro-constructor-title">Конструктор макроцикла</h3>
+				<p class="muted">
+					Макроцикл — цепочка мезо-блоков с общими упражнениями. Для каждого блока задайте метод и число μ.
+				</p>
+			</div>
+			<button type="button" class="btn ghost-link" onclick={closeMacroConstructor}>Закрыть</button>
+		</div>
+
+		<div class="constructor-meta">
+			<label>
+				<span>Название макро</span>
+				<input class="field-input" bind:value={macroLabel} />
+			</label>
+			<label>
+				<span>Старт макро</span>
+				<input
+					class="field-input"
+					type="date"
+					bind:value={macroStart}
+					onchange={() => refreshConstructorAnchors(true)}
+				/>
+			</label>
+		</div>
+
+		<div class="macro-blocks">
+			<div class="macro-blocks-head">
+				<h4>Мезо-блоки в макро</h4>
+				<button type="button" class="btn small" onclick={addMacroBlock}>+ Блок</button>
+			</div>
+			{#each macroBlocks as block, index (block.id)}
+				<article class="macro-block-card">
+					<div class="macro-block-meta">
+						<label>
+							<span>Блок {index + 1}</span>
+							<input
+								class="field-input"
+								value={block.label}
+								onchange={(e) => patchMacroBlock(block.id, { label: e.currentTarget.value })}
+							/>
+						</label>
+						<label>
+							<span>μ</span>
+							<input
+								class="field-input narrow"
+								type="number"
+								min="1"
+								max="12"
+								value={block.microCount}
+								onchange={(e) =>
+									patchMacroBlock(block.id, { microCount: Number(e.currentTarget.value) || 4 })}
+							/>
+						</label>
+						<label>
+							<span>Метод</span>
+							<select
+								class="field-input"
+								value={block.defaultProtocolId}
+								onchange={(e) =>
+									patchMacroBlock(block.id, { defaultProtocolId: e.currentTarget.value })}
+							>
+								{#each protocolTemplates as template (template.id)}
+									<option value={template.id}>{template.name}</option>
+								{/each}
+							</select>
+						</label>
+						{#if macroBlocks.length > 1}
+							<button
+								type="button"
+								class="btn small danger"
+								onclick={() => removeMacroBlock(block.id)}
+							>
+								Удалить
+							</button>
+						{/if}
+					</div>
+					{#if macroPreview[index]}
+						<p class="muted macro-block-dates">
+							{formatDateRu(macroPreview[index].startDate)} — {formatDateRu(macroPreview[index].endDate)}
+							· {macroPreview[index].microCount} μ · {shortProtocolName(macroPreview[index].protocolName)}
+						</p>
+					{/if}
+				</article>
+			{/each}
+		</div>
+
+		<h4 class="constructor-subtitle">Упражнения (общие для всех блоков)</h4>
+		<div class="constructor-table-wrap">
+			<table class="constructor-table">
+				<thead>
+					<tr>
+						<th></th>
+						<th>Упражнение</th>
+						<th>1ПМ, кг</th>
+						<th>Источник</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each knownExercises as exercise (exercise)}
+						{@const row = constructorSelection.get(exercise)}
+						{#if row}
+							<tr class:disabled={!row.enabled}>
+								<td>
+									<input
+										type="checkbox"
+										checked={row.enabled}
+										onchange={(e) =>
+											patchConstructorRow(exercise, { enabled: e.currentTarget.checked })}
+									/>
+								</td>
+								<td>{exercise}</td>
+								<td>
+									<input
+										class="field-input"
+										type="number"
+										step="0.5"
+										min="0"
+										value={row.anchor1rm || ''}
+										onchange={(e) => {
+											const parsed = Number(e.currentTarget.value.replace(',', '.'));
+											patchConstructorRow(exercise, {
+												anchor1rm: Number.isFinite(parsed) ? parsed : 0,
+												manual: true
+											});
+										}}
+									/>
+								</td>
+								<td class="muted">{row.manual ? 'вручную' : row.anchorSource}</td>
+							</tr>
+						{/if}
+					{/each}
+				</tbody>
+			</table>
+		</div>
+
+		{#if macroPreview.length > 0}
+			<div class="macro-preview">
+				<h4>Предпросмотр макро</h4>
+				{#each macroPreview as blockPreview, index}
+					<details class="macro-preview-block">
+						<summary>
+							{blockPreview.label} · μ1–μ{blockPreview.microCount} · {shortProtocolName(blockPreview.protocolName)}
+						</summary>
+						<div class="matrix-wrap compact">
+							<table class="matrix">
+								<thead>
+									<tr>
+										<th>Упражнение</th>
+										{#each blockPreview.matrix[0]?.cells ?? [] as cell}
+											<th>μ{cell.microIndex}</th>
+										{/each}
+									</tr>
+								</thead>
+								<tbody>
+									{#each blockPreview.matrix as row}
+										<tr>
+											<td>{row.exercise}</td>
+											{#each row.cells as cell}
+												<td class="pct">{cell.pct != null ? `${cell.pct}%` : '—'}</td>
+											{/each}
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</details>
+				{/each}
+			</div>
+		{:else}
+			<p class="muted constructor-empty">Отметьте упражнения и задайте 1ПМ.</p>
+		{/if}
+
+		<div class="constructor-actions">
+			<button type="button" class="btn" onclick={closeMacroConstructor}>Отмена</button>
+			<button
+				type="button"
+				class="btn primary"
+				disabled={constructorExercises.length === 0 || macroBlocks.length === 0}
+				onclick={confirmMacroConstructor}
+			>
+				Создать макроцикл
+			</button>
+		</div>
+	</section>
+{/if}
+
 {#if showMesoConstructor && plan}
 	<div class="constructor-backdrop" role="presentation" onclick={closeMesoConstructor}></div>
 	<section class="card meso-constructor" aria-labelledby="meso-constructor-title">
 		<div class="constructor-head">
 			<div>
-				<h3 id="meso-constructor-title">Конструктор мезоцикла</h3>
+				<h3 id="meso-constructor-title">
+					{mesoConstructorMacroId ? 'Добавить мезо в макро' : 'Конструктор мезоцикла'}
+				</h3>
 				<p class="muted">Выберите упражнения, метод (протокол) и якорный 1ПМ — план % и кг строится автоматически.</p>
 			</div>
 			<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
@@ -494,11 +836,12 @@
 	<div>
 		<h2>Циклы тренировок</h2>
 		<p class="muted">
-			Мезоцикл — блок из микроциклов (A+B). У каждого упражнения свой 1ПМ и протокол % по μ.
+			Макроцикл — цепочка мезо-блоков (μ). В каждом мезо у упражнений свой 1ПМ и протокол % по μ.
 		</p>
 	</div>
 	<div class="head-actions">
-		<button type="button" class="btn primary" onclick={openMesoConstructor}>+ Мезоцикл</button>
+		<button type="button" class="btn primary" onclick={openMacroConstructor}>+ Макроцикл</button>
+		<button type="button" class="btn" onclick={() => openMesoConstructor()}>+ Мезо</button>
 		{#if !usingManual}
 			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
 		{:else}
@@ -875,43 +1218,127 @@
 	</section>
 {/if}
 
-<!-- 2. Выбор мезоцикла -->
+<!-- 2. Выбор макро / мезо -->
 {#if displayMesos.length === 0}
 	<section class="card empty-state">
 		<h3>Нет данных о циклах</h3>
-		<p class="muted">Создай мезоцикл в конструкторе или импортируй автоопределение из тренировок.</p>
+		<p class="muted">Создай макроцикл в конструкторе или импортируй автоопределение из тренировок.</p>
 		<div class="empty-actions">
-			<button type="button" class="btn primary" onclick={openMesoConstructor}>Конструктор мезоцикла</button>
+			<button type="button" class="btn primary" onclick={openMacroConstructor}>Конструктор макроцикла</button>
+			<button type="button" class="btn" onclick={() => openMesoConstructor()}>Один мезо-блок</button>
 			{#if !usingManual}
 				<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
 			{/if}
 		</div>
 	</section>
 {:else}
+	{#if displayMacros.length > 0}
+		<section class="card macro-picker">
+			<div class="picker-head">
+				<h3>Макроциклы</h3>
+				{#if editMode && usingManual}
+					<button type="button" class="btn small primary" onclick={openMacroConstructor}>+ Макро</button>
+				{/if}
+			</div>
+			<div class="meso-tabs">
+				{#each displayMacros as macro (macro.plan.id)}
+					<button
+						type="button"
+						class="meso-tab macro-tab"
+						class:active={selectedMacro?.plan.id === macro.plan.id}
+						style="--meso-color: {mesocycleColor(macro.index)}"
+						onclick={() => {
+							macroPick = macro.plan.id;
+							mesoPick = macro.mesocycles[macro.mesocycles.length - 1]?.plan.id ?? null;
+						}}
+					>
+						<span class="meso-tab-num">M{macro.index}</span>
+						<span class="meso-tab-label">{macro.plan.label}</span>
+						<span class="meso-tab-dates">
+							{formatDateRu(macro.plan.startDate)} — {formatDateRu(macro.plan.endDate)}
+							· {macro.mesocycles.length} мезо
+						</span>
+					</button>
+				{/each}
+			</div>
+			{#if selectedMacro && editMode && plan}
+				<div class="macro-inline-edit">
+					<input
+						class="field-input"
+						value={selectedMacro.plan.label}
+						onchange={(e) => handleMacroLabel(selectedMacro, e.currentTarget.value)}
+					/>
+					<button
+						type="button"
+						class="btn small danger"
+						onclick={() => handleRemoveMacro(selectedMacro.plan.id)}
+					>
+						Удалить макро
+					</button>
+				</div>
+			{/if}
+		</section>
+	{/if}
+
+	{#if displayOrphans.length > 0 && displayMacros.length > 0}
+		<section class="card meso-picker orphan-picker">
+			<div class="picker-head">
+				<h3>Мезо вне макро</h3>
+			</div>
+			<div class="meso-tabs">
+				{#each displayOrphans as meso (meso.plan.id)}
+					<button
+						type="button"
+						class="meso-tab"
+						class:active={selectedMacro == null && selectedMeso?.plan.id === meso.plan.id}
+						style="--meso-color: {mesocycleColor(meso.index)}"
+						onclick={() => {
+							macroPick = null;
+							mesoPick = meso.plan.id;
+						}}
+					>
+						<span class="meso-tab-num">#{meso.index}</span>
+						<span class="meso-tab-label">{meso.plan.label}</span>
+					</button>
+				{/each}
+			</div>
+		</section>
+	{/if}
+
 	<section class="card meso-picker">
 		<div class="picker-head">
-			<h3>Мезоциклы</h3>
+			<h3>{selectedMacro ? `Мезо в «${selectedMacro.plan.label}»` : 'Мезоциклы'}</h3>
 			{#if editMode && usingManual}
-				<button type="button" class="btn small primary" onclick={openMesoConstructor}>+ Новый</button>
-			{/if}
-		</div>
-		<div class="meso-tabs">
-			{#each displayMesos as meso (meso.plan.id)}
 				<button
 					type="button"
-					class="meso-tab"
-					class:active={selectedMeso?.plan.id === meso.plan.id}
-					style="--meso-color: {mesocycleColor(meso.index)}"
-					onclick={() => (mesoPick = meso.plan.id)}
+					class="btn small primary"
+					onclick={() => openMesoConstructor(selectedMacro?.plan.id ?? null)}
 				>
-					<span class="meso-tab-num">#{meso.index}</span>
-					<span class="meso-tab-label">{meso.plan.label}</span>
-					<span class="meso-tab-dates">
-						{formatDateRu(meso.plan.startDate)} — {formatDateRu(meso.plan.endDate)}
-					</span>
+					+ Мезо
 				</button>
-			{/each}
+			{/if}
 		</div>
+		{#if scopedMesos.length === 0}
+			<p class="muted">В этом макро пока нет мезо-блоков.</p>
+		{:else}
+			<div class="meso-tabs">
+				{#each scopedMesos as meso (meso.plan.id)}
+					<button
+						type="button"
+						class="meso-tab"
+						class:active={selectedMeso?.plan.id === meso.plan.id}
+						style="--meso-color: {mesocycleColor(meso.index)}"
+						onclick={() => (mesoPick = meso.plan.id)}
+					>
+						<span class="meso-tab-num">#{meso.index}</span>
+						<span class="meso-tab-label">{meso.plan.label}</span>
+						<span class="meso-tab-dates">
+							{formatDateRu(meso.plan.startDate)} — {formatDateRu(meso.plan.endDate)}
+						</span>
+					</button>
+				{/each}
+			</div>
+		{/if}
 	</section>
 
 	{#if selectedMeso}
@@ -1561,7 +1988,8 @@
 		z-index: 40;
 	}
 
-	.meso-constructor {
+	.meso-constructor,
+	.macro-constructor {
 		position: fixed;
 		top: 50%;
 		left: 50%;
@@ -1591,6 +2019,85 @@
 		gap: 0.75rem;
 		align-items: flex-end;
 		margin-bottom: 1rem;
+	}
+
+	.constructor-subtitle {
+		margin: 1rem 0 0.5rem;
+		font-size: 0.95rem;
+	}
+
+	.macro-blocks {
+		display: grid;
+		gap: 0.65rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.macro-blocks-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.macro-blocks-head h4,
+	.macro-preview h4 {
+		margin: 0;
+		font-size: 0.95rem;
+	}
+
+	.macro-block-card {
+		padding: 0.75rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+	}
+
+	.macro-block-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.65rem;
+		align-items: flex-end;
+	}
+
+	.macro-block-meta label {
+		display: grid;
+		gap: 0.25rem;
+		font-size: 0.78rem;
+		color: var(--muted);
+		min-width: 8rem;
+	}
+
+	.macro-block-dates {
+		margin: 0.5rem 0 0;
+		font-size: 0.82rem;
+	}
+
+	.macro-preview {
+		margin-top: 1rem;
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.macro-preview-block summary {
+		cursor: pointer;
+		font-size: 0.88rem;
+		padding: 0.35rem 0;
+	}
+
+	.macro-inline-edit {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
+		margin-top: 0.75rem;
+	}
+
+	.orphan-picker {
+		border-style: dashed;
+	}
+
+	.matrix-wrap.compact .matrix {
+		font-size: 0.82rem;
 	}
 
 	.constructor-meta label {

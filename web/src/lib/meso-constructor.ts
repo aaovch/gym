@@ -26,6 +26,8 @@ export type MesoConstructorInput = {
 	microCount: number;
 	defaultProtocolId?: string;
 	exercises: MesoExerciseSetup[];
+	/** При создании внутри макро — id родительского макроцикла. */
+	macroId?: string;
 };
 
 export type MesoConstructorExerciseRow = {
@@ -140,7 +142,29 @@ export function createMesocycleFromConstructor(
 	plan: CyclePlan,
 	input: MesoConstructorInput
 ): CyclePlan {
-	const defaultProtocolId = input.defaultProtocolId ?? plan.templates[0]?.id ?? DEFAULT_PROTOCOL_TEMPLATE.id;
+	const meso = buildMesocyclePlan(input);
+	const macroId = input.macroId;
+
+	if (!macroId) {
+		return {
+			...plan,
+			updatedAt: new Date().toISOString(),
+			mesocycles: [...plan.mesocycles, meso]
+		};
+	}
+
+	return {
+		...plan,
+		updatedAt: new Date().toISOString(),
+		macrocycles: (plan.macrocycles ?? []).map((macro) =>
+			macro.id === macroId ? { ...macro, mesoIds: [...macro.mesoIds, meso.id] } : macro
+		),
+		mesocycles: [...plan.mesocycles, meso]
+	};
+}
+
+export function buildMesocyclePlan(input: MesoConstructorInput): MesocyclePlan {
+	const defaultProtocolId = input.defaultProtocolId ?? DEFAULT_PROTOCOL_TEMPLATE.id;
 	const exerciseProtocols: Record<string, string> = {};
 	const anchor1rm: Record<string, number> = {};
 	const anchor1rmManual: Record<string, boolean> = {};
@@ -151,11 +175,12 @@ export function createMesocycleFromConstructor(
 		if (row.protocolId !== defaultProtocolId) exerciseProtocols[row.exercise] = row.protocolId;
 	}
 
-	const meso: MesocyclePlan = {
+	return {
 		id: `meso-${crypto.randomUUID().slice(0, 8)}`,
 		label: input.label.trim() || 'Новый блок',
 		startDate: input.startDate,
 		endDate: '',
+		macroId: input.macroId,
 		templateId: defaultProtocolId,
 		anchor1rm,
 		anchor1rmManual,
@@ -165,12 +190,6 @@ export function createMesocycleFromConstructor(
 			indexInMeso: index + 1,
 			dates: []
 		}))
-	};
-
-	return {
-		...plan,
-		updatedAt: new Date().toISOString(),
-		mesocycles: [...plan.mesocycles, meso]
 	};
 }
 

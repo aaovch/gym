@@ -3,7 +3,7 @@ import {
 	autoMesocyclesAsView,
 	buildCyclePlanView,
 	bundledProtocolTemplates,
-	ensureBundledProtocols,
+	normalizeCyclePlan,
 	importPlanFromAuto,
 	refreshAllMesoAnchors,
 	type CyclePlan
@@ -38,10 +38,8 @@ function emptyDatabase(): WorkoutDatabase {
 
 function normalizeLoadedCyclePlan(plan: CyclePlan | null): CyclePlan | null {
 	if (!plan) return null;
-	const merged = ensureBundledProtocols(plan);
-	const changed =
-		JSON.stringify(merged.templates) !== JSON.stringify(plan.templates) ||
-		merged.templates.length !== plan.templates.length;
+	const merged = normalizeCyclePlan(plan);
+	const changed = JSON.stringify(merged) !== JSON.stringify(plan);
 	if (changed) saveCyclePlan(merged);
 	return merged;
 }
@@ -57,11 +55,12 @@ function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 			? cyclePlanView.mesocycles
 			: autoMesocyclesAsView(microcycles, entries);
 	const cyclePlanForCalc: CyclePlan = cyclePlan
-		? ensureBundledProtocols(cyclePlan)
+		? normalizeCyclePlan(cyclePlan)
 		: {
 				version: 1,
 				updatedAt: '',
 				templates: bundledProtocolTemplates(),
+				macrocycles: [],
 				mesocycles: []
 			};
 

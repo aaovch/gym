@@ -36,6 +36,8 @@ export type MesocyclePlan = {
 	startDate: string;
 	endDate: string;
 	microcycles: MicrocyclePlan[];
+	/** Принадлежность макроциклу. */
+	macroId?: string;
 	/** Протокол по умолчанию для упражнений без своего шаблона. */
 	templateId: string;
 	/** Якорные 1ПМ на старт мезо: упражнение → кг. */
@@ -46,10 +48,21 @@ export type MesocyclePlan = {
 	exerciseProtocols?: Record<string, string>;
 };
 
+export type MacrocyclePlan = {
+	id: string;
+	label: string;
+	startDate: string;
+	endDate: string;
+	/** Упорядоченные id мезоциклов внутри макро. */
+	mesoIds: string[];
+	note?: string;
+};
+
 export type CyclePlan = {
 	version: 1;
 	updatedAt: string;
 	templates: ProtocolTemplate[];
+	macrocycles: MacrocyclePlan[];
 	mesocycles: MesocyclePlan[];
 };
 
@@ -103,8 +116,18 @@ export type EnrichedMesocycle = {
 	gapAfterDays: number | null;
 };
 
+export type EnrichedMacrocycle = {
+	plan: MacrocyclePlan;
+	index: number;
+	mesocycles: EnrichedMesocycle[];
+	durationDays: number;
+	gapAfterDays: number | null;
+};
+
 export type CyclePlanView = {
 	plan: CyclePlan | null;
+	macrocycles: EnrichedMacrocycle[];
+	orphanMesocycles: EnrichedMesocycle[];
 	mesocycles: EnrichedMesocycle[];
 	unassignedDates: string[];
 	usingManualPlan: boolean;
@@ -123,8 +146,18 @@ export function emptyCyclePlan(): CyclePlan {
 		version: 1,
 		updatedAt: '',
 		templates: bundledProtocolTemplates(),
+		macrocycles: [],
 		mesocycles: []
 	};
+}
+
+/** Миграция и протоколы из каталога. */
+export function normalizeCyclePlan(plan: CyclePlan): CyclePlan {
+	const withProtocols = ensureBundledProtocols({
+		...plan,
+		macrocycles: plan.macrocycles ?? []
+	});
+	return withProtocols;
 }
 
 /** Добавляет в план недостающие протоколы из каталога, сохраняя пользовательские и legacy-шаблоны. */
@@ -385,6 +418,7 @@ export function importPlanFromAuto(
 		version: 1,
 		updatedAt: new Date().toISOString(),
 		templates,
+		macrocycles: existing?.macrocycles ?? [],
 		mesocycles
 	};
 }
@@ -454,6 +488,48 @@ function reindexMeso(meso: MesocyclePlan): MesocyclePlan {
 	};
 }
 
+function enrichSingleMesocycle(
+	meso: MesocyclePlan,
+	index: number,
+	plan: CyclePlan,
+	overview: MicrocycleOverview,
+	entries: WorkoutEntry[]
+): EnrichedMesocycle {
+	const template = templateById(plan, meso.templateId);
+	const normalized = reindexMeso(withComputedAnchors(meso, entries));
+	const anchorInfo = buildAnchorInfo(normalized, entries);
+	const effectiveMeso: MesocyclePlan = {
+		...normalized,
+		anchor1rm: Object.fromEntries(
+			Object.entries(anchorInfo).map(([exercise, meta]) => [exercise, meta.anchor])
+		)
+	};
+	const microcycles = normalized.microcycles.map((micro) =>
+		enrichMicro(micro, effectiveMeso, plan, template, overview.byDate, entries)
+	);
+	const allMicroDates = normalized.microcycles.flatMap((m) => m.dates).sort();
+	const startDate = allMicroDates[0] ?? normalized.startDate;
+	const endDate = allMicroDates[allMicroDates.length - 1] ?? normalized.endDate;
+
+	return {
+		plan: { ...effectiveMeso, startDate, endDate },
+		template,
+		index,
+		anchorInfo,
+		protocolMatrix: buildProtocolMatrix(
+			effectiveMeso,
+			normalized.microcycles,
+			plan,
+			anchorInfo,
+			entries
+		),
+		microcycles,
+		completeMicrocycles: microcycles.filter((m) => m.complete).length,
+		durationDays: startDate && endDate ? daysBetween(startDate, endDate) : 0,
+		gapAfterDays: null
+	};
+}
+
 export function buildCyclePlanView(
 	plan: CyclePlan | null,
 	overview: MicrocycleOverview,
@@ -463,7 +539,9 @@ export function buildCyclePlanView(
 	if (!plan || plan.mesocycles.length === 0) {
 		return {
 			plan,
+			macrocycles: [],
 			mesocycles: [],
+			orphanMesocycles: [],
 			unassignedDates: allDates,
 			usingManualPlan: false
 		};
@@ -472,52 +550,66 @@ export function buildCyclePlanView(
 	const assigned = new Set(plan.mesocycles.flatMap((meso) => meso.microcycles.flatMap((m) => m.dates)));
 	const unassignedDates = allDates.filter((date) => !assigned.has(date));
 
-	const mesocycles: EnrichedMesocycle[] = plan.mesocycles.map((meso, index) => {
-		const template = templateById(plan, meso.templateId);
-		const normalized = reindexMeso(withComputedAnchors(meso, entries));
-		const anchorInfo = buildAnchorInfo(normalized, entries);
-		const effectiveMeso: MesocyclePlan = {
-			...normalized,
-			anchor1rm: Object.fromEntries(
-				Object.entries(anchorInfo).map(([exercise, meta]) => [exercise, meta.anchor])
-			)
-		};
-		const microcycles = normalized.microcycles.map((micro) =>
-			enrichMicro(micro, effectiveMeso, plan, template, overview.byDate, entries)
+	const enrichedById = new Map(
+		plan.mesocycles.map((meso, index) => [
+			meso.id,
+			enrichSingleMesocycle(meso, index + 1, plan, overview, entries)
+		])
+	);
+
+	const orphanMesocycles: EnrichedMesocycle[] = [];
+	const macrocycles: EnrichedMacrocycle[] = plan.macrocycles.map((macro, macroIndex) => {
+		const mesocycles = macro.mesoIds
+			.map((id) => enrichedById.get(id))
+			.filter((m): m is EnrichedMesocycle => m != null);
+
+		for (let i = 0; i < mesocycles.length - 1; i++) {
+			mesocycles[i].gapAfterDays = daysBetween(
+				mesocycles[i].plan.endDate,
+				mesocycles[i + 1].plan.startDate
+			);
+		}
+
+		const macroDates = mesocycles.flatMap((m) =>
+			m.microcycles.flatMap((micro) => micro.plan.dates)
 		);
-		const allMicroDates = normalized.microcycles.flatMap((m) => m.dates).sort();
-		const startDate = allMicroDates[0] ?? normalized.startDate;
-		const endDate = allMicroDates[allMicroDates.length - 1] ?? normalized.endDate;
+		const startDate = macroDates.sort()[0] ?? macro.startDate;
+		const endDate = macroDates.sort().slice(-1)[0] ?? macro.endDate;
 
 		return {
-			plan: { ...effectiveMeso, startDate, endDate },
-			template,
-			index: index + 1,
-			anchorInfo,
-			protocolMatrix: buildProtocolMatrix(
-				effectiveMeso,
-				normalized.microcycles,
-				plan,
-				anchorInfo,
-				entries
-			),
-			microcycles,
-			completeMicrocycles: microcycles.filter((m) => m.complete).length,
-			durationDays: startDate && endDate ? daysBetween(startDate, endDate) : 0,
-			gapAfterDays: null
+			plan: { ...macro, startDate, endDate },
+			index: macroIndex + 1,
+			mesocycles,
+			durationDays: startDate && endDate ? daysBetween(startDate, endDate) : 0
 		};
 	});
 
-	for (let i = 0; i < mesocycles.length - 1; i++) {
-		mesocycles[i].gapAfterDays = daysBetween(
-			mesocycles[i].plan.endDate,
-			mesocycles[i + 1].plan.startDate
+	for (const meso of enrichedById.values()) {
+		const inMacro = plan.macrocycles.some((macro) => macro.mesoIds.includes(meso.plan.id));
+		if (!inMacro) orphanMesocycles.push(meso);
+	}
+
+	for (let i = 0; i < macrocycles.length - 1; i++) {
+		macrocycles[i].gapAfterDays = daysBetween(
+			macrocycles[i].plan.endDate,
+			macrocycles[i + 1].plan.startDate
 		);
 	}
 
+	for (let i = 0; i < orphanMesocycles.length - 1; i++) {
+		orphanMesocycles[i].gapAfterDays = daysBetween(
+			orphanMesocycles[i].plan.endDate,
+			orphanMesocycles[i + 1].plan.startDate
+		);
+	}
+
+	const mesocycles = [...macrocycles.flatMap((m) => m.mesocycles), ...orphanMesocycles];
+
 	return {
 		plan,
+		macrocycles,
 		mesocycles,
+		orphanMesocycles,
 		unassignedDates,
 		usingManualPlan: true
 	};
@@ -769,9 +861,38 @@ export function updateTemplate(plan: CyclePlan, template: ProtocolTemplate): Cyc
 }
 
 export function removeMesocycle(plan: CyclePlan, mesoId: string): CyclePlan {
+	const meso = plan.mesocycles.find((item) => item.id === mesoId);
 	return touchPlan({
 		...plan,
-		mesocycles: plan.mesocycles.filter((meso) => meso.id !== mesoId)
+		macrocycles: (plan.macrocycles ?? []).map((macro) => ({
+			...macro,
+			mesoIds: macro.mesoIds.filter((id) => id !== mesoId)
+		})),
+		mesocycles: plan.mesocycles.filter((item) => item.id !== mesoId)
+	});
+}
+
+export function removeMacrocycle(plan: CyclePlan, macroId: string): CyclePlan {
+	const macro = (plan.macrocycles ?? []).find((item) => item.id === macroId);
+	if (!macro) return plan;
+	const drop = new Set(macro.mesoIds);
+	return touchPlan({
+		...plan,
+		macrocycles: plan.macrocycles.filter((item) => item.id !== macroId),
+		mesocycles: plan.mesocycles.filter((item) => !drop.has(item.id))
+	});
+}
+
+export function updateMacrocycle(
+	plan: CyclePlan,
+	macroId: string,
+	patch: Partial<Pick<MacrocyclePlan, 'label' | 'note' | 'startDate' | 'endDate'>>
+): CyclePlan {
+	return touchPlan({
+		...plan,
+		macrocycles: (plan.macrocycles ?? []).map((macro) =>
+			macro.id === macroId ? { ...macro, ...patch } : macro
+		)
 	});
 }
 
@@ -789,6 +910,7 @@ export function autoMesocyclesAsView(
 		version: 1,
 		updatedAt: '',
 		templates: templates.map((item) => structuredClone(item)),
+		macrocycles: [],
 		mesocycles: []
 	};
 	const defaultTemplate = DEFAULT_PROTOCOL_TEMPLATE;
