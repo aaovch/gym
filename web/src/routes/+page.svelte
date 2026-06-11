@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { page } from '$app/stores';
-	import { formatDateRu, todayIso } from '$lib/format';
-	import { mesocycleColor, mesocycleForDate, microcycleForDate, slotColor, slotLabel } from '$lib/microcycle';
+	import { mesocyclePlanForDate, microcyclePlanForDate } from '$lib/cycle-plan';
+	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
+	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
+	import { sessionIntensity } from '$lib/protocol';
 	import { deleteSession, workoutView } from '$lib/workout-store';
 
 	let selectedDate = $state(todayIso());
@@ -15,8 +17,10 @@
 	});
 
 	const trainingDay = $derived($workoutView.microcycles.byDate.get(selectedDate) ?? null);
-	const microcycle = $derived(microcycleForDate($workoutView.microcycles.cycles, selectedDate));
-	const mesocycle = $derived(mesocycleForDate($workoutView.microcycles.mesocycles, selectedDate));
+	const mesocycle = $derived(mesocyclePlanForDate($workoutView.cyclePlanView, selectedDate));
+	const microcycle = $derived(
+		mesocycle ? microcyclePlanForDate(mesocycle, selectedDate) : null
+	);
 	const template = $derived(
 		trainingDay
 			? ($workoutView.microcycles.templates.find((item) => item.slot === trainingDay.slot) ?? null)
@@ -28,6 +32,18 @@
 			.filter((entry) => entry.date === selectedDate)
 			.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
 	);
+
+	const protocolHints = $derived.by(() => {
+		if (!mesocycle || !microcycle || microcycle.targetPct == null) return new Map();
+		const hints = new Map<string, ReturnType<typeof sessionIntensity>>();
+		for (const entry of entriesForDate) {
+			const anchor = mesocycle.plan.anchor1rm[entry.exercise];
+			if (!anchor) continue;
+			const row = sessionIntensity(entry, anchor, microcycle.targetPct);
+			if (row) hints.set(entry.exercise, row);
+		}
+		return hints;
+	});
 
 	const availableDates = $derived(
 		[...new Set($workoutView.entries.map((entry) => entry.date))].sort().reverse()
@@ -68,8 +84,11 @@
 		<div class="meso-banner" style="--meso-color: {mesocycleColor(mesocycle.index)}">
 			<strong>Мезоцикл #{mesocycle.index}</strong>
 			<span class="muted">
-				· {mesocycle.label} · {formatDateRu(mesocycle.startDate)} — {formatDateRu(mesocycle.endDate)}
-				· микро {microcycle?.indexInMeso ?? '—'}/{mesocycle.microcycles.length}
+				· {mesocycle.plan.label} · {formatDateRu(mesocycle.plan.startDate)} — {formatDateRu(mesocycle.plan.endDate)}
+				· микро {microcycle?.plan.indexInMeso ?? '—'}/{mesocycle.microcycles.length}
+				{#if microcycle?.phase}
+					· {microcycle.phase.label} ({microcycle.targetPct}% 1ПМ)
+				{/if}
 			</span>
 		</div>
 	{/if}
@@ -85,9 +104,11 @@
 			</div>
 			{#if microcycle}
 				<p class="cycle-meta muted">
-					Микроцикл #{microcycle.index}
-					{#if microcycle.mesoIndex}(в мезо #{microcycle.mesoIndex}, μ{microcycle.indexInMeso}){/if}
+					Микроцикл μ{microcycle.plan.indexInMeso}
 					· {microcycle.complete ? 'полный A+B' : 'неполный'}
+					{#if microcycle.targetPct != null}
+						· цель {microcycle.targetPct}% 1ПМ
+					{/if}
 				</p>
 			{/if}
 		</div>
@@ -111,6 +132,13 @@
 							<span class="badge">{weight}×{reps}</span>
 						{/each}
 					</div>
+					{#if protocolHints.has(entry.exercise)}
+						{@const hint = protocolHints.get(entry.exercise)!}
+						<p class="protocol-hint" class:match={Math.abs(hint.maxPct - hint.targetPct) <= 3}>
+							Протокол: цель ~{fmtNum(hint.targetWeight)} кг ({hint.targetPct}% 1ПМ)
+							· факт пик {fmtNum(hint.maxPct)}%
+						</p>
+					{/if}
 					{#if entry.id}
 						<button
 							type="button"
@@ -266,5 +294,15 @@
 	.cycle-meta {
 		margin: 0.35rem 0 0;
 		font-size: 0.82rem;
+	}
+
+	.protocol-hint {
+		margin: 0 0 0.75rem;
+		font-size: 0.82rem;
+		color: var(--accent-2);
+	}
+
+	.protocol-hint.match {
+		color: var(--accent);
 	}
 </style>

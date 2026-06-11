@@ -1,8 +1,22 @@
 import { derived, get, writable } from 'svelte/store';
 import { getGitHubToken } from './auth';
+import {
+	autoMesocyclesAsView,
+	buildCyclePlanView,
+	importPlanFromAuto,
+	type CyclePlan
+} from './cycle-plan';
 import { sessionsToEntries } from './database';
 import { fetchWorkoutDatabase, saveWorkoutDatabase, verifyGitHubToken } from './github';
-import { clearLocalDatabase, loadLocalDatabase, pickNewerDatabase, saveLocalDatabase } from './storage';
+import {
+	clearCyclePlan,
+	clearLocalDatabase,
+	loadCyclePlan,
+	loadLocalDatabase,
+	pickNewerDatabase,
+	saveCyclePlan,
+	saveLocalDatabase
+} from './storage';
 import { buildWorkoutData } from './stats';
 import { buildMicrocycleOverview } from './microcycle';
 import type { WorkoutDatabase, WorkoutSession } from './types';
@@ -21,6 +35,7 @@ function emptyDatabase(): WorkoutDatabase {
 }
 
 const database = writable<WorkoutDatabase>(emptyDatabase());
+const cyclePlan = writable<CyclePlan | null>(loadCyclePlan());
 const syncState = writable<SyncState>({
 	sha: null,
 	githubLogin: null,
@@ -30,17 +45,27 @@ const syncState = writable<SyncState>({
 	source: 'bundled'
 });
 
-export const workoutView = derived(database, ($database) => {
+export const workoutView = derived([database, cyclePlan], ([$database, $cyclePlan]) => {
 	const entries = sessionsToEntries($database.sessions);
 	const computed = buildWorkoutData(entries);
 	const microcycles = buildMicrocycleOverview($database.sessions);
+	const allDates = [...new Set(entries.map((entry) => entry.date))].sort();
+	const cyclePlanView = buildCyclePlanView($cyclePlan, microcycles, entries, allDates);
+	const mesocycles =
+		cyclePlanView.usingManualPlan && cyclePlanView.mesocycles.length > 0
+			? cyclePlanView.mesocycles
+			: autoMesocyclesAsView(microcycles, entries);
+
 	return {
 		entries,
 		summary: computed.summary,
 		trend: computed.trend,
 		sessions: $database.sessions,
 		updatedAt: $database.updatedAt,
-		microcycles
+		microcycles,
+		cyclePlan: $cyclePlan,
+		cyclePlanView: { ...cyclePlanView, mesocycles },
+		allDates
 	};
 });
 
@@ -166,10 +191,43 @@ export async function pushToGitHub(token = getGitHubToken()) {
 
 export function resetToBundled(bundled: WorkoutDatabase) {
 	clearLocalDatabase();
+	clearCyclePlan();
+	cyclePlan.set(null);
 	applyDatabase(bundled, 'bundled');
 	syncState.update((state) => ({
 		...state,
 		message: 'Локальные данные сброшены. Загружена версия с сайта.',
+		error: ''
+	}));
+}
+
+function persistCyclePlan(plan: CyclePlan) {
+	const next = { ...plan, updatedAt: new Date().toISOString() };
+	cyclePlan.set(next);
+	saveCyclePlan(next);
+}
+
+export function importCyclePlanFromAuto() {
+	const view = get(workoutView);
+	const plan = importPlanFromAuto(view.microcycles, view.entries, get(cyclePlan));
+	persistCyclePlan(plan);
+	syncState.update((state) => ({
+		...state,
+		message: 'План циклов импортирован из автоопределения. Можно редактировать.',
+		error: ''
+	}));
+}
+
+export function saveCyclePlanState(plan: CyclePlan) {
+	persistCyclePlan(plan);
+}
+
+export function clearCyclePlanState() {
+	clearCyclePlan();
+	cyclePlan.set(null);
+	syncState.update((state) => ({
+		...state,
+		message: 'Ручной план сброшен. Снова используется автоопределение.',
 		error: ''
 	}));
 }

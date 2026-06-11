@@ -1,28 +1,233 @@
 <script lang="ts">
 	import { base } from '$app/paths';
-	import { formatDateRu } from '$lib/format';
+	import {
+		addMicrocycle,
+		assignDate,
+		createMesocycle,
+		removeMesocycle,
+		removeMicrocycle,
+		unassignDate,
+		updateMesocycle,
+		updateMicroIntensity,
+		updateTemplate,
+		type EnrichedMesocycle
+	} from '$lib/cycle-plan';
+	import { formatDateRu, fmtNum } from '$lib/format';
 	import {
 		MESOCYCLE_TARGET_MICROS,
 		mesocycleColor,
 		slotColor,
 		slotLabel
 	} from '$lib/microcycle';
-	import { workoutView } from '$lib/workout-store';
+	import { DEFAULT_PROTOCOL_TEMPLATE } from '$lib/protocol';
+	import {
+		clearCyclePlanState,
+		importCyclePlanFromAuto,
+		saveCyclePlanState,
+		workoutView
+	} from '$lib/workout-store';
+	import { get } from 'svelte/store';
 
-	const { templates, mesocycles } = $derived($workoutView.microcycles);
-	const microCount = $derived(mesocycles.reduce((sum, meso) => sum + meso.microcycles.length, 0));
+	let editMode = $state(false);
+	let showProtocolEditor = $state(false);
+
+	const { templates, mesocycles, cyclePlanView } = $derived($workoutView);
+	const plan = $derived(cyclePlanView.plan);
+	const displayMesos = $derived(cyclePlanView.mesocycles);
+	const usingManual = $derived(cyclePlanView.usingManualPlan);
+	const unassigned = $derived(cyclePlanView.unassignedDates);
+	const microCount = $derived(displayMesos.reduce((sum, meso) => sum + meso.microcycles.length, 0));
+	const activeTemplate = $derived(plan?.templates[0] ?? DEFAULT_PROTOCOL_TEMPLATE);
+
+	function shortName(name: string): string {
+		if (name.includes('Приседания')) return 'присед';
+		if (name.includes('Сплит')) return 'сплит';
+		if (name.includes('лендмайн')) return 'лендмайн';
+		if (name.includes('Жим гантелей лёжа')) return 'жим лёжа';
+		return name.split(' ').slice(0, 2).join(' ').toLowerCase();
+	}
+
+	function save(next: NonNullable<typeof plan>) {
+		saveCyclePlanState(next);
+	}
+
+	function handleImport() {
+		importCyclePlanFromAuto();
+		editMode = true;
+	}
+
+	function handleCreateMeso() {
+		let current = plan;
+		if (!current) {
+			importCyclePlanFromAuto();
+			current = get(workoutView).cyclePlan;
+		}
+		if (!current) return;
+		save(createMesocycle(current));
+	}
+
+	function handleRemoveMeso(mesoId: string) {
+		if (!plan || !confirm('Удалить мезоцикл из плана? Даты станут нераспределёнными.')) return;
+		save(removeMesocycle(plan, mesoId));
+	}
+
+	function handleAddMicro(mesoId: string) {
+		if (!plan) return;
+		save(addMicrocycle(plan, mesoId));
+	}
+
+	function handleRemoveMicro(mesoId: string, microId: string) {
+		if (!plan) return;
+		save(removeMicrocycle(plan, mesoId, microId));
+	}
+
+	function handleAssign(mesoId: string, microId: string, date: string) {
+		if (!plan || !date) return;
+		save(assignDate(plan, mesoId, microId, date));
+	}
+
+	function handleUnassign(date: string) {
+		if (!plan) return;
+		save(unassignDate(plan, date));
+	}
+
+	function handleMesoLabel(meso: EnrichedMesocycle, label: string) {
+		if (!plan) return;
+		save(updateMesocycle(plan, meso.plan.id, { label }));
+	}
+
+	function handleAnchor1rm(meso: EnrichedMesocycle, exercise: string, value: string) {
+		if (!plan) return;
+		const parsed = Number(value.replace(',', '.'));
+		if (!Number.isFinite(parsed) || parsed <= 0) return;
+		save(
+			updateMesocycle(plan, meso.plan.id, {
+				anchor1rm: { ...meso.plan.anchor1rm, [exercise]: parsed }
+			})
+		);
+	}
+
+	function handleMicroIntensity(mesoId: string, microId: string, value: string) {
+		if (!plan) return;
+		const trimmed = value.trim();
+		const parsed = trimmed ? Number(trimmed.replace(',', '.')) : undefined;
+		save(updateMicroIntensity(plan, mesoId, microId, parsed));
+	}
+
+	function handlePhaseChange(index: number, field: 'label' | 'intensityPct' | 'microFrom' | 'microTo', value: string) {
+		if (!plan) return;
+		const phases = activeTemplate.phases.map((phase, i) => {
+			if (i !== index) return phase;
+			if (field === 'label') return { ...phase, label: value };
+			const num = Number(value.replace(',', '.'));
+			if (!Number.isFinite(num)) return phase;
+			return { ...phase, [field]: num };
+		});
+		save(updateTemplate(plan, { ...activeTemplate, phases }));
+	}
+
+	function protocolBarWidth(phase: (typeof activeTemplate.phases)[0], totalMicros: number): string {
+		const span = phase.microTo - phase.microFrom + 1;
+		return `${(span / Math.max(totalMicros, 1)) * 100}%`;
+	}
 </script>
 
 <section class="card intro">
 	<div>
 		<h2>Мезо- и микроциклы</h2>
 		<p class="muted">
-			<strong>Микроцикл</strong> — пара тренировок A + B. <strong>Мезоцикл</strong> — блок из
-			нескольких микроциклов (~{MESOCYCLE_TARGET_MICROS} полных), новый начинается после длинного
-			перерыва (&gt; 2 нед.), смены блока или ~6 недель тренировок.
+			<strong>Микроцикл</strong> — пара A + B. <strong>Мезоцикл</strong> — блок из ~{MESOCYCLE_TARGET_MICROS}
+			микроциклов. <strong>Протокол</strong> — диапазоны %1ПМ по микроциклам (80% = вес 80% от якорного
+			1ПМ).
 		</p>
 	</div>
+	<div class="intro-actions">
+		{#if !usingManual}
+			<button type="button" class="primary" onclick={handleImport}>Импорт из авто</button>
+		{:else}
+			<button type="button" class="ghost" onclick={() => (editMode = !editMode)}>
+				{editMode ? 'Готово' : 'Редактировать'}
+			</button>
+			<button type="button" class="ghost" onclick={() => (showProtocolEditor = !showProtocolEditor)}>
+				{showProtocolEditor ? 'Скрыть протокол' : 'Шаблон протокола'}
+			</button>
+			<button type="button" class="ghost danger-text" onclick={clearCyclePlanState}>
+				Сбросить план
+			</button>
+		{/if}
+		{#if usingManual && editMode}
+			<button type="button" class="primary" onclick={handleCreateMeso}>+ Мезоцикл</button>
+		{/if}
+	</div>
 </section>
+
+{#if showProtocolEditor && plan}
+	<section class="card protocol-editor">
+		<h3>Шаблон: {activeTemplate.name}</h3>
+		<p class="muted">
+			Фазы задают целевой %1ПМ для микроциклов μ1…μN. Якорный 1ПМ берётся на старт мезоблока (можно
+			править вручную).
+		</p>
+		<div class="phase-table">
+			{#each activeTemplate.phases as phase, index}
+				<div class="phase-row">
+					<input
+						type="text"
+						value={phase.label}
+						disabled={!editMode}
+						onchange={(e) => handlePhaseChange(index, 'label', e.currentTarget.value)}
+					/>
+					<label>
+						<span>%1ПМ</span>
+						<input
+							type="number"
+							min="50"
+							max="100"
+							step="2.5"
+							value={phase.intensityPct}
+							disabled={!editMode}
+							onchange={(e) => handlePhaseChange(index, 'intensityPct', e.currentTarget.value)}
+						/>
+					</label>
+					<label>
+						<span>μ от</span>
+						<input
+							type="number"
+							min="1"
+							max="12"
+							value={phase.microFrom}
+							disabled={!editMode}
+							onchange={(e) => handlePhaseChange(index, 'microFrom', e.currentTarget.value)}
+						/>
+					</label>
+					<label>
+						<span>μ до</span>
+						<input
+							type="number"
+							min="1"
+							max="12"
+							value={phase.microTo}
+							disabled={!editMode}
+							onchange={(e) => handlePhaseChange(index, 'microTo', e.currentTarget.value)}
+						/>
+					</label>
+				</div>
+			{/each}
+		</div>
+		<div class="protocol-preview">
+			{#each activeTemplate.phases as phase}
+				<div
+					class="proto-seg"
+					style="width: {protocolBarWidth(phase, activeTemplate.phases[activeTemplate.phases.length - 1]?.microTo ?? 4)}"
+					title="{phase.label}: {phase.intensityPct}% (μ{phase.microFrom}–{phase.microTo})"
+				>
+					<span>{phase.intensityPct}%</span>
+					<small>{phase.label}</small>
+				</div>
+			{/each}
+		</div>
+	</section>
+{/if}
 
 <section class="card templates">
 	<h3>Шаблоны A / B</h3>
@@ -40,44 +245,158 @@
 	</div>
 </section>
 
+{#if editMode && unassigned.length > 0}
+	<section class="card unassigned">
+		<h3>Нераспределённые дни ({unassigned.length})</h3>
+		<div class="date-pool">
+			{#each unassigned as date}
+				<span class="pool-chip">{formatDateRu(date)}</span>
+			{/each}
+		</div>
+	</section>
+{/if}
+
 <section class="card">
 	<div class="toolbar">
-		<h3>История блоков</h3>
-		<p class="muted">{mesocycles.length} мезоциклов · {microCount} микроциклов</p>
+		<h3>{usingManual ? 'План блоков' : 'История блоков (авто)'}</h3>
+		<p class="muted">
+			{displayMesos.length} мезоциклов · {microCount} микроциклов
+			{#if !usingManual}· нажми «Импорт из авто», чтобы редактировать{/if}
+		</p>
 	</div>
 
 	<div class="meso-list">
-		{#each [...mesocycles].reverse() as meso}
+		{#each [...displayMesos].reverse() as meso}
+			{@const totalMicros = meso.microcycles.length}
 			<article
 				class="meso-card"
 				style="--meso-color: {mesocycleColor(meso.index)}"
 			>
 				<div class="meso-head">
-					<div>
-						<p class="meso-title">Мезоцикл #{meso.index}</p>
+					<div class="meso-title-block">
+						{#if editMode && plan}
+							<input
+								class="meso-label-input"
+								value={meso.plan.label}
+								onchange={(e) => handleMesoLabel(meso, e.currentTarget.value)}
+							/>
+						{:else}
+							<p class="meso-title">Мезоцикл #{meso.index}</p>
+							<p class="muted meso-sub">{meso.plan.label}</p>
+						{/if}
 						<p class="muted meso-sub">
-							{formatDateRu(meso.startDate)} — {formatDateRu(meso.endDate)}
+							{formatDateRu(meso.plan.startDate)} — {formatDateRu(meso.plan.endDate)}
 							· {meso.durationDays} дн.
-							· {meso.label}
 						</p>
 					</div>
-					<span class="meso-badge">
-						{meso.completeMicrocycles}/{meso.microcycles.length} микро
-					</span>
+					<div class="meso-actions">
+						<span class="meso-badge">
+							{meso.completeMicrocycles}/{totalMicros} микро
+						</span>
+						{#if editMode && plan}
+							<button type="button" class="ghost tiny" onclick={() => handleAddMicro(meso.plan.id)}>
+								+ μ
+							</button>
+							<button
+								type="button"
+								class="ghost tiny danger-text"
+								onclick={() => handleRemoveMeso(meso.plan.id)}
+							>
+								×
+							</button>
+						{/if}
+					</div>
+				</div>
+
+				{#if Object.keys(meso.plan.anchor1rm).length > 0 || editMode}
+					<div class="anchors">
+						<span class="anchors-label">Якорный 1ПМ:</span>
+						{#each Object.entries(meso.plan.anchor1rm) as [exercise, value]}
+							<span class="anchor-chip">
+								{shortName(exercise)}
+								{#if editMode && plan}
+									<input
+										type="number"
+										step="0.5"
+										class="anchor-input"
+										value={value}
+										onchange={(e) => handleAnchor1rm(meso, exercise, e.currentTarget.value)}
+									/>
+								{:else}
+									<strong>{fmtNum(value)}</strong> кг
+								{/if}
+							</span>
+						{/each}
+					</div>
+				{/if}
+
+				<div class="protocol-bar" title="Протокол %1ПМ по микроциклам">
+					{#each meso.microcycles as micro}
+						{@const pct = micro.targetPct ?? micro.phase?.intensityPct}
+						<div
+							class="proto-micro"
+							class:has-data={micro.plan.dates.length > 0}
+							style="width: {100 / Math.max(totalMicros, 1)}%"
+							title="{micro.phase?.label ?? '—'} · {pct ?? '—'}%"
+						>
+							<span>{pct != null ? `${pct}%` : '—'}</span>
+							<small>μ{micro.plan.indexInMeso}</small>
+						</div>
+					{/each}
 				</div>
 
 				<div class="micro-list">
 					{#each meso.microcycles as micro}
 						<div class="micro-card" class:complete={micro.complete}>
 							<div class="micro-head">
-								<span class="micro-index">μ{micro.indexInMeso}</span>
-								<span class="muted">
-									{formatDateRu(micro.startDate)} — {formatDateRu(micro.endDate)}
-								</span>
+								<span class="micro-index">μ{micro.plan.indexInMeso}</span>
+								{#if micro.phase}
+									<span class="phase-tag">{micro.phase.label}</span>
+								{/if}
+								{#if micro.targetPct != null}
+									<span class="pct-tag">{micro.targetPct}% 1ПМ</span>
+								{/if}
+								{#if editMode && plan}
+									<label class="micro-intensity">
+										<span>%</span>
+										<input
+											type="number"
+											step="2.5"
+											placeholder={micro.phase?.intensityPct != null
+												? String(micro.phase.intensityPct)
+												: ''}
+											value={micro.plan.intensityPct ?? ''}
+											onchange={(e) =>
+												handleMicroIntensity(meso.plan.id, micro.plan.id, e.currentTarget.value)}
+										/>
+									</label>
+									<button
+										type="button"
+										class="ghost tiny danger-text"
+										onclick={() => handleRemoveMicro(meso.plan.id, micro.plan.id)}
+									>
+										×
+									</button>
+								{/if}
 								<span class="micro-status" class:ok={micro.complete}>
 									{micro.complete ? 'A+B' : 'частично'}
 								</span>
 							</div>
+
+							{#if micro.intensityByExercise.length > 0}
+								<div class="intensity-rows">
+									{#each micro.intensityByExercise as row}
+										<div class="intensity-row">
+											<span>{shortName(row.exercise)}</span>
+											<span class="muted">цель {fmtNum(row.targetWeight)} кг</span>
+											<span class:match={Math.abs(row.maxPct - row.targetPct) <= 3}>
+												факт {fmtNum(row.maxPct)}%
+											</span>
+										</div>
+									{/each}
+								</div>
+							{/if}
+
 							<div class="cycle-days">
 								{#if micro.dayA}
 									<a class="day-chip slot-a" href="{base}/?date={micro.dayA.date}">
@@ -91,16 +410,48 @@
 										<span>{formatDateRu(micro.dayB.date)}</span>
 									</a>
 								{/if}
+								{#each micro.plan.dates.filter((d) => d !== micro.dayA?.date && d !== micro.dayB?.date) as date}
+									<a class="day-chip" href="{base}/?date={date}">
+										<span>{formatDateRu(date)}</span>
+										{#if editMode && plan}
+											<button
+												type="button"
+												class="unlink"
+												onclick={(e) => {
+													e.preventDefault();
+													handleUnassign(date);
+												}}
+											>
+												×
+											</button>
+										{/if}
+									</a>
+								{/each}
 							</div>
+
+							{#if editMode && plan && unassigned.length > 0}
+								<label class="assign-field">
+									<span>Добавить день</span>
+									<select
+										onchange={(e) => {
+											handleAssign(meso.plan.id, micro.plan.id, e.currentTarget.value);
+											e.currentTarget.value = '';
+										}}
+									>
+										<option value="">— выбрать —</option>
+										{#each unassigned as date}
+											<option value={date}>{formatDateRu(date)}</option>
+										{/each}
+									</select>
+								</label>
+							{/if}
 						</div>
 					{/each}
 				</div>
 
 				{#if meso.gapAfterDays !== null && meso.gapAfterDays >= 14}
 					<p class="gap-note">
-						До следующего мезоблока {meso.gapAfterDays >= 14
-							? `${Math.round(meso.gapAfterDays / 7)} нед.`
-							: `${meso.gapAfterDays} дн.`}
+						До следующего мезоблока {Math.round(meso.gapAfterDays / 7)} нед.
 					</p>
 				{/if}
 			</article>
@@ -109,10 +460,122 @@
 </section>
 
 <style>
+	.intro {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+		align-items: start;
+	}
+
 	.intro h2,
 	.templates h3,
-	.toolbar h3 {
+	.toolbar h3,
+	.protocol-editor h3,
+	.unassigned h3 {
 		margin: 0 0 0.25rem;
+	}
+
+	.intro-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+	}
+
+	button.primary {
+		border-radius: 10px;
+		padding: 0.5rem 0.85rem;
+		border: 1px solid rgba(110, 231, 168, 0.45);
+		background: rgba(110, 231, 168, 0.16);
+		color: var(--accent);
+	}
+
+	button.ghost {
+		border-radius: 10px;
+		padding: 0.5rem 0.85rem;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text);
+	}
+
+	button.tiny {
+		padding: 0.2rem 0.45rem;
+		font-size: 0.78rem;
+	}
+
+	.danger-text {
+		color: var(--danger);
+	}
+
+	.protocol-editor {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.phase-table {
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.phase-row {
+		display: grid;
+		grid-template-columns: 1fr repeat(3, auto);
+		gap: 0.5rem;
+		align-items: end;
+	}
+
+	.phase-row input {
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--text);
+		padding: 0.4rem 0.55rem;
+		min-width: 4rem;
+	}
+
+	.phase-row label {
+		display: grid;
+		gap: 0.15rem;
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+
+	.protocol-preview,
+	.protocol-bar {
+		display: flex;
+		gap: 2px;
+		border-radius: 8px;
+		overflow: hidden;
+		min-height: 2rem;
+	}
+
+	.proto-seg,
+	.proto-micro {
+		display: grid;
+		place-content: center;
+		text-align: center;
+		font-size: 0.72rem;
+		background: rgba(167, 139, 250, 0.2);
+		border: 1px solid rgba(167, 139, 250, 0.25);
+		padding: 0.2rem;
+	}
+
+	.proto-micro {
+		background: rgba(148, 163, 184, 0.12);
+		border-color: rgba(148, 163, 184, 0.2);
+		opacity: 0.55;
+	}
+
+	.proto-micro.has-data {
+		opacity: 1;
+		background: rgba(167, 139, 250, 0.18);
+		border-color: rgba(167, 139, 250, 0.3);
+	}
+
+	.proto-seg small,
+	.proto-micro small {
+		color: var(--muted);
+		font-size: 0.65rem;
 	}
 
 	.template-grid {
@@ -154,6 +617,21 @@
 		color: var(--muted);
 	}
 
+	.date-pool {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-top: 0.5rem;
+	}
+
+	.pool-chip {
+		font-size: 0.78rem;
+		padding: 0.25rem 0.5rem;
+		border-radius: 999px;
+		border: 1px dashed var(--border);
+		color: var(--muted);
+	}
+
 	.toolbar {
 		display: flex;
 		justify-content: space-between;
@@ -180,7 +658,7 @@
 		justify-content: space-between;
 		gap: 0.75rem;
 		align-items: start;
-		margin-bottom: 0.75rem;
+		margin-bottom: 0.55rem;
 	}
 
 	.meso-title {
@@ -189,9 +667,26 @@
 		color: var(--meso-color);
 	}
 
+	.meso-label-input {
+		width: 100%;
+		max-width: 280px;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--text);
+		padding: 0.35rem 0.5rem;
+		font-weight: 700;
+	}
+
 	.meso-sub {
 		margin: 0.2rem 0 0;
 		font-size: 0.85rem;
+	}
+
+	.meso-actions {
+		display: flex;
+		gap: 0.35rem;
+		align-items: center;
 	}
 
 	.meso-badge {
@@ -201,6 +696,42 @@
 		border: 1px solid color-mix(in srgb, var(--meso-color) 45%, var(--border));
 		color: var(--meso-color);
 		white-space: nowrap;
+	}
+
+	.anchors {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		align-items: center;
+		margin-bottom: 0.55rem;
+		font-size: 0.8rem;
+	}
+
+	.anchors-label {
+		color: var(--muted);
+	}
+
+	.anchor-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.2rem 0.45rem;
+		border-radius: 999px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+	}
+
+	.anchor-input {
+		width: 4rem;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--text);
+		padding: 0.15rem 0.3rem;
+	}
+
+	.protocol-bar {
+		margin-bottom: 0.65rem;
 	}
 
 	.micro-list {
@@ -222,7 +753,7 @@
 	.micro-head {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.45rem;
 		margin-bottom: 0.45rem;
 		font-size: 0.82rem;
 		flex-wrap: wrap;
@@ -233,6 +764,36 @@
 		color: var(--muted);
 	}
 
+	.phase-tag {
+		font-size: 0.72rem;
+		padding: 0.12rem 0.4rem;
+		border-radius: 999px;
+		background: rgba(167, 139, 250, 0.15);
+		color: #c4b5fd;
+	}
+
+	.pct-tag {
+		font-size: 0.72rem;
+		color: var(--accent-2);
+	}
+
+	.micro-intensity {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		font-size: 0.72rem;
+		color: var(--muted);
+	}
+
+	.micro-intensity input {
+		width: 3.2rem;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--text);
+		padding: 0.15rem 0.25rem;
+	}
+
 	.micro-status {
 		margin-left: auto;
 		font-size: 0.75rem;
@@ -240,6 +801,23 @@
 	}
 
 	.micro-status.ok {
+		color: var(--accent);
+	}
+
+	.intensity-rows {
+		display: grid;
+		gap: 0.25rem;
+		margin-bottom: 0.45rem;
+		font-size: 0.78rem;
+	}
+
+	.intensity-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.intensity-row .match {
 		color: var(--accent);
 	}
 
@@ -274,6 +852,32 @@
 	.day-chip.slot-b {
 		border-color: rgba(110, 231, 168, 0.35);
 		background: rgba(110, 231, 168, 0.1);
+	}
+
+	.unlink {
+		border: none;
+		background: transparent;
+		color: var(--danger);
+		padding: 0;
+		cursor: pointer;
+		line-height: 1;
+	}
+
+	.assign-field {
+		display: grid;
+		gap: 0.2rem;
+		margin-top: 0.45rem;
+		font-size: 0.78rem;
+		color: var(--muted);
+	}
+
+	.assign-field select {
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--text);
+		padding: 0.35rem 0.5rem;
+		max-width: 200px;
 	}
 
 	.gap-note {
