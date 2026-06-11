@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import SetEditor from '$lib/components/SetEditor.svelte';
+	import RmLabels from '$lib/components/RmLabels.svelte';
 	import {
 		exerciseTargetOnMicro,
 		resolveMesoMicroSelection
@@ -193,11 +194,19 @@
 			<input type="date" bind:value={date} />
 		</label>
 
-		{#if protocolHint}
-			<p class="protocol-hint">
-				μ{trainingContext!.micro.plan.indexInMeso} · {protocolHint.protocolLabel}: цель ~{fmtNum(protocolHint.targetWeight)} кг
-				({protocolHint.targetPct}%) · 1ПМ {fmtNum(protocolHint.anchor1rm)} кг
-			</p>
+		{#if protocolHint || trainingContext?.meso.anchorInfo[exercise.trim()]}
+			{@const rm = trainingContext?.meso.anchorInfo[exercise.trim()]}
+			<div class="protocol-hint">
+				{#if rm}
+					<RmLabels anchor={rm.anchor} current={rm.current1rm} currentDate={rm.current1rmDate} />
+				{/if}
+				{#if protocolHint}
+					<p>
+						μ{trainingContext!.micro.plan.indexInMeso} · {protocolHint.protocolLabel}: цель ~{fmtNum(protocolHint.targetWeight)} кг
+						({protocolHint.targetPct}% от якоря)
+					</p>
+				{/if}
+			</div>
 		{/if}
 
 		<SetEditor bind:row={mainRow} label="Основной блок" />
@@ -354,6 +363,8 @@
 	}
 
 	.protocol-hint {
+		display: grid;
+		gap: 0.4rem;
 		margin: 0;
 		padding: 0.65rem 0.75rem;
 		border-radius: 10px;
@@ -361,5 +372,9 @@
 		background: rgba(110, 231, 168, 0.08);
 		font-size: 0.85rem;
 		color: var(--accent-2);
+	}
+
+	.protocol-hint p {
+		margin: 0;
 	}
 </style>

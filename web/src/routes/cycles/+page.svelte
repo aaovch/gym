@@ -43,6 +43,7 @@
 		type MacroBlockInput
 	} from '$lib/macro-constructor';
 	import { DEFAULT_PROTOCOL_TEMPLATE, isBundledProtocolId, isCustomProtocolId } from '$lib/protocol';
+	import RmLabels from '$lib/components/RmLabels.svelte';
 	import {
 		clearCyclePlanState,
 		importCyclePlanFromAuto,
@@ -778,7 +779,7 @@
 									<tr>
 										<th></th>
 										<th>Упражнение</th>
-										<th>1ПМ, кг</th>
+										<th>Якорный 1ПМ, кг</th>
 										<th>Источник</th>
 										<th>Метод</th>
 									</tr>
@@ -857,7 +858,7 @@
 								<thead>
 									<tr>
 										<th>Упражнение</th>
-										<th>1ПМ</th>
+										<th>Якорь</th>
 										{#each blockPreview.matrix[0]?.cells ?? [] as cell}
 											<th>μ{cell.microIndex}</th>
 										{/each}
@@ -867,7 +868,9 @@
 									{#each blockPreview.matrix as row}
 										<tr>
 											<td class="ex-name">{row.exercise}</td>
-											<td class="rm-cell">{fmtNum(row.anchor)}</td>
+											<td class="rm-cell">
+												<RmLabels anchor={row.anchor} stacked />
+											</td>
 											{#each row.cells as cell}
 												<td class="pct">
 													{#if cell.pct != null}
@@ -955,7 +958,7 @@
 					<tr>
 						<th></th>
 						<th>Упражнение</th>
-						<th>1ПМ, кг</th>
+						<th>Якорный 1ПМ, кг</th>
 						<th>Источник</th>
 						<th>Метод (протокол)</th>
 					</tr>
@@ -1021,7 +1024,7 @@
 						<thead>
 							<tr>
 								<th>Упражнение</th>
-								<th>1ПМ</th>
+								<th>Якорь</th>
 								<th>Метод</th>
 								{#each Array.from({ length: constructorMicroCount }, (_, index) => index + 1) as microIndex}
 									<th>μ{microIndex}</th>
@@ -1032,7 +1035,7 @@
 							{#each constructorPreview as row}
 								<tr>
 									<td class="ex-name">{row.exercise}</td>
-									<td>{fmtNum(row.anchor)}</td>
+									<td><RmLabels anchor={row.anchor} stacked /></td>
 									<td class="proto-name" title={row.templateName}>{shortProtocolName(row.templateName)}</td>
 									{#each row.cells as cell}
 										<td class="pct">
@@ -1054,7 +1057,7 @@
 				</div>
 			</div>
 		{:else}
-			<p class="muted constructor-empty">Отметьте упражнения и задайте 1ПМ, чтобы увидеть план.</p>
+			<p class="muted constructor-empty">Отметьте упражнения и задайте якорный 1ПМ, чтобы увидеть план.</p>
 		{/if}
 
 		<div class="constructor-actions">
@@ -1076,7 +1079,7 @@
 	<div>
 		<h2>Циклы тренировок</h2>
 		<p class="muted">
-			Макроцикл — цепочка мезо-блоков (μ). В каждом мезо у упражнений свой 1ПМ и протокол % по μ.
+			Макроцикл — цепочка мезо-блоков (μ). В каждом мезо — якорный 1ПМ для плана и протокол % по μ.
 		</p>
 	</div>
 	<div class="head-actions">
@@ -1102,7 +1105,7 @@
 				</button>
 				{#if showMoreActions}
 					<div class="more-menu">
-						<button type="button" onclick={() => refreshMesoAnchorsFromData(true)}>Пересчитать 1ПМ</button>
+						<button type="button" onclick={() => refreshMesoAnchorsFromData(true)}>Пересчитать якорные 1ПМ</button>
 						<button type="button" class="danger" onclick={clearCyclePlanState}>Сбросить план</button>
 					</div>
 				{/if}
@@ -1710,7 +1713,7 @@
 			{#if mesoTab === 'plan'}
 				<div class="tab-panel">
 					<p class="panel-hint muted">
-						План (% и кг) · факт — пик %1ПМ за микроцикл (лучший подход)
+						План (% и кг) по якорному 1ПМ · факт — пик % от якоря за микроцикл (лучший подход)
 					</p>
 					<div class="matrix-wrap">
 						<table class="matrix">
@@ -1725,7 +1728,7 @@
 							<thead>
 								<tr>
 									<th>Упражнение</th>
-									<th>1ПМ</th>
+									<th>Якорь / текущ.</th>
 									<th>Протокол</th>
 									{#each selectedMeso.microcycles as micro}
 										<th>μ{micro.plan.indexInMeso}</th>
@@ -1734,9 +1737,17 @@
 							</thead>
 							<tbody>
 								{#each selectedMeso.protocolMatrix as row}
+									{@const rm = selectedMeso.anchorInfo[row.exercise]}
 									<tr>
 										<td class="ex-name">{row.exercise}</td>
-										<td class="rm-cell">{fmtNum(row.anchor)}</td>
+										<td class="rm-cell">
+											<RmLabels
+												anchor={row.anchor}
+												current={rm?.current1rm}
+												currentDate={rm?.current1rmDate}
+												stacked
+											/>
+										</td>
 										<td class="proto-name" title={row.templateName}>
 											{shortProtocolName(row.templateName)}
 										</td>
@@ -1874,7 +1885,7 @@
 
 					<div class="settings-block">
 						<div class="block-head">
-							<h4>Упражнения: 1ПМ и протокол</h4>
+							<h4>Упражнения: якорный и текущий 1ПМ, протокол</h4>
 							<button type="button" class="btn small" onclick={() => handleSyncExercises(selectedMeso)}>
 								Подтянуть из тренировок
 							</button>
@@ -1884,10 +1895,15 @@
 								<div class="exercise-setting-row">
 									<div class="exercise-setting-main">
 										<strong>{exercise}</strong>
+										<RmLabels
+											anchor={info.anchor}
+											current={info.current1rm}
+											currentDate={info.current1rmDate}
+										/>
 										<span class="muted">{anchorSourceLabel(info)}</span>
 									</div>
 									<label>
-										<span>1ПМ, кг</span>
+										<span>Якорный 1ПМ, кг</span>
 										<input
 											type="number"
 											step="0.5"
@@ -2641,7 +2657,7 @@
 	}
 
 	.matrix :global(col.col-rm) {
-		width: 3.25rem;
+		width: 6.75rem;
 	}
 
 	.matrix :global(col.col-proto) {
@@ -2967,7 +2983,7 @@
 
 	.exercise-setting-main {
 		display: grid;
-		gap: 0.1rem;
+		gap: 0.25rem;
 	}
 
 	.exercise-setting-row label {

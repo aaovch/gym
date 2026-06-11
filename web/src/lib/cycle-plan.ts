@@ -6,7 +6,7 @@ import {
 	type MesoAnchor1rm,
 	type ProtocolPhase,
 	type ProtocolTemplate,
-	best1rmInRange,
+	best1rmAllTime,
 	isBundledProtocolStub,
 	isCustomProtocolId,
 	phaseForMicro,
@@ -98,11 +98,13 @@ export type ProtocolMatrixRow = {
 };
 
 export type ExerciseAnchorInfo = {
+	/** Якорный 1ПМ — фиксируется на старт мезо, основа плана % и кг. */
 	anchor: number;
 	source: MesoAnchor1rm['source'];
 	anchorDate: string | null;
-	peakInMeso: number | null;
-	peakDate: string | null;
+	/** Текущий 1ПМ — лучший результат за всю историю упражнения. */
+	current1rm: number | null;
+	current1rmDate: string | null;
 	manual: boolean;
 };
 
@@ -208,7 +210,7 @@ function buildAnchorInfo(
 	for (const exercise of mesoExercisesFromPlan(meso, entries)) {
 		const manual = Boolean(meso.anchor1rmManual?.[exercise]);
 		const computed = resolveMesoAnchor1rm(entries, exercise, meso.startDate, meso.endDate);
-		const peak = best1rmInRange(entries, exercise, meso.startDate, meso.endDate);
+		const current = best1rmAllTime(entries, exercise);
 		const anchor =
 			manual && meso.anchor1rm[exercise] != null
 				? meso.anchor1rm[exercise]
@@ -220,8 +222,8 @@ function buildAnchorInfo(
 			anchor,
 			source: manual ? 'manual' : (computed?.source ?? 'prior'),
 			anchorDate: manual ? null : (computed?.asOfDate ?? null),
-			peakInMeso: peak?.value ?? null,
-			peakDate: peak?.date ?? null,
+			current1rm: current?.value ?? null,
+			current1rmDate: current?.date ?? null,
 			manual
 		};
 	}

@@ -57,6 +57,11 @@ export function best1rmInRange(
 	);
 }
 
+/** Лучший 1ПМ (Эпли) за всю историю упражнения. */
+export function best1rmAllTime(entries: WorkoutEntry[], exercise: string): Best1rmHit | null {
+	return best1rmFromEntries(entries, exercise, () => true);
+}
+
 export type MesoAnchorSource = 'prior' | 'in_meso' | 'manual';
 
 export type MesoAnchor1rm = {

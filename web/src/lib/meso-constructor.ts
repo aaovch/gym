@@ -93,8 +93,8 @@ function buildPreviewMesoPlan(
 			anchor: row.anchor1rm,
 			source: row.manual ? 'manual' : 'prior',
 			anchorDate: null,
-			peakInMeso: null,
-			peakDate: null,
+			current1rm: null,
+			current1rmDate: null,
 			manual: Boolean(row.manual)
 		};
 	}

@@ -10,6 +10,7 @@
 	} from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel, type WorkoutSlot } from '$lib/microcycle';
+	import RmLabels from '$lib/components/RmLabels.svelte';
 	import { thesesStore } from '$lib/training-theses';
 	import {
 		evaluateEntryVolume,
@@ -258,6 +259,7 @@
 						{#each slotExercises as exercise (exercise)}
 							{@const entry = entryByExercise.get(exercise)}
 							{@const hint = protocolHints.get(exercise)}
+							{@const rm = mesocycle?.anchorInfo[exercise]}
 							<article class="exercise-card" class:logged={Boolean(entry)}>
 								<div class="exercise-head">
 									<h4>{exercise}</h4>
@@ -265,11 +267,21 @@
 										{entry ? 'Изменить' : 'Записать'}
 									</a>
 								</div>
-								{#if hint}
-									<p class="target-hint">
-										{hint.protocolLabel}: цель ~{fmtNum(hint.targetWeight)} кг ({hint.targetPct}%)
-										· 1ПМ {fmtNum(hint.anchor1rm)} кг
-									</p>
+								{#if hint || rm}
+									<div class="target-hint">
+										{#if rm}
+											<RmLabels
+												anchor={rm.anchor}
+												current={rm.current1rm}
+												currentDate={rm.current1rmDate}
+											/>
+										{/if}
+										{#if hint}
+											<p>
+												{hint.protocolLabel}: цель ~{fmtNum(hint.targetWeight)} кг ({hint.targetPct}% от якоря)
+											</p>
+										{/if}
+									</div>
 								{/if}
 								{#if entry}
 									<div class="sets">
@@ -282,7 +294,7 @@
 											class="fact-hint"
 											class:match={Math.abs(hint.maxPct - hint.targetPct) <= 3}
 										>
-											Факт пик {fmtNum(hint.maxPct)}% · {fmtNum(hint.maxWeight)} кг
+											Факт пик {fmtNum(hint.maxPct)}% от якоря · {fmtNum(hint.maxWeight)} кг
 										</p>
 									{/if}
 									{#if volumeHints.has(exercise)}
@@ -551,9 +563,15 @@
 	}
 
 	.target-hint {
+		display: grid;
+		gap: 0.35rem;
 		margin: 0 0 0.5rem;
 		font-size: 0.82rem;
 		color: var(--accent-2);
+	}
+
+	.target-hint p {
+		margin: 0;
 	}
 
 	.fact-hint {
