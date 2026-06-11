@@ -18,7 +18,7 @@
 	} from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
-	import { DEFAULT_PROTOCOL_TEMPLATE, shortExerciseName } from '$lib/protocol';
+	import { DEFAULT_PROTOCOL_TEMPLATE } from '$lib/protocol';
 	import {
 		clearCyclePlanState,
 		importCyclePlanFromAuto,
@@ -442,7 +442,7 @@
 							<tbody>
 								{#each selectedMeso.protocolMatrix as row}
 									<tr>
-										<td class="ex-name" title={row.exercise}>{shortExerciseName(row.exercise)}</td>
+										<td class="ex-name">{row.exercise}</td>
 										<td class="rm-cell">{fmtNum(row.anchor)}</td>
 										<td class="proto-name" title={row.templateName}>
 											{shortProtocolName(row.templateName)}
@@ -496,7 +496,7 @@
 										{#each micro.intensityByExercise as row}
 											<tr class:match={!row.plannedOnly && Math.abs(row.maxPct - row.targetPct) <= 3}>
 												<td>
-													<strong>{shortExerciseName(row.exercise)}</strong>
+													<strong>{row.exercise}</strong>
 													<small class="muted">{row.protocolLabel ?? ''}</small>
 												</td>
 												<td>
@@ -549,7 +549,7 @@
 							{#each Object.entries(selectedMeso.anchorInfo) as [exercise, info]}
 								<div class="exercise-setting-row">
 									<div class="exercise-setting-main">
-										<strong title={exercise}>{shortExerciseName(exercise)}</strong>
+										<strong>{exercise}</strong>
 										<span class="muted">{anchorSourceLabel(info)}</span>
 									</div>
 									<label>
@@ -927,7 +927,7 @@
 
 	.matrix {
 		width: 100%;
-		min-width: 36rem;
+		min-width: 44rem;
 		border-collapse: separate;
 		border-spacing: 0;
 		font-size: 0.82rem;
@@ -935,7 +935,7 @@
 	}
 
 	.matrix :global(col.col-ex) {
-		width: 5.5rem;
+		width: 14rem;
 	}
 
 	.matrix :global(col.col-rm) {
@@ -976,9 +976,9 @@
 	.matrix .ex-name {
 		text-align: left;
 		font-weight: 600;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		font-size: 0.78rem;
+		line-height: 1.25;
+		word-break: break-word;
 	}
 
 	.matrix .rm-cell {
