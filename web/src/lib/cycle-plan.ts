@@ -2,13 +2,15 @@ import { dateToMs } from './chart-time';
 import {
 	DEFAULT_PROTOCOL_TEMPLATE,
 	STABLE_PROTOCOL_TEMPLATE,
+	type MesoAnchor1rm,
 	type ProtocolPhase,
 	type ProtocolTemplate,
+	best1rmInRange,
 	phaseForMicro,
 	pickMesoExercises,
 	plannedSessionIntensity,
-	sessionIntensity,
-	anchor1rmBeforeDate
+	resolveMesoAnchor1rm,
+	sessionIntensity
 } from './protocol';
 import type { MicrocycleOverview, TrainingDay } from './microcycle';
 import type { WorkoutEntry } from './types';
@@ -35,6 +37,8 @@ export type MesocyclePlan = {
 	templateId: string;
 	/** Якорные 1ПМ на старт мезо: упражнение → кг. */
 	anchor1rm: Record<string, number>;
+	/** Упражнения с вручную заданным якорем — не пересчитываются автоматически. */
+	anchor1rmManual?: Record<string, boolean>;
 	/** Свой протокол для упражнения (id шаблона). Пусто → templateId мезо. */
 	exerciseProtocols?: Record<string, string>;
 };
@@ -56,11 +60,21 @@ export type EnrichedMicrocycle = {
 	intensityByExercise: ReturnType<typeof sessionIntensity>[];
 };
 
+export type ExerciseAnchorInfo = {
+	anchor: number;
+	source: MesoAnchor1rm['source'];
+	anchorDate: string | null;
+	peakInMeso: number | null;
+	peakDate: string | null;
+	manual: boolean;
+};
+
 export type EnrichedMesocycle = {
 	plan: MesocyclePlan;
 	template: ProtocolTemplate;
 	index: number;
 	microcycles: EnrichedMicrocycle[];
+	anchorInfo: Record<string, ExerciseAnchorInfo>;
 	completeMicrocycles: number;
 	durationDays: number;
 	gapAfterDays: number | null;
@@ -93,15 +107,69 @@ export function emptyCyclePlan(): CyclePlan {
 	};
 }
 
+function mesoExercisesFromPlan(meso: MesocyclePlan, entries: WorkoutEntry[]): string[] {
+	const names = new Set(Object.keys(meso.anchor1rm));
+	const dates = new Set(meso.microcycles.flatMap((micro) => micro.dates));
+	for (const entry of entries) {
+		if (dates.has(entry.date)) names.add(entry.exercise);
+	}
+	return pickMesoExercises([...names]);
+}
+
+function buildAnchorInfo(
+	meso: MesocyclePlan,
+	entries: WorkoutEntry[]
+): Record<string, ExerciseAnchorInfo> {
+	const info: Record<string, ExerciseAnchorInfo> = {};
+	for (const exercise of mesoExercisesFromPlan(meso, entries)) {
+		const manual = Boolean(meso.anchor1rmManual?.[exercise]);
+		const computed = resolveMesoAnchor1rm(entries, exercise, meso.startDate, meso.endDate);
+		const peak = best1rmInRange(entries, exercise, meso.startDate, meso.endDate);
+		const anchor =
+			manual && meso.anchor1rm[exercise] != null
+				? meso.anchor1rm[exercise]
+				: computed?.value ?? meso.anchor1rm[exercise];
+
+		if (anchor == null) continue;
+
+		info[exercise] = {
+			anchor,
+			source: manual ? 'manual' : (computed?.source ?? 'prior'),
+			anchorDate: manual ? null : (computed?.asOfDate ?? null),
+			peakInMeso: peak?.value ?? null,
+			peakDate: peak?.date ?? null,
+			manual
+		};
+	}
+	return info;
+}
+
+function withComputedAnchors(meso: MesocyclePlan, entries: WorkoutEntry[]): MesocyclePlan {
+	const exercises = mesoExercisesFromPlan(meso, entries);
+	const anchor1rm = { ...meso.anchor1rm };
+	const anchor1rmManual = { ...(meso.anchor1rmManual ?? {}) };
+
+	for (const exercise of exercises) {
+		if (anchor1rmManual[exercise]) {
+			if (anchor1rm[exercise] != null) continue;
+		}
+		const resolved = resolveMesoAnchor1rm(entries, exercise, meso.startDate, meso.endDate);
+		if (resolved) anchor1rm[exercise] = resolved.value;
+	}
+
+	return { ...meso, anchor1rm, anchor1rmManual };
+}
+
 function buildAnchor1rm(
 	exercises: string[],
 	entries: WorkoutEntry[],
-	startDate: string
+	startDate: string,
+	endDate: string
 ): Record<string, number> {
 	const anchor1rm: Record<string, number> = {};
 	for (const exercise of exercises) {
-		const value = anchor1rmBeforeDate(entries, exercise, startDate);
-		if (value) anchor1rm[exercise] = value;
+		const resolved = resolveMesoAnchor1rm(entries, exercise, startDate, endDate);
+		if (resolved) anchor1rm[exercise] = resolved.value;
 	}
 	return anchor1rm;
 }
@@ -151,7 +219,7 @@ export function importPlanFromAuto(
 
 	const mesocycles: MesocyclePlan[] = overview.mesocycles.map((meso) => {
 		const exercises = mesoExerciseNames(overview, meso.index);
-		const anchor1rm = buildAnchor1rm(exercises, entries, meso.startDate);
+		const anchor1rm = buildAnchor1rm(exercises, entries, meso.startDate, meso.endDate);
 		const existingMeso = existing?.mesocycles.find(
 			(item) => item.startDate === meso.startDate && item.endDate === meso.endDate
 		);
@@ -163,6 +231,7 @@ export function importPlanFromAuto(
 			endDate: meso.endDate,
 			templateId: defaultTemplateId,
 			anchor1rm,
+			anchor1rmManual: {},
 			exerciseProtocols: existingMeso?.exerciseProtocols ?? {},
 			microcycles: meso.microcycles.map((micro) => ({
 				id: newId('micro'),
@@ -274,18 +343,26 @@ export function buildCyclePlanView(
 
 	const mesocycles: EnrichedMesocycle[] = plan.mesocycles.map((meso, index) => {
 		const template = templateById(plan, meso.templateId);
-		const normalized = reindexMeso(meso);
+		const normalized = reindexMeso(withComputedAnchors(meso, entries));
+		const anchorInfo = buildAnchorInfo(normalized, entries);
+		const effectiveMeso: MesocyclePlan = {
+			...normalized,
+			anchor1rm: Object.fromEntries(
+				Object.entries(anchorInfo).map(([exercise, meta]) => [exercise, meta.anchor])
+			)
+		};
 		const microcycles = normalized.microcycles.map((micro) =>
-			enrichMicro(micro, normalized, plan, template, overview.byDate, entries)
+			enrichMicro(micro, effectiveMeso, plan, template, overview.byDate, entries)
 		);
 		const allMicroDates = normalized.microcycles.flatMap((m) => m.dates).sort();
 		const startDate = allMicroDates[0] ?? normalized.startDate;
 		const endDate = allMicroDates[allMicroDates.length - 1] ?? normalized.endDate;
 
 		return {
-			plan: { ...normalized, startDate, endDate },
+			plan: { ...effectiveMeso, startDate, endDate },
 			template,
 			index: index + 1,
+			anchorInfo,
 			microcycles,
 			completeMicrocycles: microcycles.filter((m) => m.complete).length,
 			durationDays: startDate && endDate ? daysBetween(startDate, endDate) : 0,
@@ -368,7 +445,7 @@ export function removeMicrocycle(plan: CyclePlan, mesoId: string, microId: strin
 export function updateMesocycle(
 	plan: CyclePlan,
 	mesoId: string,
-	patch: Partial<Pick<MesocyclePlan, 'label' | 'templateId' | 'anchor1rm' | 'exerciseProtocols'>>
+	patch: Partial<Pick<MesocyclePlan, 'label' | 'templateId' | 'anchor1rm' | 'exerciseProtocols' | 'anchor1rmManual'>>
 ): CyclePlan {
 	return touchPlan({
 		...plan,
@@ -460,19 +537,74 @@ export function syncMesoExercises(
 	mesoId: string,
 	exerciseNames: string[],
 	entries: WorkoutEntry[],
-	startDate: string
+	startDate: string,
+	endDate: string
 ): CyclePlan {
 	return touchPlan({
 		...plan,
 		mesocycles: plan.mesocycles.map((meso) => {
 			if (meso.id !== mesoId) return meso;
 			const anchor1rm = { ...meso.anchor1rm };
+			const anchor1rmManual = { ...(meso.anchor1rmManual ?? {}) };
 			for (const exercise of pickMesoExercises(exerciseNames)) {
-				if (anchor1rm[exercise]) continue;
-				const value = anchor1rmBeforeDate(entries, exercise, startDate);
-				if (value) anchor1rm[exercise] = value;
+				if (anchor1rmManual[exercise]) continue;
+				const resolved = resolveMesoAnchor1rm(entries, exercise, startDate, endDate);
+				if (resolved) anchor1rm[exercise] = resolved.value;
 			}
-			return { ...meso, anchor1rm };
+			return { ...meso, anchor1rm, anchor1rmManual };
+		})
+	});
+}
+
+/** Пересчитать якорные 1ПМ из данных; вручную заданные можно сохранить. */
+export function refreshAllMesoAnchors(
+	plan: CyclePlan,
+	entries: WorkoutEntry[],
+	keepManual = true
+): CyclePlan {
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			const normalized = reindexMeso(meso);
+			const anchor1rmManual = keepManual ? { ...(normalized.anchor1rmManual ?? {}) } : {};
+			const exercises = mesoExercisesFromPlan(normalized, entries);
+			const anchor1rm: Record<string, number> = {};
+
+			for (const exercise of exercises) {
+				if (keepManual && anchor1rmManual[exercise] && normalized.anchor1rm[exercise] != null) {
+					anchor1rm[exercise] = normalized.anchor1rm[exercise];
+					continue;
+				}
+				delete anchor1rmManual[exercise];
+				const resolved = resolveMesoAnchor1rm(
+					entries,
+					exercise,
+					normalized.startDate,
+					normalized.endDate
+				);
+				if (resolved) anchor1rm[exercise] = resolved.value;
+			}
+
+			return { ...normalized, anchor1rm, anchor1rmManual };
+		})
+	});
+}
+
+export function markAnchorManual(
+	plan: CyclePlan,
+	mesoId: string,
+	exercise: string,
+	value: number
+): CyclePlan {
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			return {
+				...meso,
+				anchor1rm: { ...meso.anchor1rm, [exercise]: value },
+				anchor1rmManual: { ...(meso.anchor1rmManual ?? {}), [exercise]: true }
+			};
 		})
 	});
 }
@@ -525,7 +657,7 @@ export function autoMesocyclesAsView(
 
 	return overview.mesocycles.map((meso, index) => {
 		const exercises = mesoExerciseNames(overview, meso.index);
-		const anchor1rm = buildAnchor1rm(exercises, entries, meso.startDate);
+		const anchor1rm = buildAnchor1rm(exercises, entries, meso.startDate, meso.endDate);
 
 		const plan: MesocyclePlan = {
 			id: `auto-${meso.index}`,
@@ -534,6 +666,7 @@ export function autoMesocyclesAsView(
 			endDate: meso.endDate,
 			templateId: defaultTemplate.id,
 			anchor1rm,
+			anchor1rmManual: {},
 			exerciseProtocols: {},
 			microcycles: meso.microcycles.map((micro) => ({
 				id: `auto-micro-${micro.index}`,
@@ -545,11 +678,13 @@ export function autoMesocyclesAsView(
 		const microcycles = plan.microcycles.map((microPlan) =>
 			enrichMicro(microPlan, plan, cyclePlan, defaultTemplate, overview.byDate, entries)
 		);
+		const anchorInfo = buildAnchorInfo(plan, entries);
 
 		return {
 			plan,
 			template: defaultTemplate,
 			index: index + 1,
+			anchorInfo,
 			microcycles,
 			completeMicrocycles: meso.completeMicrocycles,
 			durationDays: meso.durationDays,

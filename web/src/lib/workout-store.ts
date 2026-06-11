@@ -4,6 +4,7 @@ import {
 	autoMesocyclesAsView,
 	buildCyclePlanView,
 	importPlanFromAuto,
+	refreshAllMesoAnchors,
 	type CyclePlan
 } from './cycle-plan';
 import { sessionsToEntries } from './database';
@@ -220,6 +221,20 @@ export function importCyclePlanFromAuto() {
 
 export function saveCyclePlanState(plan: CyclePlan) {
 	persistCyclePlan(plan);
+}
+
+export function refreshMesoAnchorsFromData(keepManual = true) {
+	const plan = get(cyclePlan);
+	if (!plan) return;
+	const entries = get(workoutView).entries;
+	persistCyclePlan(refreshAllMesoAnchors(plan, entries, keepManual));
+	syncState.update((state) => ({
+		...state,
+		message: keepManual
+			? '1ПМ пересчитаны из данных (ручные значения сохранены).'
+			: '1ПМ пересчитаны из данных (включая ручные).',
+		error: ''
+	}));
 }
 
 export function clearCyclePlanState() {

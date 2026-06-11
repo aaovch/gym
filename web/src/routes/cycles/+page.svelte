@@ -4,6 +4,7 @@
 		addMicrocycle,
 		assignDate,
 		createMesocycle,
+		markAnchorManual,
 		removeMesocycle,
 		removeMicrocycle,
 		removeExerciseFromMeso,
@@ -13,7 +14,8 @@
 		updateMesocycle,
 		updateMicroIntensity,
 		updateTemplate,
-		type EnrichedMesocycle
+		type EnrichedMesocycle,
+		type ExerciseAnchorInfo
 	} from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum } from '$lib/format';
 	import {
@@ -26,6 +28,7 @@
 	import {
 		clearCyclePlanState,
 		importCyclePlanFromAuto,
+		refreshMesoAnchorsFromData,
 		saveCyclePlanState,
 		workoutView
 	} from '$lib/workout-store';
@@ -60,6 +63,13 @@
 	function templateName(meso: EnrichedMesocycle, exercise: string): string {
 		const id = exerciseTemplateId(meso, exercise);
 		return plan?.templates.find((item) => item.id === id)?.name ?? '—';
+	}
+
+	function anchorSourceLabel(info: ExerciseAnchorInfo): string {
+		if (info.manual) return 'вручную';
+		if (info.source === 'prior') return 'до старта мезо';
+		if (info.source === 'in_meso') return 'первый блок';
+		return '';
 	}
 
 	function save(next: NonNullable<typeof plan>) {
@@ -115,11 +125,7 @@
 		if (!plan) return;
 		const parsed = Number(value.replace(',', '.'));
 		if (!Number.isFinite(parsed) || parsed <= 0) return;
-		save(
-			updateMesocycle(plan, meso.plan.id, {
-				anchor1rm: { ...meso.plan.anchor1rm, [exercise]: parsed }
-			})
-		);
+		save(markAnchorManual(plan, meso.plan.id, exercise, parsed));
 	}
 
 	function handleMicroIntensity(mesoId: string, microId: string, value: string) {
@@ -137,7 +143,8 @@
 				meso.plan.id,
 				mesoExerciseNames(meso),
 				get(workoutView).entries,
-				meso.plan.startDate
+				meso.plan.startDate,
+				meso.plan.endDate
 			)
 		);
 	}
@@ -182,7 +189,8 @@
 		<h2>Мезо- и микроциклы</h2>
 		<p class="muted">
 			<strong>Микроцикл</strong> — пара A + B. <strong>Мезоцикл</strong> — блок из ~{MESOCYCLE_TARGET_MICROS}
-			микроциклов. У каждого упражнения свой <strong>протокол %1ПМ</strong> (линейный, стабильный и т.д.).
+			микроциклов. Якорный 1ПМ — на <strong>старт</strong> блока (лучший Эпли до первой
+			тренировки мезо, т.е. с учётом прошлого блока). Внутри мезо якорь не меняется.
 		</p>
 	</div>
 	<div class="intro-actions">
@@ -191,6 +199,9 @@
 		{:else}
 			<button type="button" class="ghost" onclick={() => (editMode = !editMode)}>
 				{editMode ? 'Готово' : 'Редактировать'}
+			</button>
+			<button type="button" class="ghost" onclick={() => refreshMesoAnchorsFromData(true)}>
+				Пересчитать 1ПМ
 			</button>
 			<button type="button" class="ghost" onclick={() => (showProtocolEditor = !showProtocolEditor)}>
 				{showProtocolEditor ? 'Скрыть протокол' : 'Шаблон протокола'}
@@ -352,7 +363,7 @@
 					</div>
 				</div>
 
-				{#if Object.keys(meso.plan.anchor1rm).length > 0 || editMode}
+				{#if Object.keys(meso.anchorInfo).length > 0 || editMode}
 					<div class="exercises-block">
 						<div class="exercises-head">
 							<span class="anchors-label">Упражнения и протоколы</span>
@@ -363,7 +374,7 @@
 							{/if}
 						</div>
 						<div class="exercise-rows">
-							{#each Object.entries(meso.plan.anchor1rm) as [exercise, value]}
+							{#each Object.entries(meso.anchorInfo) as [exercise, info]}
 								<div class="exercise-row">
 									<span class="exercise-name" title={exercise}>{shortExerciseName(exercise)}</span>
 									<span class="anchor-value">
@@ -373,11 +384,21 @@
 												type="number"
 												step="0.5"
 												class="anchor-input"
-												value={value}
+												value={info.anchor}
 												onchange={(e) => handleAnchor1rm(meso, exercise, e.currentTarget.value)}
 											/>
 										{:else}
-											<strong>{fmtNum(value)}</strong> кг
+											<strong>{fmtNum(info.anchor)}</strong> кг
+										{/if}
+									</span>
+									<span class="anchor-meta muted">
+										{anchorSourceLabel(info)}
+										{#if info.anchorDate}
+											· {formatDateRu(info.anchorDate)}
+										{/if}
+										{#if info.peakInMeso != null && info.peakInMeso > info.anchor}
+											· пик {fmtNum(info.peakInMeso)} кг
+											{#if info.peakDate}({formatDateRu(info.peakDate)}){/if}
 										{/if}
 									</span>
 									{#if editMode && plan}
@@ -825,6 +846,12 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.25rem;
+	}
+
+	.anchor-meta {
+		font-size: 0.72rem;
+		flex: 1;
+		min-width: 8rem;
 	}
 
 	.proto-badge {

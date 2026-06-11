@@ -4,6 +4,90 @@ export function epley1rm(weight: number, reps: number): number {
 	return weight * (1 + reps / 30);
 }
 
+export type Best1rmHit = {
+	value: number;
+	weight: number;
+	reps: number;
+	date: string;
+};
+
+function best1rmFromEntries(
+	entries: WorkoutEntry[],
+	exercise: string,
+	predicate: (date: string) => boolean
+): Best1rmHit | null {
+	let best: Best1rmHit | null = null;
+	for (const entry of entries) {
+		if (entry.exercise !== exercise || !predicate(entry.date)) continue;
+		for (const [weight, reps] of entry.sets) {
+			const value = epley1rm(weight, reps);
+			if (!best || value > best.value) {
+				best = {
+					value: Math.round(value * 10) / 10,
+					weight,
+					reps,
+					date: entry.date
+				};
+			}
+		}
+	}
+	return best;
+}
+
+/** Лучший 1ПМ (Эпли) строго до даты (не включая день). */
+export function best1rmBeforeDate(
+	entries: WorkoutEntry[],
+	exercise: string,
+	beforeDate: string
+): Best1rmHit | null {
+	return best1rmFromEntries(entries, exercise, (date) => date < beforeDate);
+}
+
+/** Лучший 1ПМ в диапазоне дат включительно. */
+export function best1rmInRange(
+	entries: WorkoutEntry[],
+	exercise: string,
+	startDate: string,
+	endDate: string
+): Best1rmHit | null {
+	return best1rmFromEntries(
+		entries,
+		exercise,
+		(date) => date >= startDate && date <= endDate
+	);
+}
+
+export type MesoAnchorSource = 'prior' | 'in_meso' | 'manual';
+
+export type MesoAnchor1rm = {
+	value: number;
+	source: MesoAnchorSource;
+	/** Дата сета, из которого взят 1ПМ. */
+	asOfDate: string | null;
+};
+
+/**
+ * Якорь на старт мезоцикла:
+ * 1) лучший 1ПМ до начала блока (включая прошлый мезо);
+ * 2) если истории нет — лучший за текущий мезо (первый блок).
+ */
+export function resolveMesoAnchor1rm(
+	entries: WorkoutEntry[],
+	exercise: string,
+	mesoStart: string,
+	mesoEnd: string
+): MesoAnchor1rm | null {
+	const prior = best1rmBeforeDate(entries, exercise, mesoStart);
+	if (prior) {
+		return { value: prior.value, source: 'prior', asOfDate: prior.date };
+	}
+	const inMeso = best1rmInRange(entries, exercise, mesoStart, mesoEnd);
+	if (inMeso) {
+		return { value: inMeso.value, source: 'in_meso', asOfDate: inMeso.date };
+	}
+	return null;
+}
+
 export type ProtocolPhase = {
 	id: string;
 	label: string;
@@ -56,19 +140,13 @@ export function intensityPctOf1rm(weight: number, anchor1rm: number): number | n
 	return Math.round((weight / anchor1rm) * 1000) / 10;
 }
 
+/** @deprecated используй best1rmBeforeDate */
 export function anchor1rmBeforeDate(
 	entries: WorkoutEntry[],
 	exercise: string,
 	beforeDate: string
 ): number | null {
-	let best = 0;
-	for (const entry of entries) {
-		if (entry.exercise !== exercise || entry.date >= beforeDate) continue;
-		for (const [weight, reps] of entry.sets) {
-			best = Math.max(best, epley1rm(weight, reps));
-		}
-	}
-	return best > 0 ? Math.round(best * 10) / 10 : null;
+	return best1rmBeforeDate(entries, exercise, beforeDate)?.value ?? null;
 }
 
 export type SessionIntensity = {
