@@ -1,33 +1,33 @@
 <script lang="ts">
 	import { base } from '$app/paths';
-	import { page } from '$app/stores';
+	import { browser } from '$app/environment';
+	import { page } from '$app/state';
 	import { mesocyclePlanForDate, microcyclePlanForDate, exerciseTargetOnMicro } from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
-	import { deleteSession, workoutView } from '$lib/workout-store';
+	import { deleteSession, workoutStore } from '$lib/workout-store';
 
-	let selectedDate = $state(todayIso());
+	let datePick = $state(todayIso());
 	let busyId = $state<string | null>(null);
 	let error = $state('');
 
-	$effect(() => {
-		const fromUrl = $page.url.searchParams.get('date');
-		if (fromUrl) selectedDate = fromUrl;
-	});
+	const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
+	const selectedDate = $derived(urlDate ?? datePick);
+	const view = $derived(workoutStore.view);
 
-	const trainingDay = $derived($workoutView.microcycles.byDate.get(selectedDate) ?? null);
-	const mesocycle = $derived(mesocyclePlanForDate($workoutView.cyclePlanView, selectedDate));
+	const trainingDay = $derived(view.microcycles.byDate.get(selectedDate) ?? null);
+	const mesocycle = $derived(mesocyclePlanForDate(view.cyclePlanView, selectedDate));
 	const microcycle = $derived(
 		mesocycle ? microcyclePlanForDate(mesocycle, selectedDate) : null
 	);
 	const template = $derived(
 		trainingDay
-			? ($workoutView.microcycles.templates.find((item) => item.slot === trainingDay.slot) ?? null)
+			? (view.microcycles.templates.find((item) => item.slot === trainingDay.slot) ?? null)
 			: null
 	);
 
 	const entriesForDate = $derived(
-		$workoutView.entries
+		view.entries
 			.filter((entry) => entry.date === selectedDate)
 			.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
 	);
@@ -41,7 +41,7 @@
 			const anchor = mesocycle.anchorInfo[entry.exercise]?.anchor;
 			if (!anchor) continue;
 			const row = exerciseTargetOnMicro(
-				$workoutView.cyclePlanForCalc,
+				view.cyclePlanForCalc,
 				mesocycle.plan,
 				microcycle.plan,
 				entry.exercise,
@@ -54,7 +54,7 @@
 	});
 
 	const availableDates = $derived(
-		[...new Set($workoutView.entries.map((entry) => entry.date))].sort().reverse()
+		[...new Set(view.entries.map((entry) => entry.date))].sort().reverse()
 	);
 
 	async function removeEntry(id: string | undefined) {
@@ -79,9 +79,9 @@
 		</div>
 		<label class="date-field">
 			<span>Дата</span>
-			<input type="date" bind:value={selectedDate} list="workout-dates" />
+			<input type="date" value={selectedDate} oninput={(e) => (datePick = e.currentTarget.value)} list="workout-dates" />
 			<datalist id="workout-dates">
-				{#each availableDates as date}
+				{#each availableDates as date (date)}
 					<option value={date}></option>
 				{/each}
 			</datalist>
@@ -120,7 +120,7 @@
 		<p class="empty">Нет записей на {formatDateRu(selectedDate)}.</p>
 	{:else}
 		<div class="plan-list">
-			{#each entriesForDate as entry}
+			{#each entriesForDate as entry (entry.id ?? `${entry.exercise}-${entry.date}`)}
 				<article class="plan-item">
 					<div class="plan-head">
 						<h3>{entry.exercise}</h3>
@@ -162,7 +162,7 @@
 {/if}
 
 <section class="card muted meta">
-	Обновлено: {new Date($workoutView.updatedAt || Date.now()).toLocaleString('ru-RU')}
+	Обновлено: {new Date(view.updatedAt || Date.now()).toLocaleString('ru-RU')}
 </section>
 
 <style>

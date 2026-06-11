@@ -9,13 +9,15 @@
 		type MovementBlockId
 	} from '$lib/muscle-groups';
 	import { uniqueExercises } from '$lib/database';
-	import { workoutView } from '$lib/workout-store';
+	import { workoutStore } from '$lib/workout-store';
 
 	let selectedBlock = $state<MovementBlockId | null>(null);
 
+	const view = $derived(workoutStore.view);
+
 	const sessionCounts = $derived.by(() => {
 		const counts = new Map<string, number>();
-		for (const session of $workoutView.sessions) {
+		for (const session of view.sessions) {
 			counts.set(session.exercise, (counts.get(session.exercise) ?? 0) + 1);
 		}
 		return counts;
@@ -23,9 +25,9 @@
 
 	const overview = $derived(
 		buildBlockOverview(
-			uniqueExercises($workoutView.sessions),
-			$workoutView.summary,
-			$workoutView.trend,
+			uniqueExercises(view.sessions),
+			view.summary,
+			view.trend,
 			sessionCounts
 		)
 	);
@@ -37,7 +39,7 @@
 	);
 
 	const unmappedExercises = $derived(
-		uniqueExercises($workoutView.sessions).filter(
+		uniqueExercises(view.sessions).filter(
 			(exercise) => !overview.some((item) => item.exercises.some((row) => row.exercise === exercise))
 		)
 	);

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import SetEditor from '$lib/components/SetEditor.svelte';
 	import {
 		createSession,
@@ -8,7 +9,7 @@
 		uniqueExercises
 	} from '$lib/database';
 	import { formatDateRu, todayIso } from '$lib/format';
-	import { saveSession, syncState, workoutView } from '$lib/workout-store';
+	import { saveSession, workoutStore } from '$lib/workout-store';
 	import type { RowInput, WorkoutSession } from '$lib/types';
 
 	let exercise = $state('');
@@ -20,17 +21,17 @@
 	let error = $state('');
 	let busy = $state(false);
 
-	const exercises = $derived(uniqueExercises($workoutView.sessions));
-
-	let loadedParamId = $state<string | null>(null);
+	const view = $derived(workoutStore.view);
+	const exercises = $derived(uniqueExercises(view.sessions));
+	const editId = $derived.by(() => (browser ? page.url.searchParams.get('id') : null));
 
 	$effect(() => {
-		const id = $page.url.searchParams.get('id');
-		if (!id || id === loadedParamId) return;
-		const session = $workoutView.sessions.find((item) => item.id === id);
-		if (!session) return;
-		loadedParamId = id;
-		loadSession(session);
+		if (!editId) {
+			if (editingId) resetForm();
+			return;
+		}
+		const session = view.sessions.find((item) => item.id === editId);
+		if (session && editingId !== editId) loadSession(session);
 	});
 
 	function loadSession(session: WorkoutSession) {
@@ -110,7 +111,7 @@
 			<span>Упражнение</span>
 			<input bind:value={exercise} list="exercise-list" placeholder="Приседания со штангой на спине" />
 			<datalist id="exercise-list">
-				{#each exercises as name}
+				{#each exercises as name (name)}
 					<option value={name}></option>
 				{/each}
 			</datalist>
@@ -123,13 +124,13 @@
 
 		<SetEditor bind:row={mainRow} label="Основной блок" />
 
-		{#each extraRows as _, index}
+		{#each extraRows as _, index (index)}
 			<SetEditor bind:row={extraRows[index]} label="Дополнительный блок" onremove={() => removeExtraRow(index)} />
 		{/each}
 
 		<div class="form-actions">
 			<button type="button" class="ghost" onclick={addExtraRow}>+ дополнительный блок</button>
-			<button type="submit" class="primary" disabled={!previewSession || busy || $syncState.syncing}>
+			<button type="submit" class="primary" disabled={!previewSession || busy || workoutStore.sync.syncing}>
 				{busy ? 'Сохраняем...' : editingId ? 'Обновить' : 'Сохранить'}
 			</button>
 		</div>

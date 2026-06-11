@@ -54,7 +54,7 @@
 
 	{#if layout && layout.gaps.length > 0}
 		<ul class="gap-chips" class:compact>
-			{#each layout.gaps as gap}
+			{#each layout.gaps as gap (gap.startDate + gap.endDate)}
 				<li class="gap-chip" class:long={gap.long}>
 					<span class="gap-chip-label">{gap.label}</span>
 					<span class="gap-chip-dates">
@@ -74,7 +74,7 @@
 			role="img"
 			aria-label="График 1ПМ по датам: {title}"
 		>
-			{#each layout.dateTicks as tick}
+			{#each layout.dateTicks as tick (tick.date)}
 				<line
 					x1={tick.x}
 					y1={layout.plotTop}
@@ -85,7 +85,7 @@
 				<text x={tick.x} y={layout.height - 6} class="axis-label" text-anchor="middle">{tick.label}</text>
 			{/each}
 
-			{#each layout.gaps as gap}
+			{#each layout.gaps as gap (gap.startDate + gap.endDate)}
 				<rect
 					x={gap.startX}
 					y={layout.plotTop}
@@ -140,7 +140,7 @@
 
 		{#if !compact}
 			<ul class="trend-list">
-				{#each sortedPoints as point, index}
+				{#each sortedPoints as point, index (point.date)}
 					{#if index > 0}
 						{@const gap = Math.round(
 							(dateToMs(point.date) - dateToMs(sortedPoints[index - 1].date)) / 86400000

@@ -1,29 +1,29 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import { base } from '$app/paths';
 	import { uniqueExercises } from '$lib/database';
 	import { fmtNum, fmtSet, formatDateRu } from '$lib/format';
 	import { exerciseHistory } from '$lib/history';
-	import { workoutView } from '$lib/workout-store';
+	import { workoutStore } from '$lib/workout-store';
 
-	let exercise = $state('');
+	let exerciseLocal = $state('');
 	let query = $state('');
 	let sortOrder = $state<'new' | 'old'>('new');
 
-	const exercises = $derived(uniqueExercises($workoutView.sessions));
+	const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
+	const exercise = $derived(exerciseLocal || urlExercise || '');
+	const view = $derived(workoutStore.view);
+
+	const exercises = $derived(uniqueExercises(view.sessions));
 	const newestFirst = $derived(sortOrder === 'new');
 
 	const filteredExercises = $derived(
 		exercises.filter((name) => name.toLowerCase().includes(query.trim().toLowerCase()))
 	);
 
-	$effect(() => {
-		const fromUrl = $page.url.searchParams.get('exercise');
-		if (fromUrl && !exercise) exercise = fromUrl;
-	});
-
 	const history = $derived(
-		exercise.trim() ? exerciseHistory($workoutView.sessions, exercise.trim(), newestFirst) : []
+		exercise.trim() ? exerciseHistory(view.sessions, exercise.trim(), newestFirst) : []
 	);
 
 	const summary = $derived.by(() => {
@@ -60,12 +60,13 @@
 		<label>
 			<span>Упражнение</span>
 			<input
-				bind:value={exercise}
+				value={exercise}
+				oninput={(e) => (exerciseLocal = e.currentTarget.value)}
 				list="history-exercises"
 				placeholder="Начните вводить название..."
 			/>
 			<datalist id="history-exercises">
-				{#each exercises as name}
+				{#each exercises as name (name)}
 					<option value={name}></option>
 				{/each}
 			</datalist>
@@ -78,8 +79,8 @@
 
 	{#if query.trim() && !exercise.trim()}
 		<div class="exercise-chips">
-			{#each filteredExercises.slice(0, 12) as name}
-				<button type="button" class="chip" onclick={() => (exercise = name)}>{name}</button>
+			{#each filteredExercises.slice(0, 12) as name (name)}
+				<button type="button" class="chip" onclick={() => (exerciseLocal = name)}>{name}</button>
 			{/each}
 		</div>
 	{/if}
@@ -114,7 +115,7 @@
 	<section class="card muted">Нет записей для «{exercise}».</section>
 {:else}
 	<section class="timeline">
-		{#each history as item}
+		{#each history as item (item.session.id)}
 			<article class="card session-card">
 				<div class="session-head">
 					<div>

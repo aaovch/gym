@@ -1,42 +1,30 @@
 <script lang="ts">
 	import '../app.css';
-	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { getGitHubToken, setGitHubToken } from '$lib/auth';
-	import {
-		bootstrapWorkoutStore,
-		connectGitHub,
-		pushToGitHub,
-		resetToBundled,
-		syncState
-	} from '$lib/workout-store';
+	import { connectGitHub, pushToGitHub, resetToBundled, workoutStore } from '$lib/workout-store';
 
 	let { data, children } = $props();
 
 	let githubToken = $state(getGitHubToken());
 	let showSettings = $state(false);
 
-	bootstrapWorkoutStore(data.bundled);
+	$effect(() => {
+		workoutStore.bootstrap(data.bundled);
+	});
+
+	$effect(() => {
+		workoutStore.connectIfTokenSaved();
+	});
 
 	const sourceLabel = $derived(
-		$syncState.source === 'github'
+		workoutStore.sync.source === 'github'
 			? 'GitHub'
-			: $syncState.source === 'local'
+			: workoutStore.sync.source === 'local'
 				? 'локально в браузере'
 				: 'сборка сайта'
 	);
-
-	onMount(async () => {
-		const token = getGitHubToken();
-		if (token) {
-			try {
-				await connectGitHub(token);
-			} catch {
-				// keep bundled snapshot
-			}
-		}
-	});
 
 	const tabs = [
 		{ href: `${base}/`, label: 'Сегодня', exact: true },
@@ -50,14 +38,13 @@
 	async function saveToken() {
 		setGitHubToken(githubToken);
 		if (!githubToken.trim()) {
-			syncState.update((state) => ({
-				...state,
+			workoutStore.patchSync({
 				sha: null,
 				githubLogin: null,
 				syncing: false,
 				error: '',
 				message: 'Token удалён. Данные остаются в браузере.'
-			}));
+			});
 			return;
 		}
 		await connectGitHub(githubToken);
@@ -73,16 +60,18 @@
 		<div>
 			<p class="eyebrow">aaovch / gym</p>
 			<h1>План тренировок</h1>
-			<p class="sync-note">Данные: {sourceLabel}{#if $syncState.githubLogin} · {$syncState.githubLogin}{/if}</p>
+			<p class="sync-note">
+				Данные: {sourceLabel}{#if workoutStore.sync.githubLogin} · {workoutStore.sync.githubLogin}{/if}
+			</p>
 		</div>
 		<div class="header-side">
 			<nav class="tabs">
-				{#each tabs as tab}
+				{#each tabs as tab (tab.href)}
 					<a
 						href={tab.href}
 						class:active={tab.exact
-							? $page.url.pathname === base || $page.url.pathname === `${base}/`
-							: $page.url.pathname.startsWith(tab.href)}
+							? page.url.pathname === base || page.url.pathname === `${base}/`
+							: page.url.pathname.startsWith(tab.href)}
 					>
 						{tab.label}
 					</a>
@@ -105,11 +94,11 @@
 			</p>
 			<div class="settings-row">
 				<input type="password" bind:value={githubToken} placeholder="github_pat_..." />
-				<button type="button" class="primary" onclick={saveToken} disabled={$syncState.syncing}>
-					{$syncState.syncing ? 'Подключаем...' : 'Сохранить token'}
+				<button type="button" class="primary" onclick={saveToken} disabled={workoutStore.sync.syncing}>
+					{workoutStore.sync.syncing ? 'Подключаем...' : 'Сохранить token'}
 				</button>
 				{#if githubToken.trim()}
-					<button type="button" class="ghost" onclick={syncNow} disabled={$syncState.syncing}>
+					<button type="button" class="ghost" onclick={syncNow} disabled={workoutStore.sync.syncing}>
 						Отправить в GitHub
 					</button>
 				{/if}
@@ -117,11 +106,11 @@
 					Сбросить локальные
 				</button>
 			</div>
-			{#if $syncState.message}
-				<p class="success">{$syncState.message}</p>
+			{#if workoutStore.sync.message}
+				<p class="success">{workoutStore.sync.message}</p>
 			{/if}
-			{#if $syncState.error}
-				<p class="error">{$syncState.error}</p>
+			{#if workoutStore.sync.error}
+				<p class="error">{workoutStore.sync.error}</p>
 			{/if}
 		</section>
 	{/if}

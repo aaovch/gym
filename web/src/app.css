@@ -93,31 +93,31 @@ tr:last-child td {
 }
 
 @media (max-width: 720px) {
-	table,
-	thead,
-	tbody,
-	th,
-	td,
-	tr {
+	.stack-table,
+	.stack-table thead,
+	.stack-table tbody,
+	.stack-table th,
+	.stack-table td,
+	.stack-table tr {
 		display: block;
 	}
 
-	thead {
+	.stack-table thead {
 		display: none;
 	}
 
-	tr {
+	.stack-table tr {
 		margin-bottom: 1rem;
 		padding-bottom: 0.75rem;
 		border-bottom: 1px solid var(--border);
 	}
 
-	td {
+	.stack-table td {
 		border-bottom: none;
 		padding: 0.25rem 0;
 	}
 
-	td::before {
+	.stack-table td::before {
 		content: attr(data-label);
 		display: block;
 		font-size: 0.75rem;

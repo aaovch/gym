@@ -24,9 +24,8 @@
 		importCyclePlanFromAuto,
 		refreshMesoAnchorsFromData,
 		saveCyclePlanState,
-		workoutView
+		workoutStore
 	} from '$lib/workout-store';
-	import { get } from 'svelte/store';
 
 	type MesoTab = 'plan' | 'workouts' | 'settings';
 
@@ -35,36 +34,31 @@
 	let showMoreActions = $state(false);
 	let showProtocolEditor = $state(false);
 	let mesoTab = $state<MesoTab>('plan');
-	let selectedMesoId = $state<string | null>(null);
+	let mesoPick = $state<string | null>(null);
 	let selectedTemplateId = $state(DEFAULT_PROTOCOL_TEMPLATE.id);
 
-	const { templates, cyclePlanView } = $derived($workoutView);
+	const view = $derived(workoutStore.view);
+	const templates = $derived(view.templates);
+	const cyclePlanView = $derived(view.cyclePlanView);
 	const plan = $derived(cyclePlanView.plan);
 	const displayMesos = $derived(cyclePlanView.mesocycles);
 	const usingManual = $derived(cyclePlanView.usingManualPlan);
 	const unassigned = $derived(cyclePlanView.unassignedDates);
 
-	const selectedMeso = $derived(
-		displayMesos.find((meso) => meso.plan.id === selectedMesoId) ??
-			displayMesos[displayMesos.length - 1] ??
-			null
-	);
+	const selectedMeso = $derived.by(() => {
+		if (displayMesos.length === 0) return null;
+		const pick =
+			mesoPick && displayMesos.some((meso) => meso.plan.id === mesoPick)
+				? mesoPick
+				: displayMesos[displayMesos.length - 1].plan.id;
+		return displayMesos.find((meso) => meso.plan.id === pick) ?? null;
+	});
 
 	const activeTemplate = $derived(
 		plan?.templates.find((item) => item.id === selectedTemplateId) ??
 			plan?.templates[0] ??
 			DEFAULT_PROTOCOL_TEMPLATE
 	);
-
-	$effect(() => {
-		if (displayMesos.length === 0) {
-			selectedMesoId = null;
-			return;
-		}
-		if (!selectedMesoId || !displayMesos.some((meso) => meso.plan.id === selectedMesoId)) {
-			selectedMesoId = displayMesos[displayMesos.length - 1].plan.id;
-		}
-	});
 
 	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
 		const names = new Set<string>();
@@ -102,12 +96,12 @@
 		let current = plan;
 		if (!current) {
 			importCyclePlanFromAuto();
-			current = get(workoutView).cyclePlan;
+			current = workoutStore.cyclePlan;
 		}
 		if (!current) return;
 		const next = createMesocycle(current);
 		save(next);
-		selectedMesoId = next.mesocycles[next.mesocycles.length - 1]?.id ?? null;
+		mesoPick = next.mesocycles[next.mesocycles.length - 1]?.id ?? null;
 		mesoTab = 'settings';
 	}
 
@@ -155,7 +149,7 @@
 				plan,
 				meso.plan.id,
 				mesoExerciseNames(meso),
-				get(workoutView).entries,
+				view.entries,
 				meso.plan.startDate,
 				meso.plan.endDate
 			)
@@ -198,7 +192,13 @@
 	function targetWeight(anchor: number, pct: number): number {
 		return Math.round((anchor * pct) / 100 * 2) / 2;
 	}
+
+	function shortProtocolName(name: string): string {
+		return name.replace('4×микро', '4μ').replace('~80%', '80%');
+	}
 </script>
+
+<div class="cycles-page">
 
 <!-- 1. Шапка -->
 <section class="card page-head">
@@ -329,13 +329,13 @@
 			{/if}
 		</div>
 		<div class="meso-tabs">
-			{#each displayMesos as meso}
+			{#each displayMesos as meso (meso.plan.id)}
 				<button
 					type="button"
 					class="meso-tab"
 					class:active={selectedMeso?.plan.id === meso.plan.id}
 					style="--meso-color: {mesocycleColor(meso.index)}"
-					onclick={() => (selectedMesoId = meso.plan.id)}
+					onclick={() => (mesoPick = meso.plan.id)}
 				>
 					<span class="meso-tab-num">#{meso.index}</span>
 					<span class="meso-tab-label">{meso.plan.label}</span>
@@ -421,6 +421,14 @@
 					</p>
 					<div class="matrix-wrap">
 						<table class="matrix">
+							<colgroup>
+								<col class="col-ex" />
+								<col class="col-rm" />
+								<col class="col-proto" />
+								{#each selectedMeso.microcycles as _micro}
+									<col class="col-micro" />
+								{/each}
+							</colgroup>
 							<thead>
 								<tr>
 									<th>Упражнение</th>
@@ -435,8 +443,10 @@
 								{#each selectedMeso.protocolMatrix as row}
 									<tr>
 										<td class="ex-name" title={row.exercise}>{shortExerciseName(row.exercise)}</td>
-										<td>{fmtNum(row.anchor)}</td>
-										<td class="proto-name">{row.templateName}</td>
+										<td class="rm-cell">{fmtNum(row.anchor)}</td>
+										<td class="proto-name" title={row.templateName}>
+											{shortProtocolName(row.templateName)}
+										</td>
 										{#each row.cells as cell}
 											<td class="pct" title={cell.label ?? ''}>
 												<span class="pct-val">{cell.pct != null ? `${cell.pct}%` : '—'}</span>
@@ -626,8 +636,16 @@
 		</section>
 	{/if}
 {/if}
+</div>
 
 <style>
+	.cycles-page {
+		display: grid;
+		gap: 1rem;
+		min-width: 0;
+		max-width: 100%;
+		overflow-x: clip;
+	}
 	h2,
 	h3,
 	h4 {
@@ -777,11 +795,18 @@
 		margin-bottom: 0.75rem;
 	}
 
+	.meso-picker {
+		min-width: 0;
+		overflow: hidden;
+	}
+
 	.meso-tabs {
 		display: flex;
 		gap: 0.5rem;
 		overflow-x: auto;
 		padding-bottom: 0.25rem;
+		max-width: 100%;
+		scrollbar-width: thin;
 	}
 
 	.meso-tab {
@@ -822,6 +847,8 @@
 
 	.meso-detail {
 		border-color: color-mix(in srgb, var(--meso-color) 35%, var(--border));
+		min-width: 0;
+		overflow: hidden;
 	}
 
 	.detail-head {
@@ -892,50 +919,96 @@
 
 	.matrix-wrap {
 		overflow-x: auto;
+		max-width: 100%;
+		margin: 0 -0.15rem;
+		padding: 0 0.15rem 0.25rem;
+		-webkit-overflow-scrolling: touch;
 	}
 
 	.matrix {
 		width: 100%;
-		border-collapse: collapse;
+		min-width: 36rem;
+		border-collapse: separate;
+		border-spacing: 0;
 		font-size: 0.82rem;
+		table-layout: fixed;
+	}
+
+	.matrix :global(col.col-ex) {
+		width: 5.5rem;
+	}
+
+	.matrix :global(col.col-rm) {
+		width: 3.25rem;
+	}
+
+	.matrix :global(col.col-proto) {
+		width: 5.5rem;
+	}
+
+	.matrix :global(col.col-micro) {
+		width: 4.25rem;
 	}
 
 	.matrix th,
 	.matrix td {
-		padding: 0.5rem 0.55rem;
+		padding: 0.55rem 0.45rem;
 		border: 1px solid var(--border);
 		text-align: center;
 		vertical-align: middle;
+		line-height: 1.25;
 	}
 
-	.matrix th {
+	.matrix thead th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
 		background: var(--surface-2);
 		color: var(--muted);
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 		font-weight: 600;
+	}
+
+	.matrix tbody tr:nth-child(even) td {
+		background: rgba(255, 255, 255, 0.02);
 	}
 
 	.matrix .ex-name {
 		text-align: left;
 		font-weight: 600;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.matrix .rm-cell {
+		font-weight: 600;
+		white-space: nowrap;
 	}
 
 	.matrix .proto-name {
 		text-align: left;
-		font-size: 0.72rem;
+		font-size: 0.7rem;
 		color: #c4b5fd;
-		max-width: 6rem;
+		line-height: 1.2;
+		word-break: break-word;
+	}
+
+	.matrix .pct {
+		padding: 0.4rem 0.3rem;
 	}
 
 	.matrix .pct small {
 		display: block;
+		margin-top: 0.15rem;
 		font-size: 0.68rem;
 		color: var(--muted);
 		font-weight: 400;
+		white-space: nowrap;
 	}
 
 	.matrix .pct-val {
+		display: block;
 		font-weight: 700;
 		color: var(--accent-2);
 	}
@@ -1012,6 +1085,7 @@
 		width: 100%;
 		font-size: 0.8rem;
 		border-collapse: collapse;
+		table-layout: fixed;
 	}
 
 	.result-table th,
@@ -1019,6 +1093,7 @@
 		padding: 0.35rem 0.45rem;
 		border-bottom: 1px solid var(--border);
 		text-align: left;
+		vertical-align: top;
 	}
 
 	.result-table th {

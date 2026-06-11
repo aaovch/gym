@@ -2,14 +2,16 @@
 	import { base } from '$app/paths';
 	import TrendChart from '$lib/components/TrendChart.svelte';
 	import { fmtNum, fmtSet, formatDateRu } from '$lib/format';
-	import { workoutView } from '$lib/workout-store';
+	import { workoutStore } from '$lib/workout-store';
 	import type { StrengthSummary, TrendPoint } from '$lib/types';
 
 	let query = $state('');
 	let selectedExercise = $state<string | null>(null);
 
+	const view = $derived(workoutStore.view);
+
 	const strengthSummary = $derived(
-		$workoutView.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
+		view.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
 	);
 
 	const filtered = $derived(
@@ -17,7 +19,7 @@
 	);
 
 	const trendPoints = $derived<TrendPoint[]>(
-		selectedExercise ? ($workoutView.trend[selectedExercise] ?? []) : []
+		selectedExercise ? (view.trend[selectedExercise] ?? []) : []
 	);
 
 	function selectExercise(name: string) {
@@ -35,7 +37,7 @@
 	</div>
 
 	<div class="table-wrap">
-		<table>
+		<table class="stack-table">
 			<thead>
 				<tr>
 					<th>Упражнение</th>
