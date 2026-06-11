@@ -20,6 +20,36 @@ export type TrainingThesesDoc = {
 	updatedAt: string;
 	groups: TrainingThesisGroup[];
 	matrices?: IntensityAdaptationMatrix[];
+	volumeGuides?: VolumeGuideTable[];
+	protocolGuides?: ProtocolGuide[];
+};
+
+export type ProtocolGuideWeek = {
+	id: string;
+	weekLabel: string;
+	loadLabel?: string;
+	prescription: string;
+	/** Дополнительное упражнение в недельной схеме (если есть). */
+	accessoryPrescription?: string | null;
+	/** Цель недели (например, зона скорости VBT). */
+	goal?: string;
+	intensityPct?: number;
+};
+
+export type ProtocolGuide = {
+	id: string;
+	protocolId: string;
+	title: string;
+	example?: string;
+	tasks?: string[];
+	strengths?: string[];
+	weaknesses?: string[];
+	recommendationsTitle?: string;
+	recommendations?: string[];
+	weeks?: ProtocolGuideWeek[];
+	primaryRowLabel?: string;
+	accessoryRowLabel?: string;
+	note?: string;
 };
 
 export type IntensityBand = {
@@ -45,6 +75,25 @@ export type IntensityAdaptationMatrix = {
 	rows: AdaptationIntensityRow[];
 };
 
+export type VolumeGuideRow = {
+	id: string;
+	percentLabel: string;
+	fromPct: number;
+	toPct: number | null;
+	repsPerSet: string;
+	optimalTotalReps: number;
+	totalRangeLabel: string;
+	totalRangeMin: number;
+	totalRangeMax: number;
+};
+
+export type VolumeGuideTable = {
+	id: string;
+	title: string;
+	note?: string;
+	rows: VolumeGuideRow[];
+};
+
 type ThesesLocalOverlay = {
 	disabledIds: string[];
 	customGroups: TrainingThesisGroup[];
@@ -53,7 +102,7 @@ type ThesesLocalOverlay = {
 const LOCAL_KEY = 'gym_training_theses';
 
 function emptyDoc(): TrainingThesesDoc {
-	return { version: 1, updatedAt: '', groups: [], matrices: [] };
+	return { version: 1, updatedAt: '', groups: [], matrices: [], volumeGuides: [], protocolGuides: [] };
 }
 
 function emptyOverlay(): ThesesLocalOverlay {
@@ -99,6 +148,12 @@ function mergeGroups(bundled: TrainingThesesDoc, overlay: ThesesLocalOverlay): T
 	return [...bundledGroups, ...customGroups];
 }
 
+function matchPercentBand(pct: number, fromPct: number, toPct: number | null): boolean {
+	if (pct < fromPct) return false;
+	if (toPct == null) return true;
+	return pct <= toPct;
+}
+
 class TrainingThesesStore {
 	bundled = $state.raw<TrainingThesesDoc>(emptyDoc());
 	overlay = $state.raw<ThesesLocalOverlay>(loadOverlay());
@@ -107,8 +162,29 @@ class TrainingThesesStore {
 
 	matrices = $derived.by(() => this.bundled.matrices ?? []);
 
+	volumeGuides = $derived.by(() => this.bundled.volumeGuides ?? []);
+
+	protocolGuides = $derived.by(() => this.bundled.protocolGuides ?? []);
+
 	bootstrap(doc: TrainingThesesDoc) {
 		this.bundled = doc;
+	}
+
+	protocolGuideFor(protocolId: string): ProtocolGuide | null {
+		return this.protocolGuides.find((item) => item.protocolId === protocolId) ?? null;
+	}
+
+	volumeGuideAtPct(tableId: string, pct: number): VolumeGuideRow | null {
+		const table = this.volumeGuides.find((item) => item.id === tableId);
+		if (!table) return null;
+		for (const row of [...table.rows].sort((a, b) => b.fromPct - a.fromPct)) {
+			if (row.toPct == null) {
+				if (pct >= row.fromPct) return row;
+				continue;
+			}
+			if (pct >= row.fromPct && pct <= row.toPct) return row;
+		}
+		return null;
 	}
 
 	/** Звёзды адаптации при заданном %1ПМ (для подсказок в плане). */

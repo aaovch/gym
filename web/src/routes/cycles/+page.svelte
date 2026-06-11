@@ -3,7 +3,7 @@
 	import {
 		addMicrocycle,
 		assignDate,
-		createMesocycle,
+		emptyCyclePlan,
 		markAnchorManual,
 		removeMesocycle,
 		removeMicrocycle,
@@ -18,6 +18,15 @@
 	} from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
+	import {
+		createMesocycleFromConstructor,
+		defaultMesoStartDate,
+		knownMesoExercises,
+		previewMesoPlan,
+		resolveExerciseAnchor,
+		suggestedMicroCount,
+		type MesoExerciseSetup
+	} from '$lib/meso-constructor';
 	import { DEFAULT_PROTOCOL_TEMPLATE } from '$lib/protocol';
 	import {
 		clearCyclePlanState,
@@ -30,16 +39,31 @@
 
 	type MesoTab = 'plan' | 'workouts' | 'settings';
 
+	type ConstructorRow = {
+		enabled: boolean;
+		protocolId: string;
+		anchor1rm: number;
+		manual: boolean;
+		anchorSource: string;
+	};
+
 	let editMode = $state(false);
 	let showHelp = $state(false);
 	let showMoreActions = $state(false);
 	let showProtocolEditor = $state(false);
+	let showMesoConstructor = $state(false);
 	let mesoTab = $state<MesoTab>('plan');
 	let mesoPick = $state<string | null>(null);
 	let selectedTemplateId = $state(DEFAULT_PROTOCOL_TEMPLATE.id);
 
+	let constructorLabel = $state('Новый блок');
+	let constructorStart = $state('');
+	let constructorMicroCount = $state(4);
+	let constructorSelection = $state<Map<string, ConstructorRow>>(new Map());
+
 	const view = $derived(workoutStore.view);
-	const templates = $derived(view.templates);
+	const protocolTemplates = $derived(view.protocolTemplates);
+	const workoutTemplates = $derived(view.workoutTemplates);
 	const cyclePlanView = $derived(view.cyclePlanView);
 	const plan = $derived(cyclePlanView.plan);
 	const displayMesos = $derived(cyclePlanView.mesocycles);
@@ -60,6 +84,121 @@
 			plan?.templates[0] ??
 			DEFAULT_PROTOCOL_TEMPLATE
 	);
+
+	const activeProtocolGuide = $derived(thesesStore.protocolGuideFor(activeTemplate.id));
+
+	const knownExercises = $derived(knownMesoExercises(view.entries, workoutTemplates));
+
+	const constructorExercises = $derived.by((): MesoExerciseSetup[] =>
+		[...constructorSelection.entries()]
+			.filter(([, row]) => row.enabled && row.anchor1rm > 0)
+			.map(([exercise, row]) => ({
+				exercise,
+				protocolId: row.protocolId,
+				anchor1rm: row.anchor1rm,
+				manual: row.manual
+			}))
+	);
+
+	const constructorPreview = $derived.by(() => {
+		if (!plan || !showMesoConstructor || constructorExercises.length === 0) return [];
+		return previewMesoPlan(plan, {
+			label: constructorLabel,
+			startDate: constructorStart || defaultMesoStartDate(view.entries),
+			microCount: constructorMicroCount,
+			defaultProtocolId: 'submax-effort',
+			exercises: constructorExercises
+		});
+	});
+
+	const constructorSuggestedMicros = $derived.by(() => {
+		if (!plan || constructorExercises.length === 0) return 4;
+		return suggestedMicroCount(plan.templates, constructorExercises);
+	});
+
+	function patchConstructorRow(exercise: string, patch: Partial<ConstructorRow>) {
+		const next = new Map(constructorSelection);
+		const current = next.get(exercise);
+		if (!current) return;
+		next.set(exercise, { ...current, ...patch });
+		constructorSelection = next;
+	}
+
+	function refreshConstructorAnchors(keepManual = true) {
+		const start = constructorStart || defaultMesoStartDate(view.entries);
+		const next = new Map(constructorSelection);
+		for (const [exercise, row] of next) {
+			if (keepManual && row.manual) continue;
+			const resolved = resolveExerciseAnchor(view.entries, exercise, start);
+			next.set(exercise, {
+				...row,
+				anchor1rm: resolved.value ?? row.anchor1rm,
+				anchorSource: resolved.source,
+				manual: false
+			});
+		}
+		constructorSelection = next;
+	}
+
+	function initConstructorSelection() {
+		const start = constructorStart || defaultMesoStartDate(view.entries);
+		const templateExercises = new Set(workoutTemplates.flatMap((item) => item.exercises));
+		const next = new Map<string, ConstructorRow>();
+
+		for (const exercise of knownExercises) {
+			const resolved = resolveExerciseAnchor(view.entries, exercise, start);
+			next.set(exercise, {
+				enabled: templateExercises.has(exercise),
+				protocolId: 'submax-effort',
+				anchor1rm: resolved.value ?? 0,
+				manual: false,
+				anchorSource: resolved.source
+			});
+		}
+		constructorSelection = next;
+	}
+
+	function ensurePlanForConstructor(): boolean {
+		if (plan) return true;
+		importCyclePlanFromAuto();
+		if (workoutStore.cyclePlan) return true;
+		saveCyclePlanState(emptyCyclePlan());
+		return Boolean(workoutStore.cyclePlan);
+	}
+
+	function openMesoConstructor() {
+		if (!ensurePlanForConstructor()) return;
+		editMode = true;
+		const blockNum = (workoutStore.cyclePlan?.mesocycles.length ?? 0) + 1;
+		constructorLabel = `Блок ${blockNum}`;
+		constructorStart = defaultMesoStartDate(view.entries);
+		constructorMicroCount = 4;
+		initConstructorSelection();
+		showMesoConstructor = true;
+	}
+
+	function closeMesoConstructor() {
+		showMesoConstructor = false;
+	}
+
+	function applySuggestedMicroCount() {
+		constructorMicroCount = constructorSuggestedMicros;
+	}
+
+	function confirmMesoConstructor() {
+		if (!plan || constructorExercises.length === 0) return;
+		const next = createMesocycleFromConstructor(plan, {
+			label: constructorLabel,
+			startDate: constructorStart || defaultMesoStartDate(view.entries),
+			microCount: constructorMicroCount,
+			defaultProtocolId: 'submax-effort',
+			exercises: constructorExercises
+		});
+		save(next);
+		mesoPick = next.mesocycles[next.mesocycles.length - 1]?.id ?? null;
+		mesoTab = 'plan';
+		showMesoConstructor = false;
+	}
 
 	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
 		const names = new Set<string>();
@@ -94,16 +233,7 @@
 	}
 
 	function handleCreateMeso() {
-		let current = plan;
-		if (!current) {
-			importCyclePlanFromAuto();
-			current = workoutStore.cyclePlan;
-		}
-		if (!current) return;
-		const next = createMesocycle(current);
-		save(next);
-		mesoPick = next.mesocycles[next.mesocycles.length - 1]?.id ?? null;
-		mesoTab = 'settings';
+		openMesoConstructor();
 	}
 
 	function handleRemoveMeso(mesoId: string) {
@@ -197,6 +327,168 @@
 
 <div class="cycles-page">
 
+{#if showMesoConstructor && plan}
+	<div class="constructor-backdrop" role="presentation" onclick={closeMesoConstructor}></div>
+	<section class="card meso-constructor" aria-labelledby="meso-constructor-title">
+		<div class="constructor-head">
+			<div>
+				<h3 id="meso-constructor-title">Конструктор мезоцикла</h3>
+				<p class="muted">Выберите упражнения, метод (протокол) и якорный 1ПМ — план % и кг строится автоматически.</p>
+			</div>
+			<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
+		</div>
+
+		<div class="constructor-meta">
+			<label>
+				<span>Название блока</span>
+				<input class="field-input" bind:value={constructorLabel} />
+			</label>
+			<label>
+				<span>Старт (для якоря 1ПМ)</span>
+				<input
+					class="field-input"
+					type="date"
+					bind:value={constructorStart}
+					onchange={() => refreshConstructorAnchors(true)}
+				/>
+			</label>
+			<label>
+				<span>Микроциклов (μ)</span>
+				<input
+					class="field-input narrow"
+					type="number"
+					min="1"
+					max="12"
+					bind:value={constructorMicroCount}
+				/>
+			</label>
+			<button type="button" class="btn small" onclick={applySuggestedMicroCount}>
+				μ = {constructorSuggestedMicros} (по протоколам)
+			</button>
+		</div>
+
+		<div class="constructor-table-wrap">
+			<table class="constructor-table">
+				<thead>
+					<tr>
+						<th></th>
+						<th>Упражнение</th>
+						<th>1ПМ, кг</th>
+						<th>Источник</th>
+						<th>Метод (протокол)</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each knownExercises as exercise (exercise)}
+						{@const row = constructorSelection.get(exercise)}
+						{#if row}
+							<tr class:disabled={!row.enabled}>
+								<td>
+									<input
+										type="checkbox"
+										checked={row.enabled}
+										onchange={(e) =>
+											patchConstructorRow(exercise, { enabled: e.currentTarget.checked })}
+									/>
+								</td>
+								<td>{exercise}</td>
+								<td>
+									<input
+										class="field-input"
+										type="number"
+										step="0.5"
+										value={row.anchor1rm || ''}
+										disabled={!row.enabled}
+										onchange={(e) => {
+											const parsed = Number(e.currentTarget.value.replace(',', '.'));
+											if (!Number.isFinite(parsed) || parsed <= 0) return;
+											patchConstructorRow(exercise, {
+												anchor1rm: parsed,
+												manual: true,
+												anchorSource: 'вручную'
+											});
+										}}
+									/>
+								</td>
+								<td class="muted source-cell">{row.anchorSource}</td>
+								<td>
+									<select
+										class="field-select"
+										value={row.protocolId}
+										disabled={!row.enabled}
+										onchange={(e) =>
+											patchConstructorRow(exercise, { protocolId: e.currentTarget.value })}
+									>
+										{#each plan.templates as tpl (tpl.id)}
+											<option value={tpl.id}>{tpl.name}</option>
+										{/each}
+									</select>
+								</td>
+							</tr>
+						{/if}
+					{/each}
+				</tbody>
+			</table>
+		</div>
+
+		{#if constructorPreview.length > 0}
+			<div class="constructor-preview">
+				<h4>Предпросмотр плана</h4>
+				<div class="matrix-wrap">
+					<table class="matrix constructor-preview-matrix">
+						<thead>
+							<tr>
+								<th>Упражнение</th>
+								<th>1ПМ</th>
+								<th>Метод</th>
+								{#each Array.from({ length: constructorMicroCount }, (_, index) => index + 1) as microIndex}
+									<th>μ{microIndex}</th>
+								{/each}
+							</tr>
+						</thead>
+						<tbody>
+							{#each constructorPreview as row}
+								<tr>
+									<td class="ex-name">{row.exercise}</td>
+									<td>{fmtNum(row.anchor)}</td>
+									<td class="proto-name" title={row.templateName}>{shortProtocolName(row.templateName)}</td>
+									{#each row.cells as cell}
+										<td class="pct">
+											{#if cell.pct != null}
+												<span class="pct-val">{cell.pct}%</span>
+												<small>{fmtNum(cell.targetWeight)} кг</small>
+												{#if cell.label}
+													<small class="muted phase-label">{cell.label}</small>
+												{/if}
+											{:else}
+												—
+											{/if}
+										</td>
+									{/each}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		{:else}
+			<p class="muted constructor-empty">Отметьте упражнения и задайте 1ПМ, чтобы увидеть план.</p>
+		{/if}
+
+		<div class="constructor-actions">
+			<button type="button" class="btn" onclick={closeMesoConstructor}>Отмена</button>
+			<button
+				type="button"
+				class="btn primary"
+				disabled={constructorExercises.length === 0}
+				onclick={confirmMesoConstructor}
+			>
+				Создать мезоцикл
+			</button>
+		</div>
+	</section>
+{/if}
+
 <!-- 1. Шапка -->
 <section class="card page-head">
 	<div>
@@ -206,8 +498,9 @@
 		</p>
 	</div>
 	<div class="head-actions">
+		<button type="button" class="btn primary" onclick={openMesoConstructor}>+ Мезоцикл</button>
 		{#if !usingManual}
-			<button type="button" class="btn primary" onclick={handleImport}>Импорт из авто</button>
+			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
 		{:else}
 			<button type="button" class="btn" class:active={editMode} onclick={() => (editMode = !editMode)}>
 				{editMode ? '✓ Редактирование' : 'Редактировать'}
@@ -237,7 +530,7 @@
 	<section class="card help-card">
 		<h3>Шаблоны тренировок A / B</h3>
 		<div class="ab-grid">
-			{#each templates as template}
+			{#each workoutTemplates as template}
 				<article class="ab-card" style="--slot-color: {slotColor(template.slot)}">
 					<span class="slot-badge">{template.slot}</span>
 					<strong>{slotLabel(template.slot)}</strong>
@@ -247,7 +540,27 @@
 			{/each}
 		</div>
 
-		{#if thesesStore.groups.length > 0 || thesesStore.matrices.length > 0}
+		{#if protocolTemplates.length > 0}
+			<div class="protocol-catalog">
+				<h3>Методы силовой подготовки (протоколы)</h3>
+				<p class="muted theses-note">
+					Назначаются каждому упражнению во вкладке «Настройки» мезоцикла. Стартовые %1ПМ и описания
+					можно править в «Шаблоны протокола».
+				</p>
+				<ul class="protocol-catalog-list">
+					{#each protocolTemplates as template (template.id)}
+						<li>
+							<strong>{template.name}</strong>
+							{#if template.description}
+								<span class="muted"> — {template.description}</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+
+		{#if thesesStore.groups.length > 0 || thesesStore.matrices.length > 0 || thesesStore.volumeGuides.length > 0 || thesesStore.protocolGuides.length > 0}
 			<div class="theses-block">
 				<h3>Тезисы и принципы</h3>
 				<p class="muted theses-note">
@@ -304,6 +617,137 @@
 						</div>
 					</article>
 				{/each}
+
+				{#each thesesStore.volumeGuides as guide (guide.id)}
+					<article class="thesis-group volume-guide-block">
+						<h4>{guide.title}</h4>
+						{#if guide.note}
+							<p class="muted thesis-source">{guide.note}</p>
+						{/if}
+						<div class="intensity-matrix-wrap">
+							<table class="intensity-matrix volume-guide-table">
+								<thead>
+									<tr>
+										<th>%</th>
+										<th>Повторения</th>
+										<th>Оптимально</th>
+										<th>Диапазон</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each guide.rows as row (row.id)}
+										<tr>
+											<th scope="row">{row.percentLabel}</th>
+											<td>{row.repsPerSet}</td>
+											<td><strong>{row.optimalTotalReps}</strong></td>
+											<td>{row.totalRangeLabel}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</article>
+				{/each}
+
+				{#each thesesStore.protocolGuides as guide (guide.id)}
+					<article class="thesis-group protocol-guide-block">
+						<h4>{guide.title}</h4>
+						{#if guide.note}
+							<p class="muted thesis-source">{guide.note}</p>
+						{/if}
+						{#if guide.example}
+							<p class="protocol-guide-example"><strong>Пример:</strong> {guide.example}</p>
+						{/if}
+						{#if guide.tasks?.length}
+							<div class="protocol-guide-section">
+								<h5>Задачи</h5>
+								<ul>
+									{#each guide.tasks as task}
+										<li>{task}</li>
+									{/each}
+								</ul>
+							</div>
+						{/if}
+						<div class="protocol-guide-columns">
+							{#if guide.strengths?.length}
+								<div class="protocol-guide-section">
+									<h5>Сильные стороны</h5>
+									<ul>
+										{#each guide.strengths as item}
+											<li>{item}</li>
+										{/each}
+									</ul>
+								</div>
+							{/if}
+							{#if guide.weaknesses?.length}
+								<div class="protocol-guide-section">
+									<h5>Минусы</h5>
+									<ul>
+										{#each guide.weaknesses as item}
+											<li>{item}</li>
+										{/each}
+									</ul>
+								</div>
+							{/if}
+						</div>
+						{#if guide.recommendations?.length}
+							<div class="protocol-guide-section">
+								<h5>{guide.recommendationsTitle ?? 'Рекомендации'}</h5>
+								<ul>
+									{#each guide.recommendations as item}
+										<li>{item}</li>
+									{/each}
+								</ul>
+							</div>
+						{/if}
+						{#if guide.weeks?.length}
+							<div class="intensity-matrix-wrap">
+								<table class="intensity-matrix protocol-week-table">
+									<thead>
+										<tr>
+											<th></th>
+											{#each guide.weeks as week (week.id)}
+												<th>{week.weekLabel}</th>
+											{/each}
+										</tr>
+									</thead>
+									<tbody>
+										{#if guide.weeks.some((week) => week.loadLabel)}
+											<tr>
+												<th scope="row">Нагрузка</th>
+												{#each guide.weeks as week (week.id)}
+													<td>{week.loadLabel}</td>
+												{/each}
+											</tr>
+										{/if}
+										<tr>
+											<th scope="row">{guide.primaryRowLabel ?? 'Основное упражнение'}</th>
+											{#each guide.weeks as week (week.id)}
+												<td>{week.prescription}</td>
+											{/each}
+										</tr>
+										{#if guide.weeks.some((week) => week.accessoryPrescription != null)}
+											<tr>
+												<th scope="row">{guide.accessoryRowLabel ?? 'Дополнительное упражнение'}</th>
+												{#each guide.weeks as week (week.id)}
+													<td>{week.accessoryPrescription ?? '—'}</td>
+												{/each}
+											</tr>
+										{/if}
+										{#if guide.weeks.some((week) => week.goal)}
+											<tr>
+												<th scope="row">Цель</th>
+												{#each guide.weeks as week (week.id)}
+													<td>{week.goal ?? '—'}</td>
+												{/each}
+											</tr>
+										{/if}
+									</tbody>
+								</table>
+							</div>
+						{/if}
+					</article>
+				{/each}
 			</div>
 		{/if}
 	</section>
@@ -312,7 +756,7 @@
 {#if showProtocolEditor && plan}
 	<section class="card">
 		<h3>Шаблоны протокола (% от 1ПМ)</h3>
-		<p class="muted">Назначаются каждому упражнению отдельно во вкладке «Настройки».</p>
+		<p class="muted">Методы силовой подготовки — назначаются каждому упражнению отдельно во вкладке «Настройки».</p>
 		<div class="template-picker">
 			<label>
 				<span>Редактировать</span>
@@ -323,6 +767,69 @@
 				</select>
 			</label>
 		</div>
+		{#if activeTemplate.description}
+			<p class="protocol-description muted">{activeTemplate.description}</p>
+		{/if}
+		{#if activeProtocolGuide}
+			<div class="protocol-guide-inline">
+				{#if activeProtocolGuide.example}
+					<p><strong>Пример:</strong> {activeProtocolGuide.example}</p>
+				{/if}
+				{#if activeProtocolGuide.recommendations?.length}
+					<ul class="protocol-guide-inline-list">
+						{#each activeProtocolGuide.recommendations as item}
+							<li>{item}</li>
+						{/each}
+					</ul>
+				{/if}
+				{#if activeProtocolGuide.weeks?.length}
+					<div class="intensity-matrix-wrap">
+						<table class="intensity-matrix protocol-week-table">
+							<thead>
+								<tr>
+									<th></th>
+									{#each activeProtocolGuide.weeks as week (week.id)}
+										<th>{week.weekLabel}</th>
+									{/each}
+								</tr>
+							</thead>
+							<tbody>
+								{#if activeProtocolGuide.weeks.some((week) => week.loadLabel)}
+									<tr>
+										<th scope="row">Нагрузка</th>
+										{#each activeProtocolGuide.weeks as week (week.id)}
+											<td>{week.loadLabel}</td>
+										{/each}
+									</tr>
+								{/if}
+								<tr>
+									<th scope="row">{activeProtocolGuide.primaryRowLabel ?? 'Основное упражнение'}</th>
+									{#each activeProtocolGuide.weeks as week (week.id)}
+										<td>{week.prescription}</td>
+									{/each}
+								</tr>
+								{#if activeProtocolGuide.weeks.some((week) => week.accessoryPrescription != null)}
+									<tr>
+										<th scope="row">{activeProtocolGuide.accessoryRowLabel ?? 'Дополнительное упражнение'}</th>
+										{#each activeProtocolGuide.weeks as week (week.id)}
+											<td>{week.accessoryPrescription ?? '—'}</td>
+										{/each}
+									</tr>
+								{/if}
+								{#if activeProtocolGuide.weeks.some((week) => week.goal)}
+									<tr>
+										<th scope="row">Цель</th>
+										{#each activeProtocolGuide.weeks as week (week.id)}
+											<td>{week.goal ?? '—'}</td>
+										{/each}
+									</tr>
+								{/if}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</div>
+		{/if}
 		<div class="phase-grid">
 			{#each activeTemplate.phases as phase, index}
 				<div class="phase-card">
@@ -372,17 +879,20 @@
 {#if displayMesos.length === 0}
 	<section class="card empty-state">
 		<h3>Нет данных о циклах</h3>
-		<p class="muted">Импортируй автоопределение из тренировок, чтобы увидеть мезо- и микроциклы.</p>
-		{#if !usingManual}
-			<button type="button" class="btn primary" onclick={handleImport}>Импорт из авто</button>
-		{/if}
+		<p class="muted">Создай мезоцикл в конструкторе или импортируй автоопределение из тренировок.</p>
+		<div class="empty-actions">
+			<button type="button" class="btn primary" onclick={openMesoConstructor}>Конструктор мезоцикла</button>
+			{#if !usingManual}
+				<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
+			{/if}
+		</div>
 	</section>
 {:else}
 	<section class="card meso-picker">
 		<div class="picker-head">
 			<h3>Мезоциклы</h3>
 			{#if editMode && usingManual}
-				<button type="button" class="btn small primary" onclick={handleCreateMeso}>+ Новый</button>
+				<button type="button" class="btn small primary" onclick={openMesoConstructor}>+ Новый</button>
 			{/if}
 		</div>
 		<div class="meso-tabs">
@@ -825,6 +1335,96 @@
 		margin-top: 0.75rem;
 	}
 
+	.protocol-catalog {
+		margin-top: 1.25rem;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--border);
+	}
+
+	.protocol-catalog h3 {
+		margin: 0 0 0.35rem;
+	}
+
+	.protocol-catalog-list {
+		margin: 0.75rem 0 0;
+		padding-left: 1.2rem;
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.protocol-catalog-list li {
+		line-height: 1.35;
+	}
+
+	.protocol-description {
+		margin: 0.75rem 0 0;
+		font-size: 0.88rem;
+		line-height: 1.4;
+	}
+
+	.protocol-guide-inline {
+		margin-top: 0.85rem;
+		padding: 0.85rem 0.95rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		font-size: 0.86rem;
+		line-height: 1.4;
+	}
+
+	.protocol-guide-inline p {
+		margin: 0 0 0.65rem;
+	}
+
+	.protocol-guide-inline-list {
+		margin: 0 0 0.75rem;
+		padding-left: 1.15rem;
+		display: grid;
+		gap: 0.3rem;
+	}
+
+	.protocol-guide-example {
+		margin: 0 0 0.75rem;
+		font-size: 0.88rem;
+	}
+
+	.protocol-guide-section h5 {
+		margin: 0 0 0.35rem;
+		font-size: 0.82rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--muted);
+	}
+
+	.protocol-guide-section ul {
+		margin: 0;
+		padding-left: 1.15rem;
+		display: grid;
+		gap: 0.3rem;
+	}
+
+	.protocol-guide-section + .protocol-guide-section {
+		margin-top: 0.75rem;
+	}
+
+	.protocol-guide-columns {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 0.85rem;
+		margin-top: 0.75rem;
+	}
+
+	.protocol-week-table th,
+	.protocol-week-table td {
+		text-align: center;
+		font-size: 0.82rem;
+	}
+
+	.protocol-week-table th[scope='row'] {
+		text-align: left;
+		white-space: nowrap;
+	}
+
 	.theses-block {
 		margin-top: 1.25rem;
 		padding-top: 1.25rem;
@@ -944,6 +1544,118 @@
 
 	.empty-state .btn {
 		margin-top: 1rem;
+	}
+
+	.empty-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		justify-content: center;
+		margin-top: 1rem;
+	}
+
+	.constructor-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.55);
+		z-index: 40;
+	}
+
+	.meso-constructor {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		z-index: 41;
+		transform: translate(-50%, -50%);
+		width: min(960px, calc(100vw - 1.5rem));
+		max-height: calc(100vh - 2rem);
+		overflow: auto;
+		padding: 1.1rem 1.15rem 1rem;
+	}
+
+	.constructor-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.constructor-head h3 {
+		margin: 0 0 0.25rem;
+	}
+
+	.constructor-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		align-items: flex-end;
+		margin-bottom: 1rem;
+	}
+
+	.constructor-meta label {
+		display: grid;
+		gap: 0.25rem;
+		font-size: 0.78rem;
+		color: var(--muted);
+	}
+
+	.constructor-table-wrap {
+		overflow: auto;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		margin-bottom: 1rem;
+	}
+
+	.constructor-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.82rem;
+	}
+
+	.constructor-table th,
+	.constructor-table td {
+		padding: 0.45rem 0.5rem;
+		border-bottom: 1px solid var(--border);
+		vertical-align: middle;
+	}
+
+	.constructor-table thead th {
+		background: var(--surface-2);
+		text-align: left;
+		font-size: 0.72rem;
+		color: var(--muted);
+	}
+
+	.constructor-table tr.disabled td:not(:first-child) {
+		opacity: 0.45;
+	}
+
+	.constructor-table .source-cell {
+		font-size: 0.72rem;
+		white-space: nowrap;
+	}
+
+	.constructor-preview h4 {
+		margin: 0 0 0.5rem;
+		font-size: 0.92rem;
+	}
+
+	.constructor-preview-matrix .phase-label {
+		display: block;
+		margin-top: 0.15rem;
+	}
+
+	.constructor-empty {
+		margin: 0 0 1rem;
+	}
+
+	.constructor-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		padding-top: 0.5rem;
+		border-top: 1px solid var(--border);
 	}
 
 	.picker-head {

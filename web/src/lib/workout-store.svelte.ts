@@ -2,11 +2,12 @@ import { getGitHubToken } from './auth';
 import {
 	autoMesocyclesAsView,
 	buildCyclePlanView,
+	bundledProtocolTemplates,
+	ensureBundledProtocols,
 	importPlanFromAuto,
 	refreshAllMesoAnchors,
 	type CyclePlan
 } from './cycle-plan';
-import { DEFAULT_PROTOCOL_TEMPLATE, STABLE_PROTOCOL_TEMPLATE } from './protocol';
 import { sessionsToEntries } from './database';
 import { fetchWorkoutDatabase, saveWorkoutDatabase, verifyGitHubToken } from './github';
 import {
@@ -35,6 +36,16 @@ function emptyDatabase(): WorkoutDatabase {
 	return { version: 1, updatedAt: '', sessions: [] };
 }
 
+function normalizeLoadedCyclePlan(plan: CyclePlan | null): CyclePlan | null {
+	if (!plan) return null;
+	const merged = ensureBundledProtocols(plan);
+	const changed =
+		JSON.stringify(merged.templates) !== JSON.stringify(plan.templates) ||
+		merged.templates.length !== plan.templates.length;
+	if (changed) saveCyclePlan(merged);
+	return merged;
+}
+
 function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 	const entries = sessionsToEntries(database.sessions);
 	const computed = buildWorkoutData(entries);
@@ -45,12 +56,14 @@ function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 		cyclePlanView.usingManualPlan && cyclePlanView.mesocycles.length > 0
 			? cyclePlanView.mesocycles
 			: autoMesocyclesAsView(microcycles, entries);
-	const cyclePlanForCalc: CyclePlan = cyclePlan ?? {
-		version: 1,
-		updatedAt: '',
-		templates: [structuredClone(DEFAULT_PROTOCOL_TEMPLATE), structuredClone(STABLE_PROTOCOL_TEMPLATE)],
-		mesocycles: []
-	};
+	const cyclePlanForCalc: CyclePlan = cyclePlan
+		? ensureBundledProtocols(cyclePlan)
+		: {
+				version: 1,
+				updatedAt: '',
+				templates: bundledProtocolTemplates(),
+				mesocycles: []
+			};
 
 	return {
 		entries,
@@ -63,13 +76,15 @@ function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 		cyclePlanForCalc,
 		cyclePlanView: { ...cyclePlanView, mesocycles },
 		allDates,
-		templates: cyclePlanForCalc.templates
+		templates: cyclePlanForCalc.templates,
+		protocolTemplates: cyclePlanForCalc.templates,
+		workoutTemplates: microcycles.templates
 	};
 }
 
 class WorkoutStore {
 	database = $state.raw<WorkoutDatabase>(emptyDatabase());
-	cyclePlan = $state.raw<CyclePlan | null>(loadCyclePlan());
+	cyclePlan = $state.raw<CyclePlan | null>(normalizeLoadedCyclePlan(loadCyclePlan()));
 	sync = $state<SyncState>({
 		sha: null,
 		githubLogin: null,

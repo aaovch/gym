@@ -1,23 +1,25 @@
 import { dateToMs } from './chart-time';
 import {
+	bundledProtocolTemplates,
 	DEFAULT_PROTOCOL_TEMPLATE,
-	STABLE_PROTOCOL_TEMPLATE,
 	type MesoAnchor1rm,
 	type ProtocolPhase,
 	type ProtocolTemplate,
 	best1rmInRange,
+	isBundledProtocolStub,
 	phaseForMicro,
 	pickMesoExercises,
 	plannedSessionIntensity,
 	resolveMesoAnchor1rm,
 	sessionIntensity,
+	STRENGTH_PROTOCOL_TEMPLATES,
 	targetWeight
 } from './protocol';
 import type { MicrocycleOverview, TrainingDay } from './microcycle';
 import type { WorkoutEntry } from './types';
 
 export type { ProtocolPhase, ProtocolTemplate };
-export { DEFAULT_PROTOCOL_TEMPLATE, phaseForMicro, targetWeight } from './protocol';
+export { DEFAULT_PROTOCOL_TEMPLATE, bundledProtocolTemplates, phaseForMicro, targetWeight } from './protocol';
 
 export type MicrocyclePlan = {
 	id: string;
@@ -120,12 +122,38 @@ export function emptyCyclePlan(): CyclePlan {
 	return {
 		version: 1,
 		updatedAt: '',
-		templates: [
-			structuredClone(DEFAULT_PROTOCOL_TEMPLATE),
-			structuredClone(STABLE_PROTOCOL_TEMPLATE)
-		],
+		templates: bundledProtocolTemplates(),
 		mesocycles: []
 	};
+}
+
+/** Добавляет в план недостающие протоколы из каталога, сохраняя пользовательские и legacy-шаблоны. */
+export function ensureBundledProtocols(plan: CyclePlan): CyclePlan {
+	const existing = new Map(plan.templates.map((item) => [item.id, item]));
+	const ordered: ProtocolTemplate[] = [];
+
+	for (const bundled of STRENGTH_PROTOCOL_TEMPLATES) {
+		const current = existing.get(bundled.id);
+		if (!current) {
+			ordered.push(structuredClone(bundled));
+		} else if (isBundledProtocolStub(current)) {
+			ordered.push(structuredClone(bundled));
+		} else {
+			ordered.push(current);
+		}
+		existing.delete(bundled.id);
+	}
+
+	for (const template of plan.templates) {
+		if (existing.has(template.id)) ordered.push(existing.get(template.id)!);
+	}
+
+	const unchanged =
+		ordered.length === plan.templates.length &&
+		ordered.every((item, index) => JSON.stringify(item) === JSON.stringify(plan.templates[index]));
+	if (unchanged) return plan;
+
+	return touchPlan({ ...plan, templates: ordered });
 }
 
 function mesoExercisesFromPlan(meso: MesocyclePlan, entries: WorkoutEntry[]): string[] {
@@ -324,8 +352,9 @@ export function importPlanFromAuto(
 	existing?: CyclePlan | null
 ): CyclePlan {
 	const templates = existing?.templates?.length
-		? existing.templates
-		: [structuredClone(DEFAULT_PROTOCOL_TEMPLATE)];
+		? ensureBundledProtocols({ ...existing, templates: existing.templates, mesocycles: existing.mesocycles ?? [] })
+				.templates
+		: bundledProtocolTemplates();
 	const defaultTemplateId = templates[0].id;
 
 	const mesocycles: MesocyclePlan[] = overview.mesocycles.map((meso) => {
@@ -755,7 +784,7 @@ export function autoMesocyclesAsView(
 	overview: MicrocycleOverview,
 	entries: WorkoutEntry[]
 ): EnrichedMesocycle[] {
-	const templates = [DEFAULT_PROTOCOL_TEMPLATE, STABLE_PROTOCOL_TEMPLATE];
+	const templates = bundledProtocolTemplates();
 	const cyclePlan: CyclePlan = {
 		version: 1,
 		updatedAt: '',

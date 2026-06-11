@@ -5,6 +5,10 @@ export {
 	type AdaptationIntensityRow,
 	type IntensityAdaptationMatrix,
 	type IntensityBand,
+	type VolumeGuideRow,
+	type VolumeGuideTable,
+	type ProtocolGuide,
+	type ProtocolGuideWeek,
 	type TrainingThesesDoc,
 	type TrainingThesis,
 	type TrainingThesisGroup

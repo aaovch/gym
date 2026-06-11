@@ -102,12 +102,142 @@ export type ProtocolPhase = {
 export type ProtocolTemplate = {
 	id: string;
 	name: string;
+	/** Краткое описание метода — дополняется по мере проработки протокола. */
+	description?: string;
 	phases: ProtocolPhase[];
 };
 
-export const DEFAULT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+function strengthMethodTemplate(
+	id: string,
+	name: string,
+	intensityPct: number,
+	description: string
+): ProtocolTemplate {
+	return {
+		id,
+		name,
+		description,
+		phases: [{ id: `${id}-work`, label: 'Рабочий', intensityPct, microFrom: 1, microTo: 12 }]
+	};
+}
+
+/** Методы силовой подготовки — базовый каталог протоколов тренировки. */
+export const MAX_EFFORT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'max-effort',
+	name: 'Метод максимальных усилий',
+	description:
+		'Работа на пределе: 90–100% 1ПМ, суммарно 2–10 повторений за тренировку. Раз в мезоцикл — для силы, теста и авторегуляции.',
+	phases: [
+		{ id: 'me-w1', label: 'Лёгкая · 3×5', intensityPct: 65, microFrom: 1, microTo: 1 },
+		{ id: 'me-w2', label: 'Средняя · 5×5', intensityPct: 72.5, microFrom: 2, microTo: 2 },
+		{ id: 'me-w3', label: 'Тяжёлая · 5×3', intensityPct: 80, microFrom: 3, microTo: 3 },
+		{ id: 'me-w4', label: 'Тяжёлая · 3–5×3, 3ПМ', intensityPct: 90, microFrom: 4, microTo: 4 }
+	]
+};
+
+export const REPEATED_EFFORT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'repeated-effort',
+	name: 'Метод повторных усилий',
+	description:
+		'Подмаксимальный объём: 55–70% 1ПМ, суммарно 24–80 повторений. Для доп. движений и периодов, где не мешает основным задачам.',
+	phases: [
+		{ id: 're-w1', label: 'Лёгкая · 4×12', intensityPct: 60, microFrom: 1, microTo: 1 },
+		{ id: 're-w2', label: 'Средняя · 3×8 RIR-3', intensityPct: 60, microFrom: 2, microTo: 2 },
+		{ id: 're-w3', label: 'Тяжёлая · 3×9', intensityPct: 62.5, microFrom: 3, microTo: 3 },
+		{ id: 're-w4', label: 'Тяжёлая · 3×10', intensityPct: 65, microFrom: 4, microTo: 4 }
+	]
+};
+
+export const SUBMAX_EFFORT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'submax-effort',
+	name: 'Метод субмаксимальных усилий',
+	description:
+		'Большие, но не предельные веса: 65–85% 1ПМ, суммарно 15–36 повторений. Приоритетный метод силы; сильным атлетам — в комбинации с другими.',
+	phases: [
+		{ id: 'sm-w1', label: 'Средняя · 3×5', intensityPct: 67.5, microFrom: 1, microTo: 1 },
+		{ id: 'sm-w2', label: 'Средняя · 5×5', intensityPct: 70, microFrom: 2, microTo: 2 },
+		{ id: 'sm-w3', label: 'Средняя · 5×5', intensityPct: 72.5, microFrom: 3, microTo: 3 },
+		{ id: 'sm-w4', label: 'Тяжёлая · 5×5', intensityPct: 75, microFrom: 4, microTo: 4 }
+	]
+};
+
+export function isBundledProtocolStub(template: ProtocolTemplate): boolean {
+	return template.phases.length === 1 && template.phases[0].id === `${template.id}-work`;
+}
+
+export const DYNAMIC_EFFORT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'dynamic-effort',
+	name: 'Метод динамических усилий',
+	description:
+		'Взрывная работа: 55–65% 1ПМ (до 80%), суммарно 5–25 повторений, темп 11X1 / X1X1 / XXX1. Контроль скорости (VBT), резина/цепи 15–30%.',
+	phases: [
+		{ id: 'de-w1', label: 'Лёгкая · 8×3', intensityPct: 50, microFrom: 1, microTo: 1 },
+		{ id: 'de-w2', label: 'Лёгкая · 10×2', intensityPct: 50, microFrom: 2, microTo: 2 },
+		{ id: 'de-w3', label: 'Лёгкая · 10×2', intensityPct: 55, microFrom: 3, microTo: 3 },
+		{ id: 'de-w4', label: 'Лёгкая · 10×2', intensityPct: 55, microFrom: 4, microTo: 4 }
+	]
+};
+
+export const CLUSTER_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'cluster',
+	name: 'Кластерный метод',
+	description:
+		'Повышенная интенсивность: 75–90% 1ПМ, 15–36 повторений, пауза между повторами в сете (~30 с). Раз в 2 недели или раз в мезоцикл.',
+	phases: [
+		{ id: 'cl-w1', label: 'Средняя · 5×5', intensityPct: 70, microFrom: 1, microTo: 1 },
+		{ id: 'cl-w2', label: 'Средняя · 5×5 кластер', intensityPct: 75, microFrom: 2, microTo: 2 },
+		{ id: 'cl-w3', label: 'Тяжёлая · 3×5', intensityPct: 80, microFrom: 3, microTo: 3 },
+		{ id: 'cl-w4', label: 'Тяжёлая · 3×5 кластер', intensityPct: 85, microFrom: 4, microTo: 4 }
+	]
+};
+
+export const ISOMETRIC_MAX_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'isometric-max',
+	name: 'Изометрические максимальные усилия',
+	description:
+		'Статическое усилие 5–6 сек, 90–100% максимума, суммарно 9–15 «повторений». Динамометр повышает эффективность; можно применять часто.',
+	phases: [
+		{ id: 'im-w1', label: '3×3×5 сек', intensityPct: 90, microFrom: 1, microTo: 1 },
+		{ id: 'im-w2', label: '3×3×5 сек', intensityPct: 92.5, microFrom: 2, microTo: 2 },
+		{ id: 'im-w3', label: '3×2×5 сек', intensityPct: 95, microFrom: 3, microTo: 3 },
+		{ id: 'im-w4', label: '3×2×5 сек', intensityPct: 95, microFrom: 4, microTo: 4 }
+	]
+};
+
+export const ECCENTRIC_OVERLOAD_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'eccentric-overload',
+	name: 'Эксцентрическая сверх-нагрузка',
+	description:
+		'Акцент на негативной фазе 5–6 сек: 90–120% 1ПМ, 2–9 повторений (10–25 для подтягиваний). Основные движения — раз в 2 недели или раз в мезоцикл.',
+	phases: [
+		{ id: 'eo-w1', label: '5×5 RIR-2', intensityPct: 90, microFrom: 1, microTo: 1 },
+		{ id: 'eo-w2', label: '5×5, найти 5ПМ', intensityPct: 100, microFrom: 2, microTo: 2 },
+		{ id: 'eo-w3', label: '5×5 110% 5ПМ', intensityPct: 110, microFrom: 3, microTo: 3 },
+		{ id: 'eo-w4', label: '4×5 120% 5ПМ', intensityPct: 120, microFrom: 4, microTo: 4 }
+	]
+};
+
+export const STRENGTH_PROTOCOL_TEMPLATES: ProtocolTemplate[] = [
+	MAX_EFFORT_PROTOCOL_TEMPLATE,
+	REPEATED_EFFORT_PROTOCOL_TEMPLATE,
+	SUBMAX_EFFORT_PROTOCOL_TEMPLATE,
+	DYNAMIC_EFFORT_PROTOCOL_TEMPLATE,
+	CLUSTER_PROTOCOL_TEMPLATE,
+	ISOMETRIC_MAX_PROTOCOL_TEMPLATE,
+	ECCENTRIC_OVERLOAD_PROTOCOL_TEMPLATE
+];
+
+export function bundledProtocolTemplates(): ProtocolTemplate[] {
+	return STRENGTH_PROTOCOL_TEMPLATES.map((item) => structuredClone(item));
+}
+
+export const DEFAULT_PROTOCOL_TEMPLATE: ProtocolTemplate = STRENGTH_PROTOCOL_TEMPLATES[0];
+
+/** @deprecated оставлен для старых планов с линейной периодизацией */
+export const LEGACY_LINEAR_PROTOCOL_TEMPLATE: ProtocolTemplate = {
 	id: 'linear-4',
 	name: 'Линейный 4×микро',
+	description: 'Классическая линейная периодизация по микроциклам.',
 	phases: [
 		{ id: 'p1', label: 'Втягивание', intensityPct: 75, microFrom: 1, microTo: 1 },
 		{ id: 'p2', label: 'Накопление', intensityPct: 80, microFrom: 2, microTo: 2 },
@@ -116,12 +246,16 @@ export const DEFAULT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
 	]
 };
 
-/** Плоский протокол — одна рабочая интенсивность на весь мезоцикл. */
+/** @deprecated оставлен для старых планов */
 export const STABLE_PROTOCOL_TEMPLATE: ProtocolTemplate = {
 	id: 'stable-80',
 	name: 'Стабильный ~80%',
+	description: 'Одна рабочая интенсивность на весь мезоцикл.',
 	phases: [{ id: 's1', label: 'Рабочий', intensityPct: 80, microFrom: 1, microTo: 12 }]
 };
+
+/** @deprecated используй LEGACY_LINEAR_PROTOCOL_TEMPLATE */
+export const LINEAR_PROTOCOL_TEMPLATE = LEGACY_LINEAR_PROTOCOL_TEMPLATE;
 
 export function phaseForMicro(template: ProtocolTemplate, microIndex: number): ProtocolPhase | null {
 	return (
