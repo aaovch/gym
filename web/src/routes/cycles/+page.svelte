@@ -189,10 +189,6 @@
 		save(updateTemplate(plan, { ...activeTemplate, phases }));
 	}
 
-	function targetWeight(anchor: number, pct: number): number {
-		return Math.round((anchor * pct) / 100 * 2) / 2;
-	}
-
 	function shortProtocolName(name: string): string {
 		return name.replace('4×микро', '4μ').replace('~80%', '80%');
 	}
@@ -417,7 +413,7 @@
 			{#if mesoTab === 'plan'}
 				<div class="tab-panel">
 					<p class="panel-hint muted">
-						Якорный 1ПМ на старт блока · целевой вес = 1ПМ × % протокола
+						План (% и кг) · факт — пик %1ПМ за микроцикл (лучший подход)
 					</p>
 					<div class="matrix-wrap">
 						<table class="matrix">
@@ -448,11 +444,30 @@
 											{shortProtocolName(row.templateName)}
 										</td>
 										{#each row.cells as cell}
-											<td class="pct" title={cell.label ?? ''}>
-												<span class="pct-val">{cell.pct != null ? `${cell.pct}%` : '—'}</span>
-												{#if cell.pct != null}
-													<small>{fmtNum(targetWeight(row.anchor, cell.pct))} кг</small>
-												{/if}
+											<td
+												class="pct"
+												class:match={!cell.plannedOnly &&
+													cell.pct != null &&
+													cell.factMaxPct != null &&
+													Math.abs(cell.factMaxPct - cell.pct) <= 3}
+												title={cell.label ?? ''}
+											>
+												<div class="cell-plan">
+													<span class="cell-label">план</span>
+													<span class="pct-val">{cell.pct != null ? `${cell.pct}%` : '—'}</span>
+													{#if cell.targetWeight != null}
+														<small>{fmtNum(cell.targetWeight)} кг</small>
+													{/if}
+												</div>
+												<div class="cell-fact">
+													<span class="cell-label">факт</span>
+													{#if cell.plannedOnly || cell.factMaxPct == null}
+														<span class="fact-empty">—</span>
+													{:else}
+														<span class="fact-val">{fmtNum(cell.factMaxPct)}%</span>
+														<small>{fmtNum(cell.factMaxWeight)} кг</small>
+													{/if}
+												</div>
 											</td>
 										{/each}
 									</tr>
@@ -927,7 +942,7 @@
 
 	.matrix {
 		width: 100%;
-		min-width: 44rem;
+		min-width: 48rem;
 		border-collapse: separate;
 		border-spacing: 0;
 		font-size: 0.82rem;
@@ -947,7 +962,7 @@
 	}
 
 	.matrix :global(col.col-micro) {
-		width: 4.25rem;
+		width: 5.25rem;
 	}
 
 	.matrix th,
@@ -995,13 +1010,38 @@
 	}
 
 	.matrix .pct {
-		padding: 0.4rem 0.3rem;
+		padding: 0.35rem 0.25rem;
+		vertical-align: top;
+	}
+
+	.matrix .pct.match {
+		background: rgba(110, 231, 168, 0.08);
+	}
+
+	.matrix .cell-plan,
+	.matrix .cell-fact {
+		display: grid;
+		gap: 0.05rem;
+		justify-items: center;
+	}
+
+	.matrix .cell-fact {
+		margin-top: 0.35rem;
+		padding-top: 0.3rem;
+		border-top: 1px dashed var(--border);
+	}
+
+	.matrix .cell-label {
+		font-size: 0.58rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--muted);
 	}
 
 	.matrix .pct small {
 		display: block;
-		margin-top: 0.15rem;
-		font-size: 0.68rem;
+		font-size: 0.66rem;
 		color: var(--muted);
 		font-weight: 400;
 		white-space: nowrap;
@@ -1011,6 +1051,21 @@
 		display: block;
 		font-weight: 700;
 		color: var(--accent-2);
+	}
+
+	.matrix .fact-val {
+		display: block;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.matrix .fact-empty {
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+
+	.matrix .pct.match .fact-val {
+		color: var(--accent);
 	}
 
 	.micro-timeline {
