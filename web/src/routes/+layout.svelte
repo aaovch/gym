@@ -4,14 +4,28 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/stores';
 	import { getGitHubToken, setGitHubToken } from '$lib/auth';
-	import { connectGitHub, initWorkoutStore, syncState } from '$lib/workout-store';
+	import {
+		bootstrapWorkoutStore,
+		connectGitHub,
+		pushToGitHub,
+		resetToBundled,
+		syncState
+	} from '$lib/workout-store';
 
 	let { data, children } = $props();
 
 	let githubToken = $state(getGitHubToken());
 	let showSettings = $state(false);
 
-	initWorkoutStore(data.snapshot);
+	bootstrapWorkoutStore(data.bundled);
+
+	const sourceLabel = $derived(
+		$syncState.source === 'github'
+			? 'GitHub'
+			: $syncState.source === 'local'
+				? 'локально в браузере'
+				: 'сборка сайта'
+	);
 
 	onMount(async () => {
 		const token = getGitHubToken();
@@ -35,16 +49,21 @@
 	async function saveToken() {
 		setGitHubToken(githubToken);
 		if (!githubToken.trim()) {
-			syncState.set({
+			syncState.update((state) => ({
+				...state,
 				sha: null,
 				githubLogin: null,
 				syncing: false,
 				error: '',
-				message: 'Token удалён. Доступен только просмотр последней сборки сайта.'
-			});
+				message: 'Token удалён. Данные остаются в браузере.'
+			}));
 			return;
 		}
 		await connectGitHub(githubToken);
+	}
+
+	async function syncNow() {
+		await pushToGitHub(githubToken);
 	}
 </script>
 
@@ -53,9 +72,7 @@
 		<div>
 			<p class="eyebrow">aaovch / gym</p>
 			<h1>План тренировок</h1>
-			{#if $syncState.githubLogin}
-				<p class="sync-note">GitHub: {$syncState.githubLogin}</p>
-			{/if}
+			<p class="sync-note">Данные: {sourceLabel}{#if $syncState.githubLogin} · {$syncState.githubLogin}{/if}</p>
 		</div>
 		<div class="header-side">
 			<nav class="tabs">
@@ -78,16 +95,25 @@
 
 	{#if showSettings}
 		<section class="container card settings">
-			<h2>GitHub token</h2>
+			<h2>Синхронизация</h2>
 			<p class="muted">
-				Нужен для записи тренировок онлайн в <code>data/workouts.json</code>. Fine-grained token с
-				Contents: Read and write для репозитория <code>aaovch/gym</code>, или classic с scope
+				Все тренировки хранятся в JSON. Приложение сохраняет их локально в браузере. GitHub token
+				нужен только чтобы отправить копию в <code>data/workouts.json</code> репозитория и обновить
+				сайт. Fine-grained token: Contents Read and write для <code>aaovch/gym</code>, или classic
 				<code>repo</code>.
 			</p>
 			<div class="settings-row">
 				<input type="password" bind:value={githubToken} placeholder="github_pat_..." />
 				<button type="button" class="primary" onclick={saveToken} disabled={$syncState.syncing}>
 					{$syncState.syncing ? 'Подключаем...' : 'Сохранить token'}
+				</button>
+				{#if githubToken.trim()}
+					<button type="button" class="ghost" onclick={syncNow} disabled={$syncState.syncing}>
+						Отправить в GitHub
+					</button>
+				{/if}
+				<button type="button" class="ghost" onclick={() => resetToBundled(data.bundled)}>
+					Сбросить локальные
 				</button>
 			</div>
 			{#if $syncState.message}

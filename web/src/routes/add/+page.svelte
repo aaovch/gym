@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import SetEditor from '$lib/components/SetEditor.svelte';
-	import { getGitHubToken } from '$lib/auth';
 	import {
 		createSession,
 		emptyRowInput,
@@ -80,11 +79,6 @@
 
 	async function submit() {
 		if (!previewSession) return;
-		if (!getGitHubToken()) {
-			error = 'Сначала добавьте GitHub token в настройках (кнопка GitHub в шапке).';
-			return;
-		}
-
 		busy = true;
 		error = '';
 		status = '';
@@ -104,7 +98,7 @@
 	<div class="toolbar">
 		<div>
 			<h2>{editingId ? 'Редактировать тренировку' : 'Новая тренировка'}</h2>
-			<p class="muted">Подходы вводятся кнопками, данные сохраняются в JSON на GitHub.</p>
+			<p class="muted">Подходы вводятся кнопками, данные сохраняются в JSON локально.</p>
 		</div>
 		{#if editingId}
 			<button type="button" class="ghost" onclick={resetForm}>Новая запись</button>

@@ -15,14 +15,7 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
-TABLE_ROW_RE = re.compile(r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(.*?)\|.*$")
-CONT_ROW_RE = re.compile(r"^\|\s*\|\s*(.*?)\|.*$")
 SET_RE = re.compile(r"^\s*([\d.,]+)\s*[x×]\s*([\d.,]+)\s*$")
-
-
-def _normalize(cell: str) -> str:
-    """Trim spaces and trailing commas."""
-    return cell.strip().rstrip(",")
 
 
 def parse_sets_cell(cell: str) -> list[tuple[float, float]]:
@@ -39,65 +32,6 @@ def parse_sets_cell(cell: str) -> list[tuple[float, float]]:
         reps = float(reps_raw.replace(",", "."))
         result.append((weight, reps))
     return result
-
-
-def parse_markdown(md_text: str) -> list[dict]:
-    """
-    Parse the entire markdown file into entries:
-    [{exercise, date, parts: raw strings, sets: [(weight, reps), ...]}].
-    Continuation rows are merged into the same date entry.
-    """
-    entries: list[dict] = []
-    current_exercise: str | None = None
-    pending: dict | None = None
-    collecting = False
-
-    lines = md_text.splitlines()
-    for line in lines:
-        if line.startswith("### "):
-            if pending:
-                entries.append(pending)
-            current_exercise = line.replace("### ", "").strip()
-            pending = None
-            collecting = False
-            continue
-
-        m = TABLE_ROW_RE.match(line)
-        if m and current_exercise:
-            if pending:
-                entries.append(pending)
-            date_str, sets_cell = m.group(1), _normalize(m.group(2))
-            pending = {
-                "exercise": current_exercise,
-                "date": date_str,
-                "parts": [sets_cell] if sets_cell else [],
-            }
-            collecting = True
-            continue
-
-        if collecting and pending:
-            m2 = CONT_ROW_RE.match(line)
-            if m2:
-                more = _normalize(m2.group(1))
-                if more:
-                    pending["parts"].append(more)
-                continue
-            else:
-                entries.append(pending)
-                pending = None
-                collecting = False
-
-    if pending:
-        entries.append(pending)
-
-    for entry in entries:
-        parsed_sets: list[tuple[float, float]] = []
-        for cell in entry["parts"]:
-            parsed_sets.extend(parse_sets_cell(cell))
-        entry["sets"] = parsed_sets
-
-    # Keep only entries where sets were parsed
-    return [e for e in entries if e["sets"]]
 
 
 def epley_1rm(weight: float, reps: float) -> float:

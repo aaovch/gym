@@ -2,7 +2,6 @@
 	import { base } from '$app/paths';
 	import { formatDateRu, todayIso } from '$lib/format';
 	import { deleteSession, workoutView } from '$lib/workout-store';
-	import { getGitHubToken } from '$lib/auth';
 
 	let selectedDate = $state(todayIso());
 	let busyId = $state<string | null>(null);
@@ -19,10 +18,7 @@
 	);
 
 	async function removeEntry(id: string | undefined) {
-		if (!id || !getGitHubToken()) {
-			error = 'Для удаления нужен GitHub token в настройках.';
-			return;
-		}
+		if (!id) return;
 		busyId = id;
 		error = '';
 		try {
@@ -39,7 +35,7 @@
 	<div class="toolbar">
 		<div>
 			<h2>План на дату</h2>
-			<p class="muted">Все данные хранятся в JSON на GitHub.</p>
+			<p class="muted">Данные в JSON — локально в браузере, опционально в GitHub.</p>
 		</div>
 		<label class="date-field">
 			<span>Дата</span>
@@ -70,7 +66,7 @@
 							<span class="badge">{weight}×{reps}</span>
 						{/each}
 					</div>
-					{#if entry.id && getGitHubToken()}
+					{#if entry.id}
 						<button
 							type="button"
 							class="ghost danger"

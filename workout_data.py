@@ -1,44 +1,13 @@
-"""Shared workout database helpers (JSON source of truth)."""
+"""Workout JSON database helpers."""
 
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from workout_stats import parse_sets_cell
-
-COMMENT_RE = re.compile(r"\(([^)]+)\)\s*$")
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "workouts.json"
-
-
-def extract_comment(cell: str) -> str | None:
-    match = COMMENT_RE.search(cell.strip())
-    return match.group(1).strip() if match else None
-
-
-def part_to_row(part: str) -> dict:
-    comment = extract_comment(part)
-    cleaned = COMMENT_RE.sub("", part).strip()
-    sets = parse_sets_cell(cleaned if cleaned else part)
-    return {
-        "sets": [[weight, reps] for weight, reps in sets],
-        "comment": comment,
-    }
-
-
-def entry_to_session(entry: dict, session_id: str | None = None) -> dict:
-    rows = [part_to_row(part) for part in entry.get("parts", []) if part.strip()]
-    if not rows and entry.get("sets"):
-        rows = [{"sets": [[weight, reps] for weight, reps in entry["sets"]], "comment": None}]
-    return {
-        "id": session_id or str(uuid.uuid4()),
-        "exercise": entry["exercise"],
-        "date": entry["date"],
-        "rows": rows,
-    }
 
 
 def sessions_to_entries(sessions: list[dict]) -> list[dict]:
@@ -65,6 +34,20 @@ def sessions_to_entries(sessions: list[dict]) -> list[dict]:
             }
         )
     return entries
+
+
+def create_session(
+    exercise: str,
+    date: str,
+    rows: list[dict],
+    session_id: str | None = None,
+) -> dict:
+    return {
+        "id": session_id or str(uuid.uuid4()),
+        "exercise": exercise,
+        "date": date,
+        "rows": rows,
+    }
 
 
 def _format_weight(value: float) -> str:

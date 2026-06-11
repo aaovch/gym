@@ -49,15 +49,6 @@ export type TrendPoint = {
 	avgIntensity: number;
 };
 
-export type WorkoutSnapshot = {
-	generatedAt: string;
-	updatedAt?: string;
-	sessions: WorkoutSession[];
-	entries: WorkoutEntry[];
-	summary: StrengthSummary[];
-	trend: Record<string, TrendPoint[]>;
-};
-
 export type SetInput = {
 	weight: string;
 	reps: string;
