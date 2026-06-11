@@ -231,6 +231,19 @@ export function bundledProtocolTemplates(): ProtocolTemplate[] {
 	return STRENGTH_PROTOCOL_TEMPLATES.map((item) => structuredClone(item));
 }
 
+export function isBundledProtocolId(id: string): boolean {
+	return STRENGTH_PROTOCOL_TEMPLATES.some((item) => item.id === id);
+}
+
+export function isCustomProtocolId(id: string): boolean {
+	return id.startsWith('custom-');
+}
+
+export function bundledProtocolById(id: string): ProtocolTemplate | null {
+	const found = STRENGTH_PROTOCOL_TEMPLATES.find((item) => item.id === id);
+	return found ? structuredClone(found) : null;
+}
+
 export const DEFAULT_PROTOCOL_TEMPLATE: ProtocolTemplate = STRENGTH_PROTOCOL_TEMPLATES[0];
 
 /** @deprecated оставлен для старых планов с линейной периодизацией */

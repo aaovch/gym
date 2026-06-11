@@ -5,6 +5,13 @@
 	import { mesocyclePlanForDate, microcyclePlanForDate, exerciseTargetOnMicro } from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
+	import { thesesStore } from '$lib/training-theses';
+	import {
+		evaluateEntryVolume,
+		resolveVolumeAnchor1rm,
+		TRAINING_VOLUME_GUIDE_ID,
+		volumeCheckLabel
+	} from '$lib/volume-guide';
 	import { deleteSession, workoutStore } from '$lib/workout-store';
 
 	let datePick = $state(todayIso());
@@ -49,6 +56,28 @@
 				entry
 			);
 			if (row) hints.set(entry.exercise, row);
+		}
+		return hints;
+	});
+
+	const volumeGuideRows = $derived(
+		thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
+	);
+
+	const volumeHints = $derived.by(() => {
+		if (volumeGuideRows.length === 0) return new Map<string, NonNullable<ReturnType<typeof evaluateEntryVolume>>>();
+		const hints = new Map<string, NonNullable<ReturnType<typeof evaluateEntryVolume>>>();
+		for (const entry of entriesForDate) {
+			const mesoAnchor = mesocycle?.anchorInfo[entry.exercise]?.anchor;
+			const anchor = resolveVolumeAnchor1rm(
+				view.entries,
+				entry.exercise,
+				entry.date,
+				mesoAnchor,
+				entry.id
+			);
+			const check = evaluateEntryVolume(entry, anchor, volumeGuideRows);
+			if (check) hints.set(entry.exercise, check);
 		}
 		return hints;
 	});
@@ -139,6 +168,17 @@
 						<p class="protocol-hint" class:match={Math.abs(hint.maxPct - hint.targetPct) <= 3}>
 							{hint.protocolLabel}: 1ПМ {fmtNum(hint.anchor1rm)} кг · цель ~{fmtNum(hint.targetWeight)} кг
 							({hint.targetPct}%) · факт пик {fmtNum(hint.maxPct)}%
+						</p>
+					{/if}
+					{#if volumeHints.has(entry.exercise)}
+						{@const volume = volumeHints.get(entry.exercise)!}
+						<p
+							class="volume-hint"
+							class:ok={volume.status === 'ok'}
+							class:low={volume.status === 'low'}
+							class:high={volume.status === 'high'}
+						>
+							{volumeCheckLabel(volume)}
 						</p>
 					{/if}
 					{#if entry.id}
@@ -306,5 +346,23 @@
 
 	.protocol-hint.match {
 		color: var(--accent);
+	}
+
+	.volume-hint {
+		margin: 0 0 0.75rem;
+		font-size: 0.82rem;
+		color: var(--accent-2);
+	}
+
+	.volume-hint.ok {
+		color: var(--accent);
+	}
+
+	.volume-hint.low {
+		color: #fbbf24;
+	}
+
+	.volume-hint.high {
+		color: var(--danger);
 	}
 </style>

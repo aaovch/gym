@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-11T20:00:00.000Z",
+  "updatedAt": "2026-06-11T23:00:00.000Z",
   "groups": [
     {
       "id": "strength-training-methods",
@@ -99,6 +99,277 @@
           "text": "Восстановление до базового уровня без суперкомпенсации — поддержание, стагнация",
           "tags": ["maintenance", "stagnation"],
           "note": "Схема c: тренд горизонтальный"
+        }
+      ]
+    },
+    {
+      "id": "periodization-goals",
+      "title": "Задачи периодизации",
+      "tags": ["periodization", "planning", "cycles"],
+      "source": "Распределение целей и задач между периодами подготовки и как следствие:",
+      "theses": [
+        {
+          "id": "pg-avoid-adaptation-loss",
+          "text": "Избежание потери прогресса из-за адаптации к нагрузкам",
+          "tags": ["adaptation", "progression"]
+        },
+        {
+          "id": "pg-volume-distribution",
+          "text": "Распределение тренировочного объёма для профилактики переутомления",
+          "tags": ["volume", "fatigue", "recovery"]
+        },
+        {
+          "id": "pg-separate-competing-methods",
+          "text": "Разделение конкурирующих между собой методов и задач",
+          "tags": ["methods", "planning"]
+        },
+        {
+          "id": "pg-peak-timing",
+          "text": "Выведение спортсмена на пик формы к определённым датам",
+          "tags": ["peaking", "competition"]
+        }
+      ]
+    },
+    {
+      "id": "periodization-types",
+      "title": "Виды периодизации",
+      "tags": ["periodization", "planning", "cycles"],
+      "theses": [
+        {
+          "id": "pt-linear",
+          "text": "Линейная",
+          "tags": ["linear"]
+        },
+        {
+          "id": "pt-block",
+          "text": "Блоковая",
+          "tags": ["block"]
+        },
+        {
+          "id": "pt-undulating",
+          "text": "Волнообразная",
+          "tags": ["undulating", "wave"]
+        },
+        {
+          "id": "pt-conjugated",
+          "text": "Сопряжённая",
+          "tags": ["conjugated"]
+        }
+      ]
+    },
+    {
+      "id": "strength-periodization-anatomical",
+      "title": "Периодизация силовых тренировок · анатомическая адаптация",
+      "tags": ["periodization", "strength", "anatomical-adaptation"],
+      "source": "Приоритетные цели",
+      "theses": [
+        {
+          "id": "spa-movement-patterns",
+          "text": "Изучение шаблонов движения",
+          "tags": ["coordination", "technique"]
+        },
+        {
+          "id": "spa-intermuscular",
+          "text": "Межмышечная координация",
+          "tags": ["coordination"]
+        },
+        {
+          "id": "spa-connective-tissue",
+          "text": "Адаптация сухожилий и соединительной ткани",
+          "tags": ["connective-tissue"]
+        },
+        {
+          "id": "spa-hypertrophy",
+          "text": "Гипертрофия",
+          "tags": ["hypertrophy"]
+        },
+        {
+          "id": "spa-structural-balance",
+          "text": "Структурный баланс",
+          "tags": ["balance"]
+        }
+      ]
+    },
+    {
+      "id": "strength-periodization-max-strength",
+      "title": "Периодизация силовых тренировок · максимальная сила",
+      "tags": ["periodization", "strength", "max-strength"],
+      "source": "Приоритетные цели",
+      "theses": [
+        {
+          "id": "spms-intramuscular",
+          "text": "Внутримышечная координация",
+          "tags": ["coordination"]
+        },
+        {
+          "id": "spms-inhibitory",
+          "text": "Адаптация ингибиторных механизмов",
+          "tags": ["neural"]
+        },
+        {
+          "id": "spms-recruitment",
+          "text": "Рекрутирование МВ и частота импульсации",
+          "tags": ["neural", "recruitment"]
+        }
+      ]
+    },
+    {
+      "id": "strength-periodization-maintenance",
+      "title": "Периодизация силовых тренировок · поддержание силы",
+      "tags": ["periodization", "strength", "maintenance"],
+      "source": "Приоритетные цели",
+      "theses": [
+        {
+          "id": "spm-tools-volume",
+          "text": "Использование средств, методов и объёма, которые позволят поддержать силу и не будут мешать реализации других целей",
+          "tags": ["volume", "methods", "maintenance"]
+        }
+      ]
+    },
+    {
+      "id": "strength-maintenance-power-methods",
+      "title": "Этап поддержания силы (мощность/СФП) · методы",
+      "tags": ["periodization", "strength", "maintenance", "power"],
+      "theses": [
+        {
+          "id": "smmp-de",
+          "text": "Динамических усилий",
+          "tags": ["dynamic-effort"]
+        },
+        {
+          "id": "smmp-cluster",
+          "text": "Кластерный метод",
+          "tags": ["cluster"]
+        },
+        {
+          "id": "smmp-submax-accessory",
+          "text": "Субмаксимальных усилий (для доп. упражнений)",
+          "tags": ["submax-effort"]
+        },
+        {
+          "id": "smmp-partial-rom",
+          "text": "Ограниченная амплитуда",
+          "tags": ["partial-rom"]
+        },
+        {
+          "id": "smmp-tempo",
+          "text": "Темп 11X1 и X1X1",
+          "tags": ["tempo"]
+        }
+      ]
+    },
+    {
+      "id": "strength-maintenance-power-frequency",
+      "title": "Этап поддержания силы (мощность/СФП) · частота",
+      "tags": ["periodization", "strength", "maintenance", "power"],
+      "theses": [
+        {
+          "id": "smmp-freq-mg",
+          "text": "Тренировка МГ 1–2 раза в неделю",
+          "tags": ["frequency"]
+        },
+        {
+          "id": "smmp-freq-submax",
+          "text": "Субмаксимальные усилия 1 раз в неделю",
+          "tags": ["frequency", "submax-effort"]
+        },
+        {
+          "id": "smmp-freq-accessory",
+          "text": "Дополнительные упражнения 0–1 раз в неделю",
+          "tags": ["frequency", "accessory"]
+        }
+      ]
+    },
+    {
+      "id": "strength-maintenance-power-volume",
+      "title": "Этап поддержания силы (мощность/СФП) · объём",
+      "tags": ["periodization", "strength", "maintenance", "power"],
+      "theses": [
+        {
+          "id": "smmp-vol-mg",
+          "text": "За тренировку 15–30 повторений на МГ",
+          "tags": ["volume"]
+        },
+        {
+          "id": "smmp-vol-intensive",
+          "text": "Интенсивных повторений за тренировку 6–15",
+          "tags": ["volume", "intensity"]
+        }
+      ]
+    },
+    {
+      "id": "strength-max-standard-methods",
+      "title": "Этап максимальной силы (стандарт) · методы",
+      "tags": ["periodization", "strength", "max-strength"],
+      "theses": [
+        {
+          "id": "smxs-submax",
+          "text": "Субмаксимальных усилий",
+          "tags": ["submax-effort"]
+        },
+        {
+          "id": "smxs-repeated",
+          "text": "Повторных усилий",
+          "tags": ["repeated-effort"]
+        },
+        {
+          "id": "smxs-max",
+          "text": "Максимальных усилий",
+          "tags": ["max-effort"]
+        },
+        {
+          "id": "smxs-isometric",
+          "text": "Изометрические максимальные усилия",
+          "tags": ["isometric-max"]
+        },
+        {
+          "id": "smxs-tempo",
+          "text": "Темп 2111 в основных и 3111 в дополнительных",
+          "tags": ["tempo"]
+        }
+      ]
+    },
+    {
+      "id": "strength-max-standard-frequency",
+      "title": "Этап максимальной силы (стандарт) · частота",
+      "tags": ["periodization", "strength", "max-strength"],
+      "theses": [
+        {
+          "id": "smxs-freq-mg",
+          "text": "Тренировка МГ 2–3 раза в неделю",
+          "tags": ["frequency"]
+        },
+        {
+          "id": "smxs-freq-submax",
+          "text": "Субмаксимальные усилия 1–2 раза в неделю",
+          "tags": ["frequency", "submax-effort"]
+        },
+        {
+          "id": "smxs-freq-max",
+          "text": "МУ 1 раз в 4 недели",
+          "tags": ["frequency", "max-effort"]
+        }
+      ]
+    },
+    {
+      "id": "strength-max-standard-volume",
+      "title": "Этап максимальной силы (стандарт) · объём",
+      "tags": ["periodization", "strength", "max-strength"],
+      "theses": [
+        {
+          "id": "smxs-vol-session",
+          "text": "За тренировку 30–70 повторений на МГ",
+          "tags": ["volume"]
+        },
+        {
+          "id": "smxs-vol-weekly",
+          "text": "Недельный объём 60–120",
+          "tags": ["volume", "weekly"]
+        },
+        {
+          "id": "smxs-vol-intensive",
+          "text": "Интенсивных повторений за тренировку 9–25",
+          "tags": ["volume", "intensity"]
         }
       ]
     },
@@ -728,6 +999,94 @@
           "weekLabel": "Неделя 4",
           "prescription": "4×5 120% от 5ПМ, макс. конц. повторений",
           "intensityPct": 120
+        }
+      ]
+    },
+    {
+      "id": "strength-maintenance-power-phase",
+      "protocolId": "strength-maintenance-power",
+      "title": "Этап поддержания силы (мощность/СФП) · недельный план",
+      "note": "МГ — основное движение / мышечная группа; ДУ — метод динамических усилий",
+      "primaryRowLabel": "Силовая тренировка",
+      "accessoryRowLabel": "Метод ДУ",
+      "weeks": [
+        {
+          "id": "smp-w1",
+          "weekLabel": "Неделя 1",
+          "loadLabel": "Лёгкая",
+          "prescription": "—",
+          "accessoryPrescription": "8×3 50%",
+          "goal": "Найти вес в нужной зоне скорости 0,8–1 м/с",
+          "intensityPct": 50
+        },
+        {
+          "id": "smp-w2",
+          "weekLabel": "Неделя 2",
+          "loadLabel": "Средняя",
+          "prescription": "3×2 (80%) кластерный метод",
+          "accessoryPrescription": "5×2 (50%)",
+          "goal": "Новый рекорд скорости",
+          "intensityPct": 80
+        },
+        {
+          "id": "smp-w3",
+          "weekLabel": "Неделя 3",
+          "loadLabel": "Лёгкая",
+          "prescription": "—",
+          "accessoryPrescription": "8×2 (55%)",
+          "goal": "Сохранить скорость с новым весом",
+          "intensityPct": 55
+        },
+        {
+          "id": "smp-w4",
+          "weekLabel": "Неделя 4",
+          "loadLabel": "Средняя",
+          "prescription": "5–6×1 (85%)",
+          "accessoryPrescription": "5×2 (55%)",
+          "goal": "Новый рекорд скорости",
+          "intensityPct": 85
+        }
+      ]
+    },
+    {
+      "id": "strength-max-standard-phase",
+      "protocolId": "strength-max-standard",
+      "title": "Этап максимальной силы (стандарт) · недельный план",
+      "note": "МГ — основное движение; МУ — метод максимальных усилий",
+      "primaryRowLabel": "Основное упражнение",
+      "accessoryRowLabel": "Дополнительное упражнение",
+      "weeks": [
+        {
+          "id": "smxs-w1",
+          "weekLabel": "Неделя 1",
+          "loadLabel": "Лёгкая",
+          "prescription": "3×5 (65%)",
+          "accessoryPrescription": "3×8 RIR-3",
+          "intensityPct": 65
+        },
+        {
+          "id": "smxs-w2",
+          "weekLabel": "Неделя 2",
+          "loadLabel": "Средняя",
+          "prescription": "5×5 (72,5%)",
+          "accessoryPrescription": "3×9",
+          "intensityPct": 72.5
+        },
+        {
+          "id": "smxs-w3",
+          "weekLabel": "Неделя 3",
+          "loadLabel": "Тяжёлая",
+          "prescription": "5×3 (80%)",
+          "accessoryPrescription": "3×10",
+          "intensityPct": 80
+        },
+        {
+          "id": "smxs-w4",
+          "weekLabel": "Неделя 4",
+          "loadLabel": "Тяжёлая",
+          "prescription": "3–5×3, найти 3ПМ",
+          "accessoryPrescription": "3–4×8, найти 8ПМ",
+          "intensityPct": 90
         }
       ]
     }

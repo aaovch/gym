@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import SetEditor from '$lib/components/SetEditor.svelte';
+	import { mesocyclePlanForDate } from '$lib/cycle-plan';
 	import {
 		createSession,
 		emptyRowInput,
@@ -9,6 +10,15 @@
 		uniqueExercises
 	} from '$lib/database';
 	import { formatDateRu, todayIso } from '$lib/format';
+	import { isCardioExercise } from '$lib/protocol';
+	import { thesesStore } from '$lib/training-theses';
+	import {
+		anchor1rmFromSets,
+		evaluateSessionVolume,
+		resolveVolumeAnchor1rm,
+		TRAINING_VOLUME_GUIDE_ID,
+		volumeCheckLabel
+	} from '$lib/volume-guide';
 	import { saveSession, workoutStore } from '$lib/workout-store';
 	import type { RowInput, WorkoutSession } from '$lib/types';
 
@@ -75,6 +85,32 @@
 		return createSession(name, date, rows, editingId ?? crypto.randomUUID());
 	});
 
+	const volumeGuideRows = $derived(
+		thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
+	);
+
+	const volumePreview = $derived.by(() => {
+		if (!previewSession || isCardioExercise(previewSession.exercise) || volumeGuideRows.length === 0) {
+			return null;
+		}
+		const sets = previewSession.rows.flatMap((row) => row.sets);
+		if (sets.length === 0) return null;
+
+		const meso = mesocyclePlanForDate(view.cyclePlanView, date);
+		const mesoAnchor = meso?.anchorInfo[previewSession.exercise]?.anchor;
+		let anchor = resolveVolumeAnchor1rm(
+			view.entries,
+			previewSession.exercise,
+			date,
+			mesoAnchor,
+			editingId
+		);
+		if (!anchor) anchor = anchor1rmFromSets(sets);
+		if (!anchor) return null;
+
+		return evaluateSessionVolume(sets, anchor, volumeGuideRows);
+	});
+
 	async function submit() {
 		if (!previewSession) return;
 		busy = true;
@@ -131,6 +167,17 @@
 				{busy ? 'Сохраняем...' : editingId ? 'Обновить' : 'Сохранить'}
 			</button>
 		</div>
+
+		{#if volumePreview}
+			<p
+				class="volume-hint"
+				class:ok={volumePreview.status === 'ok'}
+				class:low={volumePreview.status === 'low'}
+				class:high={volumePreview.status === 'high'}
+			>
+				{volumeCheckLabel(volumePreview)}
+			</p>
+		{/if}
 	</form>
 </section>
 
@@ -233,6 +280,31 @@
 	}
 
 	.error {
+		color: var(--danger);
+	}
+
+	.volume-hint {
+		margin: 0;
+		padding: 0.65rem 0.75rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		font-size: 0.85rem;
+		color: var(--accent-2);
+	}
+
+	.volume-hint.ok {
+		border-color: rgba(110, 231, 168, 0.35);
+		color: var(--accent);
+	}
+
+	.volume-hint.low {
+		border-color: rgba(251, 191, 36, 0.35);
+		color: #fbbf24;
+	}
+
+	.volume-hint.high {
+		border-color: rgba(255, 143, 143, 0.35);
 		color: var(--danger);
 	}
 </style>
