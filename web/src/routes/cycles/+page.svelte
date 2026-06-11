@@ -758,10 +758,11 @@
 							{blockPreview.label} · μ1–μ{blockPreview.microCount} · {shortProtocolName(blockPreview.protocolName)}
 						</summary>
 						<div class="matrix-wrap compact">
-							<table class="matrix">
+							<table class="matrix constructor-preview-matrix">
 								<thead>
 									<tr>
 										<th>Упражнение</th>
+										<th>1ПМ</th>
 										{#each blockPreview.matrix[0]?.cells ?? [] as cell}
 											<th>μ{cell.microIndex}</th>
 										{/each}
@@ -770,9 +771,20 @@
 								<tbody>
 									{#each blockPreview.matrix as row}
 										<tr>
-											<td>{row.exercise}</td>
+											<td class="ex-name">{row.exercise}</td>
+											<td class="rm-cell">{fmtNum(row.anchor)}</td>
 											{#each row.cells as cell}
-												<td class="pct">{cell.pct != null ? `${cell.pct}%` : '—'}</td>
+												<td class="pct">
+													{#if cell.pct != null}
+														<span class="pct-val">{cell.pct}%</span>
+														<small>{fmtNum(cell.targetWeight)} кг</small>
+														{#if cell.label}
+															<small class="muted phase-label">{cell.label}</small>
+														{/if}
+													{:else}
+														—
+													{/if}
+												</td>
 											{/each}
 										</tr>
 									{/each}
