@@ -10,6 +10,7 @@
 		resetToBundled,
 		workoutStore
 	} from '$lib/workout-store';
+	import { thesesStore } from '$lib/training-theses';
 
 	let { data, children } = $props();
 
@@ -18,6 +19,7 @@
 
 	onMount(() => {
 		workoutStore.bootstrap(data.bundled);
+		thesesStore.bootstrap(data.theses);
 		workoutStore.connectIfTokenSaved();
 	});
 

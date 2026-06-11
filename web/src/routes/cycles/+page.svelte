@@ -26,6 +26,7 @@
 		saveCyclePlanState,
 		workoutStore
 	} from '$lib/workout-store';
+	import { thesesStore } from '$lib/training-theses';
 
 	type MesoTab = 'plan' | 'workouts' | 'settings';
 
@@ -245,6 +246,29 @@
 				</article>
 			{/each}
 		</div>
+
+		{#if thesesStore.groups.length > 0}
+			<div class="theses-block">
+				<h3>Тезисы и принципы</h3>
+				<p class="muted theses-note">
+					Хранятся в <code>data/training-theses.json</code> и локально в браузере — можно подключать к
+					подсказкам и планированию позже.
+				</p>
+				{#each thesesStore.groups as group (group.id)}
+					<article class="thesis-group">
+						<h4>{group.title}</h4>
+						{#if group.source}
+							<p class="muted thesis-source">{group.source}</p>
+						{/if}
+						<ol class="thesis-list">
+							{#each group.theses as thesis (thesis.id)}
+								<li>{thesis.text}</li>
+							{/each}
+						</ol>
+					</article>
+				{/each}
+			</div>
+		{/if}
 	</section>
 {/if}
 
@@ -762,6 +786,44 @@
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 		gap: 0.75rem;
 		margin-top: 0.75rem;
+	}
+
+	.theses-block {
+		margin-top: 1.25rem;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--border);
+	}
+
+	.theses-block h3 {
+		margin: 0 0 0.35rem;
+	}
+
+	.theses-note {
+		margin: 0 0 1rem;
+		font-size: 0.82rem;
+	}
+
+	.thesis-group + .thesis-group {
+		margin-top: 1rem;
+	}
+
+	.thesis-group h4 {
+		margin: 0 0 0.25rem;
+		font-size: 0.95rem;
+	}
+
+	.thesis-source {
+		margin: 0 0 0.5rem;
+		font-size: 0.78rem;
+	}
+
+	.thesis-list {
+		margin: 0;
+		padding-left: 1.2rem;
+		display: grid;
+		gap: 0.35rem;
+		font-size: 0.88rem;
+		color: var(--text);
 	}
 
 	.ab-card {

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-11T00:00:00.000Z",
+  "groups": [
+    {
+      "id": "ofp-strength",
+      "title": "Принципы силовой подготовки в рамках ОФП",
+      "source": "Athletic Training",
+      "tags": ["ofp", "strength"],
+      "theses": [
+        {
+          "id": "ofp-optimal-not-max",
+          "text": "Оптимальные показатели без стремления к высшим достижениям",
+          "tags": ["intensity", "planning"]
+        },
+        {
+          "id": "ofp-sport-patterns",
+          "text": "Развитие шаблонов и режимов сокращения, необходимых для спорта",
+          "tags": ["specificity", "patterns"]
+        },
+        {
+          "id": "ofp-compensation",
+          "text": "Развитие шаблонов и мышц, необходимых для компенсации воздействия вида спорта",
+          "tags": ["compensation", "balance"]
+        },
+        {
+          "id": "ofp-min-volume",
+          "text": "Минимальный тренировочный объём, необходимый для достижения этих целей",
+          "tags": ["volume", "planning"]
+        },
+        {
+          "id": "ofp-safe-movements",
+          "text": "Максимально безопасные и эффективные движения",
+          "tags": ["safety", "exercise-selection"]
+        }
+      ]
+    }
+  ]
+}
