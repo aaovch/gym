@@ -1,11 +1,13 @@
 import { getGitHubToken } from './auth';
 import {
+	assignSessionToMicro,
 	autoMesocyclesAsView,
 	buildCyclePlanView,
 	bundledProtocolTemplates,
 	normalizeCyclePlan,
 	importPlanFromAuto,
 	refreshAllMesoAnchors,
+	resolveMesoMicroSelection,
 	type CyclePlan
 } from './cycle-plan';
 import { sessionsToEntries } from './database';
@@ -170,7 +172,10 @@ class WorkoutStore {
 		}
 	}
 
-	async saveSession(session: WorkoutSession) {
+	async saveSession(
+		session: WorkoutSession,
+		context?: { mesoId: string; microId: string }
+	) {
 		const db = this.database;
 		const index = db.sessions.findIndex((item) => item.id === session.id);
 		const sessions =
@@ -180,6 +185,33 @@ class WorkoutStore {
 
 		this.database = { ...db, sessions };
 		await this.persistDatabase(`Update workout: ${session.exercise} (${session.date})`);
+
+		const plan = this.cyclePlan;
+		if (!plan) return;
+
+		let mesoId = context?.mesoId;
+		let microId = context?.microId;
+
+		if (!mesoId || !microId) {
+			const entries = sessionsToEntries(sessions);
+			const microcycles = buildMicrocycleOverview(sessions);
+			const allDates = [...new Set(entries.map((entry) => entry.date))].sort();
+			const cyclePlanView = buildCyclePlanView(plan, microcycles, entries, allDates);
+			const mesocycles =
+				cyclePlanView.usingManualPlan && cyclePlanView.mesocycles.length > 0
+					? cyclePlanView.mesocycles
+					: autoMesocyclesAsView(microcycles, entries);
+			const resolved = resolveMesoMicroSelection(mesocycles, session.date, null, null);
+			if (resolved) {
+				mesoId = resolved.meso.plan.id;
+				microId = resolved.micro.plan.id;
+			}
+		}
+
+		if (mesoId && microId) {
+			const next = assignSessionToMicro(plan, mesoId, microId, session.date);
+			if (next !== plan) this.persistCyclePlan(next);
+		}
 	}
 
 	async deleteSession(sessionId: string) {
@@ -297,8 +329,11 @@ export async function pushToGitHub(token = getGitHubToken()) {
 	await workoutStore.pushToGitHub(token);
 }
 
-export async function saveSession(session: WorkoutSession) {
-	await workoutStore.saveSession(session);
+export async function saveSession(
+	session: WorkoutSession,
+	context?: { mesoId: string; microId: string }
+) {
+	await workoutStore.saveSession(session, context);
 }
 
 export async function deleteSession(sessionId: string) {

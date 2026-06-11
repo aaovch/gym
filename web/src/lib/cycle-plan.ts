@@ -17,7 +17,7 @@ import {
 	STRENGTH_PROTOCOL_TEMPLATES,
 	targetWeight
 } from './protocol';
-import type { MicrocycleOverview, TrainingDay } from './microcycle';
+import type { MicrocycleOverview, TrainingDay, WorkoutSlot, WorkoutTemplate } from './microcycle';
 import type { WorkoutEntry } from './types';
 
 export type { ProtocolPhase, ProtocolTemplate };
@@ -629,6 +629,91 @@ export function microcyclePlanForDate(
 	date: string
 ): EnrichedMicrocycle | null {
 	return meso.microcycles.find((micro) => micro.plan.dates.includes(date)) ?? null;
+}
+
+export function exercisesForWorkoutSlot(
+	meso: EnrichedMesocycle,
+	templates: WorkoutTemplate[],
+	slot: WorkoutSlot
+): string[] {
+	const template = templates.find((item) => item.slot === slot);
+	if (!template) return [];
+	const inMeso = new Set(Object.keys(meso.anchorInfo));
+	return template.exercises.filter((exercise) => inMeso.has(exercise));
+}
+
+export function suggestWorkoutSlot(
+	micro: EnrichedMicrocycle,
+	date: string,
+	entries: WorkoutEntry[],
+	templates: WorkoutTemplate[]
+): WorkoutSlot {
+	const dayEntries = entries.filter((entry) => entry.date === date);
+	const templateA = templates.find((item) => item.slot === 'A');
+	const templateB = templates.find((item) => item.slot === 'B');
+
+	if (dayEntries.length > 0 && templateA && templateB) {
+		const todayExercises = new Set(dayEntries.map((entry) => entry.exercise));
+		const scoreA = templateA.exercises.filter((exercise) => todayExercises.has(exercise)).length;
+		const scoreB = templateB.exercises.filter((exercise) => todayExercises.has(exercise)).length;
+		return scoreA >= scoreB ? 'A' : 'B';
+	}
+
+	if (micro.dayA && !micro.dayB) return 'B';
+	if (micro.dayB && !micro.dayA) return 'A';
+	return 'A';
+}
+
+export function resolveMesoMicroSelection(
+	mesocycles: EnrichedMesocycle[],
+	date: string,
+	mesoId: string | null,
+	microId: string | null
+): { meso: EnrichedMesocycle; micro: EnrichedMicrocycle } | null {
+	if (mesocycles.length === 0) return null;
+
+	if (mesoId && microId) {
+		const meso = mesocycles.find((item) => item.plan.id === mesoId);
+		const micro = meso?.microcycles.find((item) => item.plan.id === microId);
+		if (meso && micro) return { meso, micro };
+	}
+
+	for (const meso of mesocycles) {
+		const micro = meso.microcycles.find((item) => item.plan.dates.includes(date));
+		if (micro) return { meso, micro };
+	}
+
+	const mesoByDate = mesocycles.find(
+		(meso) => date >= meso.plan.startDate && date <= meso.plan.endDate
+	);
+	if (mesoByDate) {
+		if (microId) {
+			const micro = mesoByDate.microcycles.find((item) => item.plan.id === microId);
+			if (micro) return { meso: mesoByDate, micro };
+		}
+		const incomplete = mesoByDate.microcycles.find((item) => !item.complete);
+		if (incomplete) return { meso: mesoByDate, micro: incomplete };
+		const last = mesoByDate.microcycles[mesoByDate.microcycles.length - 1];
+		if (last) return { meso: mesoByDate, micro: last };
+	}
+
+	const meso = mesocycles[mesocycles.length - 1];
+	const incomplete = meso.microcycles.find((item) => !item.complete);
+	const micro = incomplete ?? meso.microcycles[meso.microcycles.length - 1];
+	return micro ? { meso, micro } : null;
+}
+
+/** Привязать дату тренировки к микроциклу, если ещё не распределена. */
+export function assignSessionToMicro(
+	plan: CyclePlan,
+	mesoId: string,
+	microId: string,
+	date: string
+): CyclePlan {
+	const meso = plan.mesocycles.find((item) => item.id === mesoId);
+	const micro = meso?.microcycles.find((item) => item.id === microId);
+	if (!micro || micro.dates.includes(date)) return plan;
+	return assignDate(plan, mesoId, microId, date);
 }
 
 export function createMesocycle(plan: CyclePlan, label = 'Новый блок'): CyclePlan {

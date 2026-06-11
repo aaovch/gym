@@ -25,7 +25,7 @@
 		type EnrichedMesocycle,
 		type ExerciseAnchorInfo
 	} from '$lib/cycle-plan';
-	import { formatDateRu, fmtNum } from '$lib/format';
+	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
 	import {
 		createMesocycleFromConstructor,
@@ -79,6 +79,7 @@
 	let mesoTab = $state<MesoTab>('plan');
 	let macroPick = $state<string | null>(null);
 	let mesoPick = $state<string | null>(null);
+	let microPick = $state<string | null>(null);
 	let mesoConstructorMacroId = $state<string | null>(null);
 	let selectedTemplateId = $state(DEFAULT_PROTOCOL_TEMPLATE.id);
 
@@ -127,6 +128,27 @@
 				: mesos[mesos.length - 1].plan.id;
 		return mesos.find((meso) => meso.plan.id === pick) ?? null;
 	});
+
+	const selectedMicro = $derived.by(() => {
+		if (!selectedMeso) return null;
+		const micros = selectedMeso.microcycles;
+		if (micros.length === 0) return null;
+		const pick =
+			microPick && micros.some((micro) => micro.plan.id === microPick)
+				? microPick
+				: micros.find((micro) => !micro.complete)?.plan.id ??
+					micros[micros.length - 1].plan.id;
+		return micros.find((micro) => micro.plan.id === pick) ?? null;
+	});
+
+	function todayWorkoutUrl(mesoId: string, microId: string): string {
+		const params = new URLSearchParams({
+			date: todayIso(),
+			meso: mesoId,
+			micro: microId
+		});
+		return `${base}/?${params.toString()}`;
+	}
 
 	const activeTemplate = $derived(
 		editorPlan.templates.find((item) => item.id === selectedTemplateId) ??
@@ -1517,6 +1539,7 @@
 						onclick={() => {
 							macroPick = macro.plan.id;
 							mesoPick = macro.mesocycles[macro.mesocycles.length - 1]?.plan.id ?? null;
+							microPick = null;
 						}}
 					>
 						<span class="meso-tab-num">M{macro.index}</span>
@@ -1562,6 +1585,7 @@
 						onclick={() => {
 							macroPick = null;
 							mesoPick = meso.plan.id;
+							microPick = null;
 						}}
 					>
 						<span class="meso-tab-num">#{meso.index}</span>
@@ -1595,7 +1619,10 @@
 						class="meso-tab"
 						class:active={selectedMeso?.plan.id === meso.plan.id}
 						style="--meso-color: {mesocycleColor(meso.index)}"
-						onclick={() => (mesoPick = meso.plan.id)}
+						onclick={() => {
+							mesoPick = meso.plan.id;
+							microPick = null;
+						}}
 					>
 						<span class="meso-tab-num">#{meso.index}</span>
 						<span class="meso-tab-label">{meso.plan.label}</span>
@@ -1629,8 +1656,13 @@
 						· {selectedMeso.completeMicrocycles}/{selectedMeso.microcycles.length} полных μ
 					</p>
 				</div>
-				{#if editMode && plan}
-					<div class="detail-actions">
+				<div class="detail-actions">
+					{#if selectedMicro}
+						<a class="btn small primary" href={todayWorkoutUrl(selectedMeso.plan.id, selectedMicro.plan.id)}>
+							Записать тренировку
+						</a>
+					{/if}
+					{#if editMode && plan}
 						<button type="button" class="btn small" onclick={() => handleAddMicro(selectedMeso.plan.id)}>
 							+ μ
 						</button>
@@ -1641,8 +1673,8 @@
 						>
 							Удалить мезо
 						</button>
-					</div>
-				{/if}
+					{/if}
+				</div>
 			</div>
 
 			<!-- Внутренние вкладки -->
@@ -1743,8 +1775,30 @@
 				</div>
 			{:else if mesoTab === 'workouts'}
 				<div class="tab-panel micro-timeline">
+					<div class="micro-picker-row">
+						{#each selectedMeso.microcycles as micro (micro.plan.id)}
+							<button
+								type="button"
+								class="micro-pick-btn"
+								class:active={selectedMicro?.plan.id === micro.plan.id}
+								class:complete={micro.complete}
+								onclick={() => (microPick = micro.plan.id)}
+							>
+								μ{micro.plan.indexInMeso}
+							</button>
+						{/each}
+						{#if selectedMicro}
+							<a class="btn small primary" href={todayWorkoutUrl(selectedMeso.plan.id, selectedMicro.plan.id)}>
+								Занести данные →
+							</a>
+						{/if}
+					</div>
 					{#each selectedMeso.microcycles as micro}
-						<article class="micro-block" class:complete={micro.complete}>
+						<article
+							class="micro-block"
+							class:complete={micro.complete}
+							class:selected={selectedMicro?.plan.id === micro.plan.id}
+						>
 							<div class="micro-top">
 								<span class="micro-label">μ{micro.plan.indexInMeso}</span>
 								<div class="micro-days">
@@ -2699,6 +2753,40 @@
 
 	.matrix .pct.match .fact-val {
 		color: var(--accent);
+	}
+
+	.micro-block.selected {
+		border-color: rgba(110, 231, 168, 0.45);
+		box-shadow: 0 0 0 1px rgba(110, 231, 168, 0.15);
+	}
+
+	.micro-picker-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		align-items: center;
+		margin-bottom: 0.75rem;
+	}
+
+	.micro-pick-btn {
+		min-width: 2.5rem;
+		padding: 0.35rem 0.6rem;
+		border-radius: 8px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		color: var(--text);
+		font-weight: 700;
+		font-size: 0.85rem;
+	}
+
+	.micro-pick-btn.active {
+		border-color: rgba(110, 231, 168, 0.45);
+		background: rgba(110, 231, 168, 0.14);
+		color: var(--accent);
+	}
+
+	.micro-pick-btn.complete {
+		border-color: rgba(110, 231, 168, 0.25);
 	}
 
 	.micro-timeline {

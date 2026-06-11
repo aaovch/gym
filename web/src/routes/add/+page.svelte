@@ -2,14 +2,17 @@
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import SetEditor from '$lib/components/SetEditor.svelte';
-	import { mesocyclePlanForDate } from '$lib/cycle-plan';
+	import {
+		exerciseTargetOnMicro,
+		resolveMesoMicroSelection
+	} from '$lib/cycle-plan';
 	import {
 		createSession,
 		emptyRowInput,
 		rowInputToSessionRow,
 		uniqueExercises
 	} from '$lib/database';
-	import { formatDateRu, todayIso } from '$lib/format';
+	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { isCardioExercise } from '$lib/protocol';
 	import { thesesStore } from '$lib/training-theses';
 	import {
@@ -34,6 +37,39 @@
 	const view = $derived(workoutStore.view);
 	const exercises = $derived(uniqueExercises(view.sessions));
 	const editId = $derived.by(() => (browser ? page.url.searchParams.get('id') : null));
+	const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
+	const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
+	const urlMeso = $derived.by(() => (browser ? page.url.searchParams.get('meso') : null));
+	const urlMicro = $derived.by(() => (browser ? page.url.searchParams.get('micro') : null));
+
+	const trainingContext = $derived.by(() =>
+		resolveMesoMicroSelection(
+			view.cyclePlanView.mesocycles,
+			date,
+			urlMeso,
+			urlMicro
+		)
+	);
+
+	const protocolHint = $derived.by(() => {
+		const name = exercise.trim();
+		if (!name || !trainingContext) return null;
+		const anchor = trainingContext.meso.anchorInfo[name]?.anchor;
+		if (!anchor) return null;
+		return exerciseTargetOnMicro(
+			view.cyclePlanForCalc,
+			trainingContext.meso.plan,
+			trainingContext.micro.plan,
+			name,
+			anchor
+		);
+	});
+
+	$effect(() => {
+		if (editId) return;
+		if (urlExercise && !exercise) exercise = urlExercise;
+		if (urlDate && date === todayIso()) date = urlDate;
+	});
 
 	$effect(() => {
 		if (!editId) return;
@@ -96,8 +132,7 @@
 		const sets = previewSession.rows.flatMap((row) => row.sets);
 		if (sets.length === 0) return null;
 
-		const meso = mesocyclePlanForDate(view.cyclePlanView, date);
-		const mesoAnchor = meso?.anchorInfo[previewSession.exercise]?.anchor;
+		const mesoAnchor = trainingContext?.meso.anchorInfo[previewSession.exercise]?.anchor;
 		let anchor = resolveVolumeAnchor1rm(
 			view.entries,
 			previewSession.exercise,
@@ -117,7 +152,10 @@
 		error = '';
 		status = '';
 		try {
-			await saveSession(previewSession);
+			const context = trainingContext
+					? { mesoId: trainingContext.meso.plan.id, microId: trainingContext.micro.plan.id }
+					: undefined;
+			await saveSession(previewSession, context);
 			status = editingId ? 'Тренировка обновлена.' : 'Тренировка сохранена.';
 			if (!editingId) resetForm();
 		} catch (err) {
@@ -154,6 +192,13 @@
 			<span>Дата</span>
 			<input type="date" bind:value={date} />
 		</label>
+
+		{#if protocolHint}
+			<p class="protocol-hint">
+				μ{trainingContext!.micro.plan.indexInMeso} · {protocolHint.protocolLabel}: цель ~{fmtNum(protocolHint.targetWeight)} кг
+				({protocolHint.targetPct}%) · 1ПМ {fmtNum(protocolHint.anchor1rm)} кг
+			</p>
+		{/if}
 
 		<SetEditor bind:row={mainRow} label="Основной блок" />
 
@@ -306,5 +351,15 @@
 	.volume-hint.high {
 		border-color: rgba(255, 143, 143, 0.35);
 		color: var(--danger);
+	}
+
+	.protocol-hint {
+		margin: 0;
+		padding: 0.65rem 0.75rem;
+		border-radius: 10px;
+		border: 1px solid rgba(110, 231, 168, 0.25);
+		background: rgba(110, 231, 168, 0.08);
+		font-size: 0.85rem;
+		color: var(--accent-2);
 	}
 </style>
