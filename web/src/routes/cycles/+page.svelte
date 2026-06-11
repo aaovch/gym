@@ -48,6 +48,7 @@
 		clearCyclePlanState,
 		importCyclePlanFromAuto,
 		refreshMesoAnchorsFromData,
+		repairPlanMicroDatesFromAuto,
 		saveCyclePlanState,
 		workoutStore
 	} from '$lib/workout-store';
@@ -1106,6 +1107,9 @@
 				{#if showMoreActions}
 					<div class="more-menu">
 						<button type="button" onclick={() => refreshMesoAnchorsFromData(true)}>Пересчитать якорные 1ПМ</button>
+						<button type="button" onclick={() => repairPlanMicroDatesFromAuto()}>
+							Восстановить даты μ
+						</button>
 						<button type="button" class="danger" onclick={clearCyclePlanState}>Сбросить план</button>
 					</div>
 				{/if}

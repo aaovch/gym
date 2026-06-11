@@ -153,7 +153,8 @@
 		error = '';
 		status = '';
 		try {
-			const context = trainingContext
+			const context =
+				urlMeso && urlMicro && trainingContext
 					? { mesoId: trainingContext.meso.plan.id, microId: trainingContext.micro.plan.id }
 					: undefined;
 			await saveSession(previewSession, context);

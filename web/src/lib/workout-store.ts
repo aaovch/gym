@@ -7,6 +7,7 @@ export {
 	pushToGitHub,
 	refreshFromGitHub,
 	refreshMesoAnchorsFromData,
+	repairPlanMicroDatesFromAuto,
 	resetToBundled,
 	saveCyclePlanState,
 	saveSession,

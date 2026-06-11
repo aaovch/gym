@@ -1,5 +1,5 @@
 import { getGitHubToken } from './auth';
-import {
+	import {
 	assignSessionToMicro,
 	autoMesocyclesAsView,
 	buildCyclePlanView,
@@ -7,7 +7,7 @@ import {
 	normalizeCyclePlan,
 	importPlanFromAuto,
 	refreshAllMesoAnchors,
-	resolveMesoMicroSelection,
+	repairMicroDatesFromAuto,
 	type CyclePlan
 } from './cycle-plan';
 import { sessionsToEntries } from './database';
@@ -186,32 +186,13 @@ class WorkoutStore {
 		this.database = { ...db, sessions };
 		await this.persistDatabase(`Update workout: ${session.exercise} (${session.date})`);
 
+		if (!context?.mesoId || !context?.microId) return;
+
 		const plan = this.cyclePlan;
 		if (!plan) return;
 
-		let mesoId = context?.mesoId;
-		let microId = context?.microId;
-
-		if (!mesoId || !microId) {
-			const entries = sessionsToEntries(sessions);
-			const microcycles = buildMicrocycleOverview(sessions);
-			const allDates = [...new Set(entries.map((entry) => entry.date))].sort();
-			const cyclePlanView = buildCyclePlanView(plan, microcycles, entries, allDates);
-			const mesocycles =
-				cyclePlanView.usingManualPlan && cyclePlanView.mesocycles.length > 0
-					? cyclePlanView.mesocycles
-					: autoMesocyclesAsView(microcycles, entries);
-			const resolved = resolveMesoMicroSelection(mesocycles, session.date, null, null);
-			if (resolved) {
-				mesoId = resolved.meso.plan.id;
-				microId = resolved.micro.plan.id;
-			}
-		}
-
-		if (mesoId && microId) {
-			const next = assignSessionToMicro(plan, mesoId, microId, session.date);
-			if (next !== plan) this.persistCyclePlan(next);
-		}
+		const next = assignSessionToMicro(plan, context.mesoId, context.microId, session.date);
+		if (next !== plan) this.persistCyclePlan(next);
 	}
 
 	async deleteSession(sessionId: string) {
@@ -257,6 +238,17 @@ class WorkoutStore {
 			message: keepManual
 				? '1ПМ пересчитаны из данных (ручные значения сохранены).'
 				: '1ПМ пересчитаны из данных (включая ручные).',
+			error: ''
+		});
+	}
+
+	repairMicroDatesFromAuto() {
+		const plan = this.cyclePlan;
+		if (!plan) return;
+		const next = repairMicroDatesFromAuto(plan, this.view.microcycles);
+		this.persistCyclePlan(next);
+		this.patchSync({
+			message: 'Дни по μ восстановлены из автоопределения по истории тренировок.',
 			error: ''
 		});
 	}
@@ -354,6 +346,10 @@ export function saveCyclePlanState(plan: CyclePlan) {
 
 export function refreshMesoAnchorsFromData(keepManual = true) {
 	workoutStore.refreshMesoAnchorsFromData(keepManual);
+}
+
+export function repairPlanMicroDatesFromAuto() {
+	workoutStore.repairMicroDatesFromAuto();
 }
 
 export function clearCyclePlanState() {

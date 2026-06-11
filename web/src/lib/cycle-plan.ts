@@ -680,6 +680,18 @@ export function resolveMesoMicroSelection(
 		if (meso && micro) return { meso, micro };
 	}
 
+	if (mesoId) {
+		const meso = mesocycles.find((item) => item.plan.id === mesoId);
+		if (meso) {
+			const micro =
+				(microId && meso.microcycles.find((item) => item.plan.id === microId)) ??
+				meso.microcycles.find((item) => item.plan.dates.includes(date)) ??
+				meso.microcycles.find((item) => !item.complete) ??
+				meso.microcycles[meso.microcycles.length - 1];
+			if (micro) return { meso, micro };
+		}
+	}
+
 	for (const meso of mesocycles) {
 		const micro = meso.microcycles.find((item) => item.plan.dates.includes(date));
 		if (micro) return { meso, micro };
@@ -699,10 +711,54 @@ export function resolveMesoMicroSelection(
 		if (last) return { meso: mesoByDate, micro: last };
 	}
 
+	return null;
+}
+
+/** Текущий активный μ — последний мезо, первый неполный микро (только для «сегодня»). */
+export function defaultActiveMesoMicro(
+	mesocycles: EnrichedMesocycle[]
+): { meso: EnrichedMesocycle; micro: EnrichedMicrocycle } | null {
+	if (mesocycles.length === 0) return null;
 	const meso = mesocycles[mesocycles.length - 1];
 	const incomplete = meso.microcycles.find((item) => !item.complete);
 	const micro = incomplete ?? meso.microcycles[meso.microcycles.length - 1];
 	return micro ? { meso, micro } : null;
+}
+
+/** Восстановить распределение дней по μ из автоопределения (не трогает 1ПМ и протоколы). */
+export function repairMicroDatesFromAuto(
+	plan: CyclePlan,
+	overview: MicrocycleOverview
+): CyclePlan {
+	const autoOrdered = [...overview.mesocycles].sort((a, b) =>
+		a.startDate.localeCompare(b.startDate)
+	);
+	const manualOrdered = [...plan.mesocycles].sort((a, b) =>
+		a.startDate.localeCompare(b.startDate)
+	);
+
+	const mesocycles = plan.mesocycles.map((meso) => {
+		const manualIndex = manualOrdered.findIndex((item) => item.id === meso.id);
+		const autoMeso = autoOrdered[manualIndex];
+		if (!autoMeso) return meso;
+
+		const microcycles = autoMeso.microcycles.map((micro, idx) => ({
+			id: meso.microcycles[idx]?.id ?? newId('micro'),
+			indexInMeso: micro.indexInMeso,
+			dates: micro.days.map((day) => day.date).sort(),
+			label: meso.microcycles[idx]?.label,
+			intensityPct: meso.microcycles[idx]?.intensityPct
+		}));
+
+		return reindexMeso({
+			...meso,
+			startDate: autoMeso.startDate,
+			endDate: autoMeso.endDate,
+			microcycles
+		});
+	});
+
+	return touchPlan({ ...plan, mesocycles });
 }
 
 /** Привязать дату тренировки к микроциклу, если ещё не распределена. */

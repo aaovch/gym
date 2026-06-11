@@ -3,6 +3,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import {
+		defaultActiveMesoMicro,
 		exerciseTargetOnMicro,
 		exercisesForWorkoutSlot,
 		resolveMesoMicroSelection,
@@ -35,14 +36,20 @@
 
 	const mesocycles = $derived(view.cyclePlanView.mesocycles);
 
-	const trainingContext = $derived.by(() =>
-		resolveMesoMicroSelection(
+	const trainingContext = $derived.by(() => {
+		const resolved = resolveMesoMicroSelection(
 			mesocycles,
 			selectedDate,
 			mesoPick ?? urlMeso,
 			microPick ?? urlMicro
-		)
-	);
+		);
+		if (resolved) return resolved;
+		const hasExplicitPick = Boolean(mesoPick ?? urlMeso ?? microPick ?? urlMicro);
+		if (!hasExplicitPick && selectedDate === todayIso()) {
+			return defaultActiveMesoMicro(mesocycles);
+		}
+		return null;
+	});
 
 	const mesocycle = $derived(trainingContext?.meso ?? null);
 	const microcycle = $derived(trainingContext?.micro ?? null);
@@ -185,7 +192,12 @@
 							style="--meso-color: {mesocycleColor(meso.index)}"
 							onclick={() => {
 								mesoPick = meso.plan.id;
-								microPick = meso.microcycles[0]?.plan.id ?? null;
+								microPick =
+									meso.microcycles.find((micro) => micro.plan.dates.includes(selectedDate))
+										?.plan.id ??
+									meso.microcycles.find((micro) => !micro.complete)?.plan.id ??
+									meso.microcycles[0]?.plan.id ??
+									null;
 								slotPick = null;
 							}}
 						>
@@ -318,6 +330,11 @@
 			{:else}
 				<p class="empty">В этом мезо нет упражнений для тренировки {activeSlot}. Настрой их на вкладке Циклы.</p>
 			{/if}
+		{:else if !mesocycle || !microcycle}
+			<p class="empty hint">
+				Выбери мезоцикл и μ для {formatDateRu(selectedDate)} — или восстанови даты на вкладке
+				<a href="{base}/cycles">Циклы</a> → Ещё → «Восстановить даты μ».
+			</p>
 		{/if}
 	{/if}
 </section>
