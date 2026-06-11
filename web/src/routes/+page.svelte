@@ -4,7 +4,6 @@
 	import { mesocyclePlanForDate, microcyclePlanForDate } from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
-	import { sessionIntensity } from '$lib/protocol';
 	import { deleteSession, workoutView } from '$lib/workout-store';
 
 	let selectedDate = $state(todayIso());
@@ -34,12 +33,12 @@
 	);
 
 	const protocolHints = $derived.by(() => {
-		if (!mesocycle || !microcycle || microcycle.targetPct == null) return new Map();
-		const hints = new Map<string, ReturnType<typeof sessionIntensity>>();
+		if (!microcycle) return new Map<string, (typeof microcycle.intensityByExercise)[number]>();
+		const hints = new Map<string, (typeof microcycle.intensityByExercise)[number]>();
 		for (const entry of entriesForDate) {
-			const anchor = mesocycle.plan.anchor1rm[entry.exercise];
-			if (!anchor) continue;
-			const row = sessionIntensity(entry, anchor, microcycle.targetPct);
+			const row = microcycle.intensityByExercise.find(
+				(item) => item.exercise === entry.exercise && !item.plannedOnly
+			);
 			if (row) hints.set(entry.exercise, row);
 		}
 		return hints;
@@ -135,7 +134,8 @@
 					{#if protocolHints.has(entry.exercise)}
 						{@const hint = protocolHints.get(entry.exercise)!}
 						<p class="protocol-hint" class:match={Math.abs(hint.maxPct - hint.targetPct) <= 3}>
-							Протокол: цель ~{fmtNum(hint.targetWeight)} кг ({hint.targetPct}% 1ПМ)
+							{hint.protocolLabel ? `${hint.protocolLabel}: ` : 'Протокол: '}
+							цель ~{fmtNum(hint.targetWeight)} кг ({hint.targetPct}% 1ПМ)
 							· факт пик {fmtNum(hint.maxPct)}%
 						</p>
 					{/if}

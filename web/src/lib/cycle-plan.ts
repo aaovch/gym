@@ -1,10 +1,12 @@
 import { dateToMs } from './chart-time';
 import {
 	DEFAULT_PROTOCOL_TEMPLATE,
+	STABLE_PROTOCOL_TEMPLATE,
 	type ProtocolPhase,
 	type ProtocolTemplate,
 	phaseForMicro,
-	pickAnchorExercises,
+	pickMesoExercises,
+	plannedSessionIntensity,
 	sessionIntensity,
 	anchor1rmBeforeDate
 } from './protocol';
@@ -29,9 +31,12 @@ export type MesocyclePlan = {
 	startDate: string;
 	endDate: string;
 	microcycles: MicrocyclePlan[];
+	/** Протокол по умолчанию для упражнений без своего шаблона. */
 	templateId: string;
 	/** Якорные 1ПМ на старт мезо: упражнение → кг. */
 	anchor1rm: Record<string, number>;
+	/** Свой протокол для упражнения (id шаблона). Пусто → templateId мезо. */
+	exerciseProtocols?: Record<string, string>;
 };
 
 export type CyclePlan = {
@@ -80,9 +85,58 @@ export function emptyCyclePlan(): CyclePlan {
 	return {
 		version: 1,
 		updatedAt: '',
-		templates: [structuredClone(DEFAULT_PROTOCOL_TEMPLATE)],
+		templates: [
+			structuredClone(DEFAULT_PROTOCOL_TEMPLATE),
+			structuredClone(STABLE_PROTOCOL_TEMPLATE)
+		],
 		mesocycles: []
 	};
+}
+
+function buildAnchor1rm(
+	exercises: string[],
+	entries: WorkoutEntry[],
+	startDate: string
+): Record<string, number> {
+	const anchor1rm: Record<string, number> = {};
+	for (const exercise of exercises) {
+		const value = anchor1rmBeforeDate(entries, exercise, startDate);
+		if (value) anchor1rm[exercise] = value;
+	}
+	return anchor1rm;
+}
+
+function mesoExerciseNames(overview: MicrocycleOverview, mesoIndex: number): string[] {
+	const meso = overview.mesocycles.find((item) => item.index === mesoIndex);
+	if (!meso) return [];
+	const exercises = new Set<string>();
+	for (const micro of meso.microcycles) {
+		for (const day of micro.days) {
+			for (const exercise of day.exercises) exercises.add(exercise);
+		}
+	}
+	return pickMesoExercises([...exercises]);
+}
+
+export function templateForExercise(
+	plan: CyclePlan,
+	meso: MesocyclePlan,
+	exercise: string
+): ProtocolTemplate {
+	const templateId = meso.exerciseProtocols?.[exercise] ?? meso.templateId;
+	return plan.templates.find((item) => item.id === templateId) ?? plan.templates[0];
+}
+
+export function targetPctForExercise(
+	plan: CyclePlan,
+	meso: MesocyclePlan,
+	micro: MicrocyclePlan,
+	exercise: string
+): { pct: number | null; phase: ProtocolPhase | null; template: ProtocolTemplate } {
+	const template = templateForExercise(plan, meso, exercise);
+	const phase = phaseForMicro(template, micro.indexInMeso);
+	const pct = micro.intensityPct ?? phase?.intensityPct ?? null;
+	return { pct, phase, template };
 }
 
 export function importPlanFromAuto(
@@ -96,18 +150,11 @@ export function importPlanFromAuto(
 	const defaultTemplateId = templates[0].id;
 
 	const mesocycles: MesocyclePlan[] = overview.mesocycles.map((meso) => {
-		const exercises = new Set<string>();
-		for (const micro of meso.microcycles) {
-			for (const day of micro.days) {
-				for (const exercise of day.exercises) exercises.add(exercise);
-			}
-		}
-		const anchors = pickAnchorExercises([...exercises]);
-		const anchor1rm: Record<string, number> = {};
-		for (const exercise of anchors) {
-			const value = anchor1rmBeforeDate(entries, exercise, meso.startDate);
-			if (value) anchor1rm[exercise] = value;
-		}
+		const exercises = mesoExerciseNames(overview, meso.index);
+		const anchor1rm = buildAnchor1rm(exercises, entries, meso.startDate);
+		const existingMeso = existing?.mesocycles.find(
+			(item) => item.startDate === meso.startDate && item.endDate === meso.endDate
+		);
 
 		return {
 			id: newId('meso'),
@@ -116,6 +163,7 @@ export function importPlanFromAuto(
 			endDate: meso.endDate,
 			templateId: defaultTemplateId,
 			anchor1rm,
+			exerciseProtocols: existingMeso?.exerciseProtocols ?? {},
 			microcycles: meso.microcycles.map((micro) => ({
 				id: newId('micro'),
 				indexInMeso: micro.indexInMeso,
@@ -143,7 +191,8 @@ function dayFromOverview(byDate: Map<string, TrainingDay>, date: string): Traini
 function enrichMicro(
 	plan: MicrocyclePlan,
 	meso: MesocyclePlan,
-	template: ProtocolTemplate,
+	cyclePlan: CyclePlan,
+	defaultTemplate: ProtocolTemplate,
 	byDate: Map<string, TrainingDay>,
 	entries: WorkoutEntry[]
 ): EnrichedMicrocycle {
@@ -152,29 +201,41 @@ function enrichMicro(
 		.filter((day): day is TrainingDay => day !== null);
 	const dayA = days.find((day) => day.slot === 'A') ?? null;
 	const dayB = days.find((day) => day.slot === 'B') ?? null;
-	const phase = phaseForMicro(template, plan.indexInMeso);
-	const targetPct = plan.intensityPct ?? phase?.intensityPct ?? null;
+	const defaultPhase = phaseForMicro(defaultTemplate, plan.indexInMeso);
+	const targetPct = plan.intensityPct ?? defaultPhase?.intensityPct ?? null;
 
-	const anchorExercises = Object.keys(meso.anchor1rm);
 	const intensityByExercise: ReturnType<typeof sessionIntensity>[] = [];
-	if (targetPct !== null) {
-		for (const exercise of anchorExercises) {
-			const anchor = meso.anchor1rm[exercise];
-			const entry = entries
-				.filter((item) => item.exercise === exercise && plan.dates.includes(item.date))
-				.sort((a, b) => b.date.localeCompare(a.date))[0];
-			if (!entry) continue;
-			const row = sessionIntensity(entry, anchor, targetPct);
-			if (row) intensityByExercise.push(row);
+	for (const exercise of Object.keys(meso.anchor1rm)) {
+		const anchor = meso.anchor1rm[exercise];
+		const { pct, phase, template } = targetPctForExercise(cyclePlan, meso, plan, exercise);
+		if (pct === null) continue;
+
+		const entry = entries
+			.filter((item) => item.exercise === exercise && plan.dates.includes(item.date))
+			.sort((a, b) => b.date.localeCompare(a.date))[0];
+
+		if (entry) {
+			const row = sessionIntensity(entry, anchor, pct);
+			if (row) {
+				row.protocolLabel = template.name;
+				if (phase && phase.label !== defaultPhase?.label) row.protocolLabel += ` · ${phase.label}`;
+				intensityByExercise.push(row);
+			}
+		} else {
+			intensityByExercise.push(
+				plannedSessionIntensity(exercise, anchor, pct, template.name)
+			);
 		}
 	}
+
+	intensityByExercise.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
 
 	return {
 		plan,
 		dayA,
 		dayB,
 		complete: Boolean(dayA && dayB),
-		phase,
+		phase: defaultPhase,
 		targetPct,
 		intensityByExercise
 	};
@@ -215,7 +276,7 @@ export function buildCyclePlanView(
 		const template = templateById(plan, meso.templateId);
 		const normalized = reindexMeso(meso);
 		const microcycles = normalized.microcycles.map((micro) =>
-			enrichMicro(micro, normalized, template, overview.byDate, entries)
+			enrichMicro(micro, normalized, plan, template, overview.byDate, entries)
 		);
 		const allMicroDates = normalized.microcycles.flatMap((m) => m.dates).sort();
 		const startDate = allMicroDates[0] ?? normalized.startDate;
@@ -307,7 +368,7 @@ export function removeMicrocycle(plan: CyclePlan, mesoId: string, microId: strin
 export function updateMesocycle(
 	plan: CyclePlan,
 	mesoId: string,
-	patch: Partial<Pick<MesocyclePlan, 'label' | 'templateId' | 'anchor1rm'>>
+	patch: Partial<Pick<MesocyclePlan, 'label' | 'templateId' | 'anchor1rm' | 'exerciseProtocols'>>
 ): CyclePlan {
 	return touchPlan({
 		...plan,
@@ -373,6 +434,63 @@ export function updateMicroIntensity(
 	});
 }
 
+export function updateExerciseProtocol(
+	plan: CyclePlan,
+	mesoId: string,
+	exercise: string,
+	templateId: string | null
+): CyclePlan {
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			const exerciseProtocols = { ...(meso.exerciseProtocols ?? {}) };
+			if (!templateId || templateId === meso.templateId) {
+				delete exerciseProtocols[exercise];
+			} else {
+				exerciseProtocols[exercise] = templateId;
+			}
+			return { ...meso, exerciseProtocols };
+		})
+	});
+}
+
+export function syncMesoExercises(
+	plan: CyclePlan,
+	mesoId: string,
+	exerciseNames: string[],
+	entries: WorkoutEntry[],
+	startDate: string
+): CyclePlan {
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			const anchor1rm = { ...meso.anchor1rm };
+			for (const exercise of pickMesoExercises(exerciseNames)) {
+				if (anchor1rm[exercise]) continue;
+				const value = anchor1rmBeforeDate(entries, exercise, startDate);
+				if (value) anchor1rm[exercise] = value;
+			}
+			return { ...meso, anchor1rm };
+		})
+	});
+}
+
+export function removeExerciseFromMeso(plan: CyclePlan, mesoId: string, exercise: string): CyclePlan {
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			const anchor1rm = { ...meso.anchor1rm };
+			delete anchor1rm[exercise];
+			const exerciseProtocols = { ...(meso.exerciseProtocols ?? {}) };
+			delete exerciseProtocols[exercise];
+			return { ...meso, anchor1rm, exerciseProtocols };
+		})
+	});
+}
+
 export function updateTemplate(plan: CyclePlan, template: ProtocolTemplate): CyclePlan {
 	const templates = plan.templates.some((item) => item.id === template.id)
 		? plan.templates.map((item) => (item.id === template.id ? template : item))
@@ -396,28 +514,27 @@ export function autoMesocyclesAsView(
 	overview: MicrocycleOverview,
 	entries: WorkoutEntry[]
 ): EnrichedMesocycle[] {
-	const template = DEFAULT_PROTOCOL_TEMPLATE;
+	const templates = [DEFAULT_PROTOCOL_TEMPLATE, STABLE_PROTOCOL_TEMPLATE];
+	const cyclePlan: CyclePlan = {
+		version: 1,
+		updatedAt: '',
+		templates: templates.map((item) => structuredClone(item)),
+		mesocycles: []
+	};
+	const defaultTemplate = DEFAULT_PROTOCOL_TEMPLATE;
+
 	return overview.mesocycles.map((meso, index) => {
-		const exercises = new Set<string>();
-		for (const micro of meso.microcycles) {
-			for (const day of micro.days) {
-				for (const exercise of day.exercises) exercises.add(exercise);
-			}
-		}
-		const anchorExercises = pickAnchorExercises([...exercises]);
-		const anchor1rm: Record<string, number> = {};
-		for (const exercise of anchorExercises) {
-			const value = anchor1rmBeforeDate(entries, exercise, meso.startDate);
-			if (value) anchor1rm[exercise] = value;
-		}
+		const exercises = mesoExerciseNames(overview, meso.index);
+		const anchor1rm = buildAnchor1rm(exercises, entries, meso.startDate);
 
 		const plan: MesocyclePlan = {
 			id: `auto-${meso.index}`,
 			label: meso.label,
 			startDate: meso.startDate,
 			endDate: meso.endDate,
-			templateId: template.id,
+			templateId: defaultTemplate.id,
 			anchor1rm,
+			exerciseProtocols: {},
 			microcycles: meso.microcycles.map((micro) => ({
 				id: `auto-micro-${micro.index}`,
 				indexInMeso: micro.indexInMeso,
@@ -426,12 +543,12 @@ export function autoMesocyclesAsView(
 		};
 
 		const microcycles = plan.microcycles.map((microPlan) =>
-			enrichMicro(microPlan, plan, template, overview.byDate, entries)
+			enrichMicro(microPlan, plan, cyclePlan, defaultTemplate, overview.byDate, entries)
 		);
 
 		return {
 			plan,
-			template,
+			template: defaultTemplate,
 			index: index + 1,
 			microcycles,
 			completeMicrocycles: meso.completeMicrocycles,

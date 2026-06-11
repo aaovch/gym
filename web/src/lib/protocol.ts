@@ -32,6 +32,13 @@ export const DEFAULT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
 	]
 };
 
+/** Плоский протокол — одна рабочая интенсивность на весь мезоцикл. */
+export const STABLE_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'stable-80',
+	name: 'Стабильный ~80%',
+	phases: [{ id: 's1', label: 'Рабочий', intensityPct: 80, microFrom: 1, microTo: 12 }]
+};
+
 export function phaseForMicro(template: ProtocolTemplate, microIndex: number): ProtocolPhase | null {
 	return (
 		template.phases.find(
@@ -74,6 +81,9 @@ export type SessionIntensity = {
 	maxWeight: number;
 	avgPct: number;
 	maxPct: number;
+	protocolLabel?: string;
+	/** Нет записи в этом микро — показана только цель по протоколу. */
+	plannedOnly?: boolean;
 };
 
 export function sessionIntensity(
@@ -101,9 +111,41 @@ export function sessionIntensity(
 
 const COMPOUND_RE =
 	/присед|жим|тяга|румынск|лендмайн|сплит|станов|выпад|подтяг|отжим/i;
+const CARDIO_RE = /бег|кардио|элипс/i;
 
-export function pickAnchorExercises(exercises: string[], limit = 2): string[] {
-	return exercises.filter((name) => COMPOUND_RE.test(name)).slice(0, limit);
+export function isCardioExercise(name: string): boolean {
+	return CARDIO_RE.test(name);
+}
+
+/** Все силовые упражнения мезо (без кардио), базовые — первыми. */
+export function pickMesoExercises(exercises: string[]): string[] {
+	return exercises
+		.filter((name) => !isCardioExercise(name))
+		.sort((a, b) => {
+			const aCompound = COMPOUND_RE.test(a) ? 0 : 1;
+			const bCompound = COMPOUND_RE.test(b) ? 0 : 1;
+			if (aCompound !== bCompound) return aCompound - bCompound;
+			return a.localeCompare(b, 'ru');
+		});
+}
+
+/** @deprecated используй pickMesoExercises */
+export function pickAnchorExercises(exercises: string[], limit?: number): string[] {
+	const picked = pickMesoExercises(exercises);
+	return limit ? picked.slice(0, limit) : picked;
+}
+
+export function shortExerciseName(name: string): string {
+	if (name.includes('Приседания')) return 'присед';
+	if (name.includes('Сплит')) return 'сплит';
+	if (name.includes('лендмайн')) return 'лендмайн';
+	if (name.includes('Жим гантелей лёжа')) return 'жим лёжа';
+	if (name.includes('Румынская')) return 'RDL';
+	if (name.includes('Горизонтальная тяга')) return 'тяга';
+	if (name.includes('Вертикальная тяга')) return 'тяга V';
+	if (name.includes('Вертикальный жим')) return 'жим V';
+	if (name.includes('Скручивания')) return 'пресс';
+	return name.split(' ').slice(0, 2).join(' ').toLowerCase();
 }
 
 export function newPhaseId(): string {
@@ -112,4 +154,25 @@ export function newPhaseId(): string {
 
 export function newTemplateId(): string {
 	return `tpl-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+export function plannedSessionIntensity(
+	exercise: string,
+	anchor1rm: number,
+	targetPct: number,
+	protocolLabel?: string
+): SessionIntensity {
+	return {
+		exercise,
+		date: '',
+		anchor1rm,
+		targetPct,
+		targetWeight: targetWeight(anchor1rm, targetPct),
+		avgWeight: 0,
+		maxWeight: 0,
+		avgPct: 0,
+		maxPct: 0,
+		protocolLabel,
+		plannedOnly: true
+	};
 }

@@ -6,7 +6,10 @@
 		createMesocycle,
 		removeMesocycle,
 		removeMicrocycle,
+		removeExerciseFromMeso,
+		syncMesoExercises,
 		unassignDate,
+		updateExerciseProtocol,
 		updateMesocycle,
 		updateMicroIntensity,
 		updateTemplate,
@@ -19,7 +22,7 @@
 		slotColor,
 		slotLabel
 	} from '$lib/microcycle';
-	import { DEFAULT_PROTOCOL_TEMPLATE } from '$lib/protocol';
+	import { DEFAULT_PROTOCOL_TEMPLATE, shortExerciseName } from '$lib/protocol';
 	import {
 		clearCyclePlanState,
 		importCyclePlanFromAuto,
@@ -39,12 +42,24 @@
 	const microCount = $derived(displayMesos.reduce((sum, meso) => sum + meso.microcycles.length, 0));
 	const activeTemplate = $derived(plan?.templates[0] ?? DEFAULT_PROTOCOL_TEMPLATE);
 
-	function shortName(name: string): string {
-		if (name.includes('Приседания')) return 'присед';
-		if (name.includes('Сплит')) return 'сплит';
-		if (name.includes('лендмайн')) return 'лендмайн';
-		if (name.includes('Жим гантелей лёжа')) return 'жим лёжа';
-		return name.split(' ').slice(0, 2).join(' ').toLowerCase();
+	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
+		const names = new Set<string>();
+		for (const micro of meso.microcycles) {
+			for (const day of [micro.dayA, micro.dayB]) {
+				if (!day) continue;
+				for (const exercise of day.exercises) names.add(exercise);
+			}
+		}
+		return [...names];
+	}
+
+	function exerciseTemplateId(meso: EnrichedMesocycle, exercise: string): string {
+		return meso.plan.exerciseProtocols?.[exercise] ?? meso.plan.templateId;
+	}
+
+	function templateName(meso: EnrichedMesocycle, exercise: string): string {
+		const id = exerciseTemplateId(meso, exercise);
+		return plan?.templates.find((item) => item.id === id)?.name ?? '—';
 	}
 
 	function save(next: NonNullable<typeof plan>) {
@@ -114,6 +129,36 @@
 		save(updateMicroIntensity(plan, mesoId, microId, parsed));
 	}
 
+	function handleSyncExercises(meso: EnrichedMesocycle) {
+		if (!plan) return;
+		save(
+			syncMesoExercises(
+				plan,
+				meso.plan.id,
+				mesoExerciseNames(meso),
+				get(workoutView).entries,
+				meso.plan.startDate
+			)
+		);
+	}
+
+	function handleExerciseProtocol(meso: EnrichedMesocycle, exercise: string, templateId: string) {
+		if (!plan) return;
+		save(
+			updateExerciseProtocol(
+				plan,
+				meso.plan.id,
+				exercise,
+				templateId === meso.plan.templateId ? null : templateId
+			)
+		);
+	}
+
+	function handleRemoveExercise(meso: EnrichedMesocycle, exercise: string) {
+		if (!plan) return;
+		save(removeExerciseFromMeso(plan, meso.plan.id, exercise));
+	}
+
 	function handlePhaseChange(index: number, field: 'label' | 'intensityPct' | 'microFrom' | 'microTo', value: string) {
 		if (!plan) return;
 		const phases = activeTemplate.phases.map((phase, i) => {
@@ -137,8 +182,7 @@
 		<h2>Мезо- и микроциклы</h2>
 		<p class="muted">
 			<strong>Микроцикл</strong> — пара A + B. <strong>Мезоцикл</strong> — блок из ~{MESOCYCLE_TARGET_MICROS}
-			микроциклов. <strong>Протокол</strong> — диапазоны %1ПМ по микроциклам (80% = вес 80% от якорного
-			1ПМ).
+			микроциклов. У каждого упражнения свой <strong>протокол %1ПМ</strong> (линейный, стабильный и т.д.).
 		</p>
 	</div>
 	<div class="intro-actions">
@@ -309,24 +353,57 @@
 				</div>
 
 				{#if Object.keys(meso.plan.anchor1rm).length > 0 || editMode}
-					<div class="anchors">
-						<span class="anchors-label">Якорный 1ПМ:</span>
-						{#each Object.entries(meso.plan.anchor1rm) as [exercise, value]}
-							<span class="anchor-chip">
-								{shortName(exercise)}
-								{#if editMode && plan}
-									<input
-										type="number"
-										step="0.5"
-										class="anchor-input"
-										value={value}
-										onchange={(e) => handleAnchor1rm(meso, exercise, e.currentTarget.value)}
-									/>
-								{:else}
-									<strong>{fmtNum(value)}</strong> кг
-								{/if}
-							</span>
-						{/each}
+					<div class="exercises-block">
+						<div class="exercises-head">
+							<span class="anchors-label">Упражнения и протоколы</span>
+							{#if editMode && plan}
+								<button type="button" class="ghost tiny" onclick={() => handleSyncExercises(meso)}>
+									Подтянуть из тренировок
+								</button>
+							{/if}
+						</div>
+						<div class="exercise-rows">
+							{#each Object.entries(meso.plan.anchor1rm) as [exercise, value]}
+								<div class="exercise-row">
+									<span class="exercise-name" title={exercise}>{shortExerciseName(exercise)}</span>
+									<span class="anchor-value">
+										1ПМ
+										{#if editMode && plan}
+											<input
+												type="number"
+												step="0.5"
+												class="anchor-input"
+												value={value}
+												onchange={(e) => handleAnchor1rm(meso, exercise, e.currentTarget.value)}
+											/>
+										{:else}
+											<strong>{fmtNum(value)}</strong> кг
+										{/if}
+									</span>
+									{#if editMode && plan}
+										<select
+											class="proto-select"
+											value={exerciseTemplateId(meso, exercise)}
+											onchange={(e) =>
+												handleExerciseProtocol(meso, exercise, e.currentTarget.value)}
+										>
+											{#each plan.templates as tpl}
+												<option value={tpl.id}>{tpl.name}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											class="ghost tiny danger-text"
+											onclick={() => handleRemoveExercise(meso, exercise)}
+										>
+											×
+										</button>
+									{:else}
+										<span class="proto-badge">{templateName(meso, exercise)}</span>
+									{/if}
+								</div>
+							{/each}
+						</div>
 					</div>
 				{/if}
 
@@ -387,11 +464,18 @@
 								<div class="intensity-rows">
 									{#each micro.intensityByExercise as row}
 										<div class="intensity-row">
-											<span>{shortName(row.exercise)}</span>
-											<span class="muted">цель {fmtNum(row.targetWeight)} кг</span>
-											<span class:match={Math.abs(row.maxPct - row.targetPct) <= 3}>
-												факт {fmtNum(row.maxPct)}%
+											<span>{shortExerciseName(row.exercise)}</span>
+											<span class="muted">
+												{row.protocolLabel ? `${row.protocolLabel} · ` : ''}цель {fmtNum(row.targetWeight)}
+												кг ({row.targetPct}%)
 											</span>
+											{#if row.plannedOnly}
+												<span class="muted">нет записи в μ</span>
+											{:else}
+												<span class:match={Math.abs(row.maxPct - row.targetPct) <= 3}>
+													факт {fmtNum(row.maxPct)}%
+												</span>
+											{/if}
 										</div>
 									{/each}
 								</div>
@@ -698,27 +782,67 @@
 		white-space: nowrap;
 	}
 
-	.anchors {
+	.anchors-label {
+		color: var(--muted);
+		font-size: 0.82rem;
+	}
+
+	.exercises-block {
+		margin-bottom: 0.55rem;
+	}
+
+	.exercises-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.4rem;
+	}
+
+	.exercise-rows {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.exercise-row {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.45rem;
 		align-items: center;
-		margin-bottom: 0.55rem;
+		gap: 0.45rem;
+		padding: 0.35rem 0.5rem;
+		border-radius: 8px;
+		border: 1px solid var(--border);
+		background: var(--surface);
 		font-size: 0.8rem;
 	}
 
-	.anchors-label {
-		color: var(--muted);
+	.exercise-name {
+		min-width: 5rem;
+		font-weight: 600;
 	}
 
-	.anchor-chip {
+	.anchor-value {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.35rem;
-		padding: 0.2rem 0.45rem;
+		gap: 0.25rem;
+	}
+
+	.proto-badge {
+		font-size: 0.72rem;
+		padding: 0.12rem 0.4rem;
 		border-radius: 999px;
+		background: rgba(167, 139, 250, 0.12);
+		color: #c4b5fd;
+	}
+
+	.proto-select {
+		background: var(--surface-2);
 		border: 1px solid var(--border);
-		background: var(--surface);
+		border-radius: 8px;
+		color: var(--text);
+		padding: 0.2rem 0.35rem;
+		font-size: 0.75rem;
+		max-width: 160px;
 	}
 
 	.anchor-input {
