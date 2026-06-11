@@ -3,6 +3,9 @@ import type { TrendPoint } from './types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Пропуск считается перерывом, если между сессиями больше 3 недель. */
+export const TRAINING_GAP_DAYS = 21;
+
 export type ChartPadding = {
 	left: number;
 	right: number;
@@ -16,7 +19,9 @@ export type TimeChartGap = {
 	startX: number;
 	endX: number;
 	days: number;
+	weeks: number;
 	label: string;
+	long: boolean;
 };
 
 export type TimeChartTick = {
@@ -56,9 +61,11 @@ function daysBetween(a: string, b: string): number {
 }
 
 export function formatGapLabel(days: number): string {
-	if (days < 14) return `${days} дн.`;
 	const weeks = Math.round(days / 7);
-	return weeks === 1 ? '1 нед.' : `${weeks} нед.`;
+	if (days <= TRAINING_GAP_DAYS) return `${days} дн.`;
+	if (weeks < 8) return `${weeks} нед.`;
+	const months = Math.round(days / 30);
+	return months === 1 ? '~1 мес.' : `~${months} мес.`;
 }
 
 function formatTickLabel(iso: string, spanDays: number): string {
@@ -101,7 +108,7 @@ export function buildTimeChartLayout(
 	if (points.length === 0) return null;
 
 	const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
-	const gapDays = options.gapDays ?? 21;
+	const gapDays = options.gapDays ?? TRAINING_GAP_DAYS;
 	const padding = options.padding ?? { left: 44, right: 12, top: 12, bottom: 28 };
 	const width = options.width ?? 640;
 	const height = options.height ?? 200;
@@ -131,13 +138,16 @@ export function buildTimeChartLayout(
 		const gap = daysBetween(prev.date, cur.date);
 
 		if (gap > gapDays) {
+			const weeks = Math.round(gap / 7);
 			gaps.push({
 				startDate: prev.date,
 				endDate: cur.date,
 				startX: xScale(prev.date),
 				endX: xScale(cur.date),
 				days: gap,
-				label: formatGapLabel(gap)
+				weeks,
+				label: formatGapLabel(gap),
+				long: weeks >= 6
 			});
 			segments.push(current);
 			current = [cur];
