@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-11T12:00:00.000Z",
+  "updatedAt": "2026-06-11T14:00:00.000Z",
   "groups": [
     {
       "id": "strength-training-principles",
@@ -31,6 +31,104 @@
           "id": "st-continuity",
           "text": "Принцип непрерывности",
           "tags": ["continuity", "consistency"]
+        }
+      ]
+    },
+    {
+      "id": "adapt-anatomical",
+      "title": "Адаптации к силовой тренировке · анатомическая",
+      "tags": ["adaptations", "anatomy"],
+      "theses": [
+        {
+          "id": "adapt-bone-density",
+          "text": "Повышение плотности костей",
+          "tags": ["bones"]
+        },
+        {
+          "id": "adapt-tendons-ligaments",
+          "text": "Повышение крепкости сухожилий, связок и соединительной мышечной ткани",
+          "tags": ["connective-tissue"]
+        },
+        {
+          "id": "adapt-cartilage",
+          "text": "Повышение толщины суставного хряща",
+          "tags": ["joints"]
+        },
+        {
+          "id": "adapt-hypertrophy",
+          "text": "Гипертрофия",
+          "tags": ["hypertrophy", "muscle"]
+        }
+      ]
+    },
+    {
+      "id": "adapt-neuromuscular",
+      "title": "Адаптации к силовой тренировке · нервно-мышечная",
+      "tags": ["adaptations", "neuromuscular"],
+      "theses": [
+        {
+          "id": "adapt-intramuscular",
+          "text": "Внутримышечная координация (увеличение числа возбуждаемых нейронов, частота импульсации)",
+          "tags": ["coordination", "intramuscular"]
+        },
+        {
+          "id": "adapt-intermuscular",
+          "text": "Межмышечная координация",
+          "tags": ["coordination", "intermuscular"]
+        },
+        {
+          "id": "adapt-inhibition",
+          "text": "Регуляция ингибиторных механизмов",
+          "tags": ["inhibition", "neural"]
+        }
+      ]
+    },
+    {
+      "id": "adapt-anatomical",
+      "title": "Адаптации к силовой тренировке · анатомическая",
+      "tags": ["adaptations", "anatomy"],
+      "theses": [
+        {
+          "id": "adapt-bone-density",
+          "text": "Повышение плотности костей",
+          "tags": ["bones"]
+        },
+        {
+          "id": "adapt-tendons-ligaments",
+          "text": "Повышение крепкости сухожилий, связок и соединительной мышечной ткани",
+          "tags": ["connective-tissue"]
+        },
+        {
+          "id": "adapt-cartilage",
+          "text": "Повышение толщины суставного хряща",
+          "tags": ["joints"]
+        },
+        {
+          "id": "adapt-hypertrophy",
+          "text": "Гипертрофия",
+          "tags": ["hypertrophy", "muscle"]
+        }
+      ]
+    },
+    {
+      "id": "adapt-neuromuscular",
+      "title": "Адаптации к силовой тренировке · нервно-мышечная",
+      "tags": ["adaptations", "neuromuscular"],
+      "theses": [
+        {
+          "id": "adapt-intramuscular",
+          "text": "Внутримышечная координация (увеличение числа возбуждаемых нейронов, частота импульсации)",
+          "tags": ["coordination", "intramuscular"]
+        },
+        {
+          "id": "adapt-intermuscular",
+          "text": "Межмышечная координация",
+          "tags": ["coordination", "intermuscular"]
+        },
+        {
+          "id": "adapt-inhibition",
+          "text": "Регуляция ингибиторных механизмов",
+          "tags": ["inhibition", "neural"]
         }
       ]
     },
