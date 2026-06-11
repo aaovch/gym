@@ -17,12 +17,7 @@
 		type ExerciseAnchorInfo
 	} from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum } from '$lib/format';
-	import {
-		MESOCYCLE_TARGET_MICROS,
-		mesocycleColor,
-		slotColor,
-		slotLabel
-	} from '$lib/microcycle';
+	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
 	import { DEFAULT_PROTOCOL_TEMPLATE, shortExerciseName } from '$lib/protocol';
 	import {
 		clearCyclePlanState,
@@ -33,21 +28,43 @@
 	} from '$lib/workout-store';
 	import { get } from 'svelte/store';
 
+	type MesoTab = 'plan' | 'workouts' | 'settings';
+
 	let editMode = $state(false);
+	let showHelp = $state(false);
+	let showMoreActions = $state(false);
 	let showProtocolEditor = $state(false);
+	let mesoTab = $state<MesoTab>('plan');
+	let selectedMesoId = $state<string | null>(null);
 	let selectedTemplateId = $state(DEFAULT_PROTOCOL_TEMPLATE.id);
 
-	const { templates, mesocycles, cyclePlanView } = $derived($workoutView);
+	const { templates, cyclePlanView } = $derived($workoutView);
 	const plan = $derived(cyclePlanView.plan);
 	const displayMesos = $derived(cyclePlanView.mesocycles);
 	const usingManual = $derived(cyclePlanView.usingManualPlan);
 	const unassigned = $derived(cyclePlanView.unassignedDates);
-	const microCount = $derived(displayMesos.reduce((sum, meso) => sum + meso.microcycles.length, 0));
+
+	const selectedMeso = $derived(
+		displayMesos.find((meso) => meso.plan.id === selectedMesoId) ??
+			displayMesos[displayMesos.length - 1] ??
+			null
+	);
+
 	const activeTemplate = $derived(
 		plan?.templates.find((item) => item.id === selectedTemplateId) ??
 			plan?.templates[0] ??
 			DEFAULT_PROTOCOL_TEMPLATE
 	);
+
+	$effect(() => {
+		if (displayMesos.length === 0) {
+			selectedMesoId = null;
+			return;
+		}
+		if (!selectedMesoId || !displayMesos.some((meso) => meso.plan.id === selectedMesoId)) {
+			selectedMesoId = displayMesos[displayMesos.length - 1].plan.id;
+		}
+	});
 
 	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
 		const names = new Set<string>();
@@ -64,11 +81,6 @@
 		return meso.plan.exerciseProtocols?.[exercise] ?? meso.plan.templateId;
 	}
 
-	function templateName(meso: EnrichedMesocycle, exercise: string): string {
-		const id = exerciseTemplateId(meso, exercise);
-		return plan?.templates.find((item) => item.id === id)?.name ?? '—';
-	}
-
 	function anchorSourceLabel(info: ExerciseAnchorInfo): string {
 		if (info.manual) return 'вручную';
 		if (info.source === 'prior') return 'до старта мезо';
@@ -83,6 +95,7 @@
 	function handleImport() {
 		importCyclePlanFromAuto();
 		editMode = true;
+		mesoTab = 'settings';
 	}
 
 	function handleCreateMeso() {
@@ -92,11 +105,14 @@
 			current = get(workoutView).cyclePlan;
 		}
 		if (!current) return;
-		save(createMesocycle(current));
+		const next = createMesocycle(current);
+		save(next);
+		selectedMesoId = next.mesocycles[next.mesocycles.length - 1]?.id ?? null;
+		mesoTab = 'settings';
 	}
 
 	function handleRemoveMeso(mesoId: string) {
-		if (!plan || !confirm('Удалить мезоцикл из плана? Даты станут нераспределёнными.')) return;
+		if (!plan || !confirm('Удалить мезоцикл из плана?')) return;
 		save(removeMesocycle(plan, mesoId));
 	}
 
@@ -163,7 +179,11 @@
 		save(removeExerciseFromMeso(plan, meso.plan.id, exercise));
 	}
 
-	function handlePhaseChange(index: number, field: 'label' | 'intensityPct' | 'microFrom' | 'microTo', value: string) {
+	function handlePhaseChange(
+		index: number,
+		field: 'label' | 'intensityPct' | 'microFrom' | 'microTo',
+		value: string
+	) {
 		if (!plan) return;
 		const phases = activeTemplate.phases.map((phase, i) => {
 			if (i !== index) return phase;
@@ -175,61 +195,82 @@
 		save(updateTemplate(plan, { ...activeTemplate, phases }));
 	}
 
-	function protocolBarWidth(phase: (typeof activeTemplate.phases)[0], totalMicros: number): string {
-		const span = phase.microTo - phase.microFrom + 1;
-		return `${(span / Math.max(totalMicros, 1)) * 100}%`;
+	function targetWeight(anchor: number, pct: number): number {
+		return Math.round((anchor * pct) / 100 * 2) / 2;
 	}
 </script>
 
-<section class="card intro">
+<!-- 1. Шапка -->
+<section class="card page-head">
 	<div>
-		<h2>Мезо- и микроциклы</h2>
+		<h2>Циклы тренировок</h2>
 		<p class="muted">
-			<strong>Микроцикл</strong> — пара A + B. У каждого упражнения свой <strong>1ПМ</strong> и свой
-			<strong>протокол</strong> (% по μ). Якорный 1ПМ фиксируется на старт мезо и берётся из прошлого
-			блока.
+			Мезоцикл — блок из микроциклов (A+B). У каждого упражнения свой 1ПМ и протокол % по μ.
 		</p>
 	</div>
-	<div class="intro-actions">
+	<div class="head-actions">
 		{#if !usingManual}
-			<button type="button" class="primary" onclick={handleImport}>Импорт из авто</button>
+			<button type="button" class="btn primary" onclick={handleImport}>Импорт из авто</button>
 		{:else}
-			<button type="button" class="ghost" onclick={() => (editMode = !editMode)}>
-				{editMode ? 'Готово' : 'Редактировать'}
+			<button type="button" class="btn" class:active={editMode} onclick={() => (editMode = !editMode)}>
+				{editMode ? '✓ Редактирование' : 'Редактировать'}
 			</button>
-			<button type="button" class="ghost" onclick={() => refreshMesoAnchorsFromData(true)}>
-				Пересчитать 1ПМ
-			</button>
-			<button type="button" class="ghost" onclick={() => (showProtocolEditor = !showProtocolEditor)}>
-				{showProtocolEditor ? 'Скрыть протокол' : 'Шаблон протокола'}
-			</button>
-			<button type="button" class="ghost danger-text" onclick={clearCyclePlanState}>
-				Сбросить план
-			</button>
+			<div class="more-wrap">
+				<button type="button" class="btn" onclick={() => (showMoreActions = !showMoreActions)}>
+					Ещё ▾
+				</button>
+				{#if showMoreActions}
+					<div class="more-menu">
+						<button type="button" onclick={() => refreshMesoAnchorsFromData(true)}>Пересчитать 1ПМ</button>
+						<button type="button" onclick={() => (showProtocolEditor = !showProtocolEditor)}>
+							{showProtocolEditor ? 'Скрыть шаблоны %' : 'Шаблоны протокола'}
+						</button>
+						<button type="button" class="danger" onclick={clearCyclePlanState}>Сбросить план</button>
+					</div>
+				{/if}
+			</div>
 		{/if}
-		{#if usingManual && editMode}
-			<button type="button" class="primary" onclick={handleCreateMeso}>+ Мезоцикл</button>
-		{/if}
+		<button type="button" class="btn ghost-link" onclick={() => (showHelp = !showHelp)}>
+			{showHelp ? 'Скрыть справку' : 'Справка A/B'}
+		</button>
 	</div>
 </section>
 
-{#if showProtocolEditor && plan}
-	<section class="card protocol-editor">
-		<div class="protocol-editor-head">
-			<h3>Редактор шаблона протокола</h3>
-			<select bind:value={selectedTemplateId} class="proto-select">
-				{#each plan.templates as tpl}
-					<option value={tpl.id}>{tpl.name}</option>
-				{/each}
-			</select>
+{#if showHelp}
+	<section class="card help-card">
+		<h3>Шаблоны тренировок A / B</h3>
+		<div class="ab-grid">
+			{#each templates as template}
+				<article class="ab-card" style="--slot-color: {slotColor(template.slot)}">
+					<span class="slot-badge">{template.slot}</span>
+					<strong>{slotLabel(template.slot)}</strong>
+					<p class="muted">{template.label}</p>
+					<p class="meta">{template.sessions} дней в базе</p>
+				</article>
+			{/each}
 		</div>
-		<p class="muted">
-			Шаблон назначается каждому упражнению отдельно в блоке ниже. Фазы — целевой % от <em>его</em> 1ПМ.
-		</p>
-		<div class="phase-table">
+	</section>
+{/if}
+
+{#if showProtocolEditor && plan}
+	<section class="card">
+		<h3>Шаблоны протокола (% от 1ПМ)</h3>
+		<p class="muted">Назначаются каждому упражнению отдельно во вкладке «Настройки».</p>
+		<div class="template-picker">
+			<label>
+				<span>Редактировать</span>
+				<select bind:value={selectedTemplateId} class="field-select">
+					{#each plan.templates as tpl}
+						<option value={tpl.id}>{tpl.name}</option>
+					{/each}
+				</select>
+			</label>
+		</div>
+		<div class="phase-grid">
 			{#each activeTemplate.phases as phase, index}
-				<div class="phase-row">
+				<div class="phase-card">
 					<input
+						class="field-input"
 						type="text"
 						value={phase.label}
 						disabled={!editMode}
@@ -238,9 +279,8 @@
 					<label>
 						<span>%1ПМ</span>
 						<input
+							class="field-input"
 							type="number"
-							min="50"
-							max="100"
 							step="2.5"
 							value={phase.intensityPct}
 							disabled={!editMode}
@@ -248,22 +288,18 @@
 						/>
 					</label>
 					<label>
-						<span>μ от</span>
+						<span>μ</span>
 						<input
+							class="field-input narrow"
 							type="number"
-							min="1"
-							max="12"
 							value={phase.microFrom}
 							disabled={!editMode}
 							onchange={(e) => handlePhaseChange(index, 'microFrom', e.currentTarget.value)}
 						/>
-					</label>
-					<label>
-						<span>μ до</span>
+						<span>—</span>
 						<input
+							class="field-input narrow"
 							type="number"
-							min="1"
-							max="12"
 							value={phase.microTo}
 							disabled={!editMode}
 							onchange={(e) => handlePhaseChange(index, 'microTo', e.currentTarget.value)}
@@ -272,301 +308,333 @@
 				</div>
 			{/each}
 		</div>
-		<div class="protocol-preview">
-			{#each activeTemplate.phases as phase}
-				<div
-					class="proto-seg"
-					style="width: {protocolBarWidth(phase, activeTemplate.phases[activeTemplate.phases.length - 1]?.microTo ?? 4)}"
-					title="{phase.label}: {phase.intensityPct}% (μ{phase.microFrom}–{phase.microTo})"
+	</section>
+{/if}
+
+<!-- 2. Выбор мезоцикла -->
+{#if displayMesos.length === 0}
+	<section class="card empty-state">
+		<h3>Нет данных о циклах</h3>
+		<p class="muted">Импортируй автоопределение из тренировок, чтобы увидеть мезо- и микроциклы.</p>
+		{#if !usingManual}
+			<button type="button" class="btn primary" onclick={handleImport}>Импорт из авто</button>
+		{/if}
+	</section>
+{:else}
+	<section class="card meso-picker">
+		<div class="picker-head">
+			<h3>Мезоциклы</h3>
+			{#if editMode && usingManual}
+				<button type="button" class="btn small primary" onclick={handleCreateMeso}>+ Новый</button>
+			{/if}
+		</div>
+		<div class="meso-tabs">
+			{#each displayMesos as meso}
+				<button
+					type="button"
+					class="meso-tab"
+					class:active={selectedMeso?.plan.id === meso.plan.id}
+					style="--meso-color: {mesocycleColor(meso.index)}"
+					onclick={() => (selectedMesoId = meso.plan.id)}
 				>
-					<span>{phase.intensityPct}%</span>
-					<small>{phase.label}</small>
-				</div>
+					<span class="meso-tab-num">#{meso.index}</span>
+					<span class="meso-tab-label">{meso.plan.label}</span>
+					<span class="meso-tab-dates">
+						{formatDateRu(meso.plan.startDate)} — {formatDateRu(meso.plan.endDate)}
+					</span>
+				</button>
 			{/each}
 		</div>
 	</section>
-{/if}
 
-<section class="card templates">
-	<h3>Шаблоны A / B</h3>
-	<div class="template-grid">
-		{#each templates as template}
-			<article class="template-card" style="--slot-color: {slotColor(template.slot)}">
-				<div class="template-head">
-					<span class="slot-badge">{template.slot}</span>
-					<strong>{slotLabel(template.slot)}</strong>
+	{#if selectedMeso}
+		<!-- 3. Детали выбранного мезо -->
+		<section class="card meso-detail" style="--meso-color: {mesocycleColor(selectedMeso.index)}">
+			<div class="detail-head">
+				<div>
+					<p class="detail-kicker">Мезоцикл #{selectedMeso.index}</p>
+					{#if editMode && plan}
+						<input
+							class="detail-title-input"
+							value={selectedMeso.plan.label}
+							onchange={(e) => handleMesoLabel(selectedMeso, e.currentTarget.value)}
+						/>
+					{:else}
+						<h3>{selectedMeso.plan.label}</h3>
+					{/if}
+					<p class="muted">
+						{formatDateRu(selectedMeso.plan.startDate)} — {formatDateRu(selectedMeso.plan.endDate)}
+						· {selectedMeso.durationDays} дн.
+						· {selectedMeso.completeMicrocycles}/{selectedMeso.microcycles.length} полных μ
+					</p>
 				</div>
-				<p class="muted">{template.label}</p>
-				<p class="meta">{template.sessions} дней в базе</p>
-			</article>
-		{/each}
-	</div>
-</section>
-
-{#if editMode && unassigned.length > 0}
-	<section class="card unassigned">
-		<h3>Нераспределённые дни ({unassigned.length})</h3>
-		<div class="date-pool">
-			{#each unassigned as date}
-				<span class="pool-chip">{formatDateRu(date)}</span>
-			{/each}
-		</div>
-	</section>
-{/if}
-
-<section class="card">
-	<div class="toolbar">
-		<h3>{usingManual ? 'План блоков' : 'История блоков (авто)'}</h3>
-		<p class="muted">
-			{displayMesos.length} мезоциклов · {microCount} микроциклов
-			{#if !usingManual}· нажми «Импорт из авто», чтобы редактировать{/if}
-		</p>
-	</div>
-
-	<div class="meso-list">
-		{#each [...displayMesos].reverse() as meso}
-			{@const totalMicros = meso.microcycles.length}
-			<article
-				class="meso-card"
-				style="--meso-color: {mesocycleColor(meso.index)}"
-			>
-				<div class="meso-head">
-					<div class="meso-title-block">
-						{#if editMode && plan}
-							<input
-								class="meso-label-input"
-								value={meso.plan.label}
-								onchange={(e) => handleMesoLabel(meso, e.currentTarget.value)}
-							/>
-						{:else}
-							<p class="meso-title">Мезоцикл #{meso.index}</p>
-							<p class="muted meso-sub">{meso.plan.label}</p>
-						{/if}
-						<p class="muted meso-sub">
-							{formatDateRu(meso.plan.startDate)} — {formatDateRu(meso.plan.endDate)}
-							· {meso.durationDays} дн.
-						</p>
+				{#if editMode && plan}
+					<div class="detail-actions">
+						<button type="button" class="btn small" onclick={() => handleAddMicro(selectedMeso.plan.id)}>
+							+ μ
+						</button>
+						<button
+							type="button"
+							class="btn small danger"
+							onclick={() => handleRemoveMeso(selectedMeso.plan.id)}
+						>
+							Удалить мезо
+						</button>
 					</div>
-					<div class="meso-actions">
-						<span class="meso-badge">
-							{meso.completeMicrocycles}/{totalMicros} микро
-						</span>
-						{#if editMode && plan}
-							<button type="button" class="ghost tiny" onclick={() => handleAddMicro(meso.plan.id)}>
-								+ μ
-							</button>
-							<button
-								type="button"
-								class="ghost tiny danger-text"
-								onclick={() => handleRemoveMeso(meso.plan.id)}
-							>
-								×
-							</button>
-						{/if}
+				{/if}
+			</div>
+
+			<!-- Внутренние вкладки -->
+			<div class="sub-tabs">
+				<button
+					type="button"
+					class="sub-tab"
+					class:active={mesoTab === 'plan'}
+					onclick={() => (mesoTab = 'plan')}
+				>
+					План (% и цели)
+				</button>
+				<button
+					type="button"
+					class="sub-tab"
+					class:active={mesoTab === 'workouts'}
+					onclick={() => (mesoTab = 'workouts')}
+				>
+					Тренировки (μ)
+				</button>
+				{#if editMode && usingManual}
+					<button
+						type="button"
+						class="sub-tab"
+						class:active={mesoTab === 'settings'}
+						onclick={() => (mesoTab = 'settings')}
+					>
+						Настройки
+					</button>
+				{/if}
+			</div>
+
+			{#if mesoTab === 'plan'}
+				<div class="tab-panel">
+					<p class="panel-hint muted">
+						Якорный 1ПМ на старт блока · целевой вес = 1ПМ × % протокола
+					</p>
+					<div class="matrix-wrap">
+						<table class="matrix">
+							<thead>
+								<tr>
+									<th>Упражнение</th>
+									<th>1ПМ</th>
+									<th>Протокол</th>
+									{#each selectedMeso.microcycles as micro}
+										<th>μ{micro.plan.indexInMeso}</th>
+									{/each}
+								</tr>
+							</thead>
+							<tbody>
+								{#each selectedMeso.protocolMatrix as row}
+									<tr>
+										<td class="ex-name" title={row.exercise}>{shortExerciseName(row.exercise)}</td>
+										<td>{fmtNum(row.anchor)}</td>
+										<td class="proto-name">{row.templateName}</td>
+										{#each row.cells as cell}
+											<td class="pct" title={cell.label ?? ''}>
+												<span class="pct-val">{cell.pct != null ? `${cell.pct}%` : '—'}</span>
+												{#if cell.pct != null}
+													<small>{fmtNum(targetWeight(row.anchor, cell.pct))} кг</small>
+												{/if}
+											</td>
+										{/each}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
 					</div>
 				</div>
-
-				{#if Object.keys(meso.anchorInfo).length > 0 || editMode}
-					<div class="exercises-block">
-						<div class="exercises-head">
-							<span class="anchors-label">Упражнения и протоколы</span>
-							{#if editMode && plan}
-								<button type="button" class="ghost tiny" onclick={() => handleSyncExercises(meso)}>
-									Подтянуть из тренировок
-								</button>
+			{:else if mesoTab === 'workouts'}
+				<div class="tab-panel micro-timeline">
+					{#each selectedMeso.microcycles as micro}
+						<article class="micro-block" class:complete={micro.complete}>
+							<div class="micro-top">
+								<span class="micro-label">μ{micro.plan.indexInMeso}</span>
+								<div class="micro-days">
+									{#if micro.dayA}
+										<a class="day-link a" href="{base}/?date={micro.dayA.date}">
+											A · {formatDateRu(micro.dayA.date)}
+										</a>
+									{/if}
+									{#if micro.dayB}
+										<a class="day-link b" href="{base}/?date={micro.dayB.date}">
+											B · {formatDateRu(micro.dayB.date)}
+										</a>
+									{/if}
+								</div>
+								<span class="micro-badge" class:ok={micro.complete}>
+									{micro.complete ? 'A+B' : 'неполный'}
+								</span>
+							</div>
+							{#if micro.intensityByExercise.length > 0}
+								<table class="result-table">
+									<thead>
+										<tr>
+											<th></th>
+											<th>Цель</th>
+											<th>Факт</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each micro.intensityByExercise as row}
+											<tr class:match={!row.plannedOnly && Math.abs(row.maxPct - row.targetPct) <= 3}>
+												<td>
+													<strong>{shortExerciseName(row.exercise)}</strong>
+													<small class="muted">{row.protocolLabel ?? ''}</small>
+												</td>
+												<td>
+													{fmtNum(row.targetWeight)} кг
+													<small class="muted">({row.targetPct}%)</small>
+												</td>
+												<td>
+													{#if row.plannedOnly}
+														<span class="muted">—</span>
+													{:else}
+														{fmtNum(row.maxPct)}%
+													{/if}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							{:else}
+								<p class="muted empty-micro">Нет данных по упражнениям</p>
 							{/if}
+						</article>
+					{/each}
+					{#if selectedMeso.gapAfterDays !== null && selectedMeso.gapAfterDays >= 14}
+						<p class="gap-note">
+							Перерыв до следующего блока: {Math.round(selectedMeso.gapAfterDays / 7)} нед.
+						</p>
+					{/if}
+				</div>
+			{:else if mesoTab === 'settings' && editMode && plan}
+				<div class="tab-panel">
+					{#if unassigned.length > 0}
+						<div class="settings-block">
+							<h4>Нераспределённые дни ({unassigned.length})</h4>
+							<div class="chip-row">
+								{#each unassigned as date}
+									<span class="chip">{formatDateRu(date)}</span>
+								{/each}
+							</div>
 						</div>
-						<div class="exercise-rows">
-							{#each Object.entries(meso.anchorInfo) as [exercise, info]}
-								<div class="exercise-row">
-									<span class="exercise-name" title={exercise}>{shortExerciseName(exercise)}</span>
-									<span class="anchor-value">
-										1ПМ
-										{#if editMode && plan}
-											<input
-												type="number"
-												step="0.5"
-												class="anchor-input"
-												value={info.anchor}
-												onchange={(e) => handleAnchor1rm(meso, exercise, e.currentTarget.value)}
-											/>
-										{:else}
-											<strong>{fmtNum(info.anchor)}</strong> кг
-										{/if}
-									</span>
-									<span class="anchor-meta muted">
-										{anchorSourceLabel(info)}
-										{#if info.anchorDate}
-											· {formatDateRu(info.anchorDate)}
-										{/if}
-										{#if info.peakInMeso != null && info.peakInMeso > info.anchor}
-											· пик {fmtNum(info.peakInMeso)} кг
-											{#if info.peakDate}({formatDateRu(info.peakDate)}){/if}
-										{/if}
-									</span>
-									{#if editMode && plan}
+					{/if}
+
+					<div class="settings-block">
+						<div class="block-head">
+							<h4>Упражнения: 1ПМ и протокол</h4>
+							<button type="button" class="btn small" onclick={() => handleSyncExercises(selectedMeso)}>
+								Подтянуть из тренировок
+							</button>
+						</div>
+						<div class="exercise-settings">
+							{#each Object.entries(selectedMeso.anchorInfo) as [exercise, info]}
+								<div class="exercise-setting-row">
+									<div class="exercise-setting-main">
+										<strong title={exercise}>{shortExerciseName(exercise)}</strong>
+										<span class="muted">{anchorSourceLabel(info)}</span>
+									</div>
+									<label>
+										<span>1ПМ, кг</span>
+										<input
+											type="number"
+											step="0.5"
+											class="field-input"
+											value={info.anchor}
+											onchange={(e) => handleAnchor1rm(selectedMeso, exercise, e.currentTarget.value)}
+										/>
+									</label>
+									<label>
+										<span>Протокол</span>
 										<select
-											class="proto-select"
-											value={exerciseTemplateId(meso, exercise)}
+											class="field-select"
+											value={exerciseTemplateId(selectedMeso, exercise)}
 											onchange={(e) =>
-												handleExerciseProtocol(meso, exercise, e.currentTarget.value)}
+												handleExerciseProtocol(selectedMeso, exercise, e.currentTarget.value)}
 										>
 											{#each plan.templates as tpl}
 												<option value={tpl.id}>{tpl.name}</option>
 											{/each}
 										</select>
+									</label>
+									<button
+										type="button"
+										class="btn small danger"
+										onclick={() => handleRemoveExercise(selectedMeso, exercise)}
+									>
+										×
+									</button>
+								</div>
+							{/each}
+						</div>
+					</div>
+
+					<div class="settings-block">
+						<h4>Распределение дней по μ</h4>
+						<div class="assign-grid">
+							{#each selectedMeso.microcycles as micro}
+								<div class="assign-card">
+									<div class="assign-head">
+										<strong>μ{micro.plan.indexInMeso}</strong>
 										<button
 											type="button"
-											class="ghost tiny danger-text"
-											onclick={() => handleRemoveExercise(meso, exercise)}
+											class="btn small danger"
+											onclick={() => handleRemoveMicro(selectedMeso.plan.id, micro.plan.id)}
 										>
 											×
 										</button>
-									{:else}
-										<span class="proto-badge">{templateName(meso, exercise)}</span>
+									</div>
+									<div class="chip-row">
+										{#each micro.plan.dates as date}
+											<span class="chip">
+												{formatDateRu(date)}
+												<button type="button" class="chip-x" onclick={() => handleUnassign(date)}>×</button>
+											</span>
+										{/each}
+										{#if micro.plan.dates.length === 0}
+											<span class="muted">нет дней</span>
+										{/if}
+									</div>
+									{#if unassigned.length > 0}
+										<select
+											class="field-select"
+											onchange={(e) => {
+												handleAssign(selectedMeso.plan.id, micro.plan.id, e.currentTarget.value);
+												e.currentTarget.value = '';
+											}}
+										>
+											<option value="">+ добавить день</option>
+											{#each unassigned as date}
+												<option value={date}>{formatDateRu(date)}</option>
+											{/each}
+										</select>
 									{/if}
 								</div>
 							{/each}
 						</div>
 					</div>
-				{/if}
-
-				<div class="protocol-matrix-wrap">
-					<table class="protocol-matrix">
-						<thead>
-							<tr>
-								<th>Упражнение</th>
-								<th>1ПМ</th>
-								<th>Протокол</th>
-								{#each meso.microcycles as micro}
-									<th>μ{micro.plan.indexInMeso}</th>
-								{/each}
-							</tr>
-						</thead>
-						<tbody>
-							{#each meso.protocolMatrix as row}
-								<tr>
-									<td title={row.exercise}>{shortExerciseName(row.exercise)}</td>
-									<td>{fmtNum(row.anchor)}</td>
-									<td class="proto-cell">{row.templateName}</td>
-									{#each row.cells as cell}
-										<td class="pct-cell" title={cell.label ?? ''}>
-											{cell.pct != null ? `${cell.pct}%` : '—'}
-										</td>
-									{/each}
-								</tr>
-							{/each}
-						</tbody>
-					</table>
 				</div>
-
-				<div class="micro-list">
-					{#each meso.microcycles as micro}
-						<div class="micro-card" class:complete={micro.complete}>
-							<div class="micro-head">
-								<span class="micro-index">μ{micro.plan.indexInMeso}</span>
-								{#if editMode && plan}
-									<button
-										type="button"
-										class="ghost tiny danger-text"
-										onclick={() => handleRemoveMicro(meso.plan.id, micro.plan.id)}
-									>
-										×
-									</button>
-								{/if}
-								<span class="micro-status" class:ok={micro.complete}>
-									{micro.complete ? 'A+B' : 'частично'}
-								</span>
-							</div>
-
-							{#if micro.intensityByExercise.length > 0}
-								<div class="intensity-rows">
-									{#each micro.intensityByExercise as row}
-										<div class="intensity-row">
-											<span class="exercise-col">{shortExerciseName(row.exercise)}</span>
-											<span class="muted">1ПМ {fmtNum(row.anchor1rm)} кг</span>
-											<span class="muted">
-												{row.protocolLabel ? `${row.protocolLabel} · ` : ''}цель {fmtNum(row.targetWeight)}
-												кг ({row.targetPct}%)
-											</span>
-											{#if row.plannedOnly}
-												<span class="muted">не было в этот μ</span>
-											{:else}
-												<span class:match={Math.abs(row.maxPct - row.targetPct) <= 3}>
-													факт {fmtNum(row.maxPct)}%
-												</span>
-											{/if}
-										</div>
-									{/each}
-								</div>
-							{:else}
-								<p class="muted micro-empty">Нет упражнений с якорным 1ПМ в этом μ</p>
-							{/if}
-
-							<div class="cycle-days">
-								{#if micro.dayA}
-									<a class="day-chip slot-a" href="{base}/?date={micro.dayA.date}">
-										<span class="slot">A</span>
-										<span>{formatDateRu(micro.dayA.date)}</span>
-									</a>
-								{/if}
-								{#if micro.dayB}
-									<a class="day-chip slot-b" href="{base}/?date={micro.dayB.date}">
-										<span class="slot">B</span>
-										<span>{formatDateRu(micro.dayB.date)}</span>
-									</a>
-								{/if}
-								{#each micro.plan.dates.filter((d) => d !== micro.dayA?.date && d !== micro.dayB?.date) as date}
-									<a class="day-chip" href="{base}/?date={date}">
-										<span>{formatDateRu(date)}</span>
-										{#if editMode && plan}
-											<button
-												type="button"
-												class="unlink"
-												onclick={(e) => {
-													e.preventDefault();
-													handleUnassign(date);
-												}}
-											>
-												×
-											</button>
-										{/if}
-									</a>
-								{/each}
-							</div>
-
-							{#if editMode && plan && unassigned.length > 0}
-								<label class="assign-field">
-									<span>Добавить день</span>
-									<select
-										onchange={(e) => {
-											handleAssign(meso.plan.id, micro.plan.id, e.currentTarget.value);
-											e.currentTarget.value = '';
-										}}
-									>
-										<option value="">— выбрать —</option>
-										{#each unassigned as date}
-											<option value={date}>{formatDateRu(date)}</option>
-										{/each}
-									</select>
-								</label>
-							{/if}
-						</div>
-					{/each}
-				</div>
-
-				{#if meso.gapAfterDays !== null && meso.gapAfterDays >= 14}
-					<p class="gap-note">
-						До следующего мезоблока {Math.round(meso.gapAfterDays / 7)} нед.
-					</p>
-				{/if}
-			</article>
-		{/each}
-	</div>
-</section>
+			{/if}
+		</section>
+	{/if}
+{/if}
 
 <style>
-	.intro {
+	h2,
+	h3,
+	h4 {
+		margin: 0;
+	}
+
+	.page-head {
 		display: flex;
 		justify-content: space-between;
 		gap: 1rem;
@@ -574,482 +642,569 @@
 		align-items: start;
 	}
 
-	.intro h2,
-	.templates h3,
-	.toolbar h3,
-	.protocol-editor h3,
-	.unassigned h3 {
-		margin: 0 0 0.25rem;
+	.page-head h2 {
+		margin-bottom: 0.25rem;
 	}
 
-	.intro-actions {
+	.head-actions {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.45rem;
+		align-items: center;
 	}
 
-	button.primary {
+	.btn {
 		border-radius: 10px;
 		padding: 0.5rem 0.85rem;
-		border: 1px solid rgba(110, 231, 168, 0.45);
-		background: rgba(110, 231, 168, 0.16);
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		color: var(--text);
+	}
+
+	.btn.primary {
+		border-color: rgba(110, 231, 168, 0.45);
+		background: rgba(110, 231, 168, 0.14);
 		color: var(--accent);
 	}
 
-	button.ghost {
-		border-radius: 10px;
-		padding: 0.5rem 0.85rem;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
+	.btn.active {
+		border-color: rgba(110, 231, 168, 0.5);
+		background: rgba(110, 231, 168, 0.2);
+		color: var(--accent);
 	}
 
-	button.tiny {
-		padding: 0.2rem 0.45rem;
+	.btn.small {
+		padding: 0.3rem 0.55rem;
 		font-size: 0.78rem;
 	}
 
-	.danger-text {
+	.btn.danger,
+	.btn.small.danger {
+		color: var(--danger);
+		border-color: rgba(255, 143, 143, 0.35);
+	}
+
+	.btn.ghost-link {
+		background: transparent;
+		color: var(--muted);
+	}
+
+	.more-wrap {
+		position: relative;
+	}
+
+	.more-menu {
+		position: absolute;
+		top: calc(100% + 0.35rem);
+		right: 0;
+		z-index: 5;
+		display: grid;
+		min-width: 11rem;
+		padding: 0.35rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+	}
+
+	.more-menu button {
+		text-align: left;
+		padding: 0.45rem 0.55rem;
+		border: none;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--text);
+	}
+
+	.more-menu button:hover {
+		background: var(--surface-2);
+	}
+
+	.more-menu button.danger {
 		color: var(--danger);
 	}
 
-	.protocol-editor {
+	.ab-grid {
 		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 		gap: 0.75rem;
+		margin-top: 0.75rem;
 	}
 
-	.phase-table {
-		display: grid;
-		gap: 0.45rem;
-	}
-
-	.phase-row {
-		display: grid;
-		grid-template-columns: 1fr repeat(3, auto);
-		gap: 0.5rem;
-		align-items: end;
-	}
-
-	.phase-row input {
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		color: var(--text);
-		padding: 0.4rem 0.55rem;
-		min-width: 4rem;
-	}
-
-	.phase-row label {
-		display: grid;
-		gap: 0.15rem;
-		font-size: 0.75rem;
-		color: var(--muted);
-	}
-
-	.protocol-preview {
-		display: flex;
-		gap: 2px;
-		border-radius: 8px;
-		overflow: hidden;
-		min-height: 2rem;
-	}
-
-	.proto-seg {
-		display: grid;
-		place-content: center;
-		text-align: center;
-		font-size: 0.72rem;
-		background: rgba(167, 139, 250, 0.2);
-		border: 1px solid rgba(167, 139, 250, 0.25);
-		padding: 0.2rem;
-	}
-
-	.proto-seg small {
-		color: var(--muted);
-		font-size: 0.65rem;
-	}
-
-	.template-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 0.85rem;
-		margin-top: 0.85rem;
-	}
-
-	.template-card {
+	.ab-card {
 		padding: 0.85rem;
 		border-radius: 12px;
 		border: 1px solid color-mix(in srgb, var(--slot-color) 35%, var(--border));
 		background: color-mix(in srgb, var(--slot-color) 8%, var(--surface-2));
 	}
 
-	.template-head {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.35rem;
-	}
-
 	.slot-badge {
 		display: inline-grid;
 		place-items: center;
-		width: 1.6rem;
-		height: 1.6rem;
+		width: 1.5rem;
+		height: 1.5rem;
+		margin-right: 0.35rem;
 		border-radius: 999px;
 		background: var(--slot-color);
 		color: #0f1115;
-		font-size: 0.85rem;
+		font-size: 0.8rem;
 		font-weight: 800;
 	}
 
 	.meta {
-		margin: 0.35rem 0 0;
+		margin: 0.25rem 0 0;
 		font-size: 0.82rem;
 		color: var(--muted);
 	}
 
-	.date-pool {
+	.empty-state {
+		text-align: center;
+		padding: 2rem 1.25rem;
+	}
+
+	.empty-state h3 {
+		margin-bottom: 0.35rem;
+	}
+
+	.empty-state .btn {
+		margin-top: 1rem;
+	}
+
+	.picker-head {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-		margin-top: 0.5rem;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.75rem;
 	}
 
-	.pool-chip {
-		font-size: 0.78rem;
-		padding: 0.25rem 0.5rem;
-		border-radius: 999px;
-		border: 1px dashed var(--border);
+	.meso-tabs {
+		display: flex;
+		gap: 0.5rem;
+		overflow-x: auto;
+		padding-bottom: 0.25rem;
+	}
+
+	.meso-tab {
+		flex: 0 0 auto;
+		min-width: 9rem;
+		padding: 0.65rem 0.85rem;
+		border-radius: 12px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		text-align: left;
+		color: var(--text);
+	}
+
+	.meso-tab.active {
+		border-color: color-mix(in srgb, var(--meso-color) 55%, var(--border));
+		background: color-mix(in srgb, var(--meso-color) 12%, var(--surface-2));
+	}
+
+	.meso-tab-num {
+		display: block;
+		font-weight: 800;
+		color: var(--meso-color);
+		font-size: 0.85rem;
+	}
+
+	.meso-tab-label {
+		display: block;
+		font-size: 0.82rem;
+		margin-top: 0.15rem;
+	}
+
+	.meso-tab-dates {
+		display: block;
+		font-size: 0.72rem;
 		color: var(--muted);
+		margin-top: 0.15rem;
 	}
 
-	.toolbar {
+	.meso-detail {
+		border-color: color-mix(in srgb, var(--meso-color) 35%, var(--border));
+	}
+
+	.detail-head {
 		display: flex;
 		justify-content: space-between;
 		gap: 1rem;
-		align-items: end;
 		flex-wrap: wrap;
 		margin-bottom: 1rem;
 	}
 
-	.meso-list {
-		display: grid;
-		gap: 0.85rem;
-	}
-
-	.meso-card {
-		padding: 0.9rem;
-		border-radius: 14px;
-		border: 1px solid color-mix(in srgb, var(--meso-color) 40%, var(--border));
-		background: color-mix(in srgb, var(--meso-color) 7%, var(--surface-2));
-	}
-
-	.meso-head {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.75rem;
-		align-items: start;
-		margin-bottom: 0.55rem;
-	}
-
-	.meso-title {
-		margin: 0;
+	.detail-kicker {
+		margin: 0 0 0.15rem;
+		font-size: 0.78rem;
 		font-weight: 700;
 		color: var(--meso-color);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
-	.meso-label-input {
+	.detail-title-input {
 		width: 100%;
-		max-width: 280px;
-		background: var(--surface);
+		max-width: 320px;
+		font-size: 1.25rem;
+		font-weight: 700;
+		background: var(--surface-2);
 		border: 1px solid var(--border);
 		border-radius: 8px;
 		color: var(--text);
 		padding: 0.35rem 0.5rem;
-		font-weight: 700;
+		margin-bottom: 0.25rem;
 	}
 
-	.meso-sub {
-		margin: 0.2rem 0 0;
+	.detail-actions {
+		display: flex;
+		gap: 0.35rem;
+		align-items: start;
+	}
+
+	.sub-tabs {
+		display: flex;
+		gap: 0.35rem;
+		flex-wrap: wrap;
+		margin-bottom: 1rem;
+		padding: 0.25rem;
+		border-radius: 12px;
+		background: var(--surface-2);
+	}
+
+	.sub-tab {
+		padding: 0.45rem 0.85rem;
+		border-radius: 8px;
+		border: none;
+		background: transparent;
+		color: var(--muted);
 		font-size: 0.85rem;
 	}
 
-	.meso-actions {
-		display: flex;
-		gap: 0.35rem;
-		align-items: center;
+	.sub-tab.active {
+		background: var(--surface);
+		color: var(--text);
+		box-shadow: 0 1px 0 var(--border);
 	}
 
-	.meso-badge {
-		font-size: 0.78rem;
-		padding: 0.25rem 0.55rem;
-		border-radius: 999px;
-		border: 1px solid color-mix(in srgb, var(--meso-color) 45%, var(--border));
-		color: var(--meso-color);
+	.panel-hint {
+		margin: 0 0 0.75rem;
+		font-size: 0.82rem;
+	}
+
+	.matrix-wrap {
+		overflow-x: auto;
+	}
+
+	.matrix {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.82rem;
+	}
+
+	.matrix th,
+	.matrix td {
+		padding: 0.5rem 0.55rem;
+		border: 1px solid var(--border);
+		text-align: center;
+		vertical-align: middle;
+	}
+
+	.matrix th {
+		background: var(--surface-2);
+		color: var(--muted);
+		font-size: 0.75rem;
+		font-weight: 600;
+	}
+
+	.matrix .ex-name {
+		text-align: left;
+		font-weight: 600;
 		white-space: nowrap;
 	}
 
-	.anchors-label {
-		color: var(--muted);
-		font-size: 0.82rem;
-	}
-
-	.exercises-block {
-		margin-bottom: 0.55rem;
-	}
-
-	.exercises-head {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.4rem;
-	}
-
-	.exercise-rows {
-		display: grid;
-		gap: 0.35rem;
-	}
-
-	.exercise-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.45rem;
-		padding: 0.35rem 0.5rem;
-		border-radius: 8px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		font-size: 0.8rem;
-	}
-
-	.exercise-name {
-		min-width: 5rem;
-		font-weight: 600;
-	}
-
-	.anchor-value {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.25rem;
-	}
-
-	.anchor-meta {
-		font-size: 0.72rem;
-		flex: 1;
-		min-width: 8rem;
-	}
-
-	.proto-badge {
-		font-size: 0.72rem;
-		padding: 0.12rem 0.4rem;
-		border-radius: 999px;
-		background: rgba(167, 139, 250, 0.12);
-		color: #c4b5fd;
-	}
-
-	.proto-select {
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		color: var(--text);
-		padding: 0.2rem 0.35rem;
-		font-size: 0.75rem;
-		max-width: 160px;
-	}
-
-	.anchor-input {
-		width: 4rem;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		color: var(--text);
-		padding: 0.15rem 0.3rem;
-	}
-
-	.protocol-editor-head {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 0.75rem;
-		flex-wrap: wrap;
-	}
-
-	.protocol-editor-head h3 {
-		margin: 0;
-	}
-
-	.protocol-matrix-wrap {
-		overflow-x: auto;
-		margin-bottom: 0.75rem;
-	}
-
-	.protocol-matrix {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.78rem;
-	}
-
-	.protocol-matrix th,
-	.protocol-matrix td {
-		padding: 0.35rem 0.45rem;
-		border: 1px solid var(--border);
-		text-align: center;
-	}
-
-	.protocol-matrix th:first-child,
-	.protocol-matrix td:first-child {
+	.matrix .proto-name {
 		text-align: left;
-		min-width: 5.5rem;
-	}
-
-	.protocol-matrix th {
-		color: var(--muted);
-		font-weight: 600;
-		background: var(--surface);
-	}
-
-	.protocol-matrix .proto-cell {
-		text-align: left;
-		color: #c4b5fd;
 		font-size: 0.72rem;
-		max-width: 7rem;
+		color: #c4b5fd;
+		max-width: 6rem;
 	}
 
-	.protocol-matrix .pct-cell {
-		font-weight: 600;
+	.matrix .pct small {
+		display: block;
+		font-size: 0.68rem;
+		color: var(--muted);
+		font-weight: 400;
+	}
+
+	.matrix .pct-val {
+		font-weight: 700;
 		color: var(--accent-2);
 	}
 
-	.micro-empty {
-		margin: 0 0 0.45rem;
-		font-size: 0.78rem;
-	}
-
-	.exercise-col {
-		font-weight: 600;
-		min-width: 5rem;
-	}
-
-	.micro-list {
+	.micro-timeline {
 		display: grid;
-		gap: 0.5rem;
+		gap: 0.75rem;
 	}
 
-	.micro-card {
-		padding: 0.65rem 0.75rem;
-		border-radius: 10px;
+	.micro-block {
+		padding: 0.85rem;
+		border-radius: 12px;
 		border: 1px solid var(--border);
-		background: var(--surface);
+		background: var(--surface-2);
 	}
 
-	.micro-card.complete {
-		border-color: rgba(110, 231, 168, 0.22);
+	.micro-block.complete {
+		border-color: rgba(110, 231, 168, 0.25);
 	}
 
-	.micro-head {
+	.micro-top {
 		display: flex;
-		align-items: center;
-		gap: 0.45rem;
-		margin-bottom: 0.45rem;
-		font-size: 0.82rem;
 		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.65rem;
 	}
 
-	.micro-index {
+	.micro-label {
 		font-weight: 800;
+		font-size: 1rem;
 		color: var(--muted);
+		min-width: 2rem;
 	}
 
-	.micro-status {
+	.micro-days {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		flex: 1;
+	}
+
+	.day-link {
+		padding: 0.25rem 0.55rem;
+		border-radius: 999px;
+		text-decoration: none;
+		font-size: 0.8rem;
+		border: 1px solid var(--border);
+	}
+
+	.day-link.a {
+		border-color: rgba(91, 157, 255, 0.35);
+		background: rgba(91, 157, 255, 0.1);
+		color: var(--text);
+	}
+
+	.day-link.b {
+		border-color: rgba(110, 231, 168, 0.35);
+		background: rgba(110, 231, 168, 0.1);
+		color: var(--text);
+	}
+
+	.micro-badge {
 		margin-left: auto;
 		font-size: 0.75rem;
 		color: #fbbf24;
 	}
 
-	.micro-status.ok {
+	.micro-badge.ok {
 		color: var(--accent);
 	}
 
-	.intensity-rows {
-		display: grid;
+	.result-table {
+		width: 100%;
+		font-size: 0.8rem;
+		border-collapse: collapse;
+	}
+
+	.result-table th,
+	.result-table td {
+		padding: 0.35rem 0.45rem;
+		border-bottom: 1px solid var(--border);
+		text-align: left;
+	}
+
+	.result-table th {
+		color: var(--muted);
+		font-size: 0.72rem;
+		font-weight: 600;
+	}
+
+	.result-table tr.match td:last-child {
+		color: var(--accent);
+		font-weight: 600;
+	}
+
+	.result-table small {
+		display: block;
+		font-size: 0.68rem;
+	}
+
+	.empty-micro {
+		margin: 0;
+		font-size: 0.82rem;
+	}
+
+	.gap-note {
+		margin: 0;
+		font-size: 0.82rem;
+		color: var(--danger);
+	}
+
+	.settings-block {
+		padding: 0.85rem;
+		border-radius: 12px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		margin-bottom: 0.75rem;
+	}
+
+	.settings-block h4 {
+		margin-bottom: 0.5rem;
+		font-size: 0.92rem;
+	}
+
+	.block-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.5rem;
+	}
+
+	.block-head h4 {
+		margin: 0;
+	}
+
+	.chip-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.chip {
+		display: inline-flex;
+		align-items: center;
 		gap: 0.25rem;
-		margin-bottom: 0.45rem;
+		padding: 0.2rem 0.45rem;
+		border-radius: 999px;
+		border: 1px solid var(--border);
+		background: var(--surface);
 		font-size: 0.78rem;
 	}
 
-	.intensity-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.intensity-row .match {
-		color: var(--accent);
-	}
-
-	.cycle-days {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-	}
-
-	.day-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.35rem;
-		padding: 0.3rem 0.5rem;
-		border-radius: 999px;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-		text-decoration: none;
-		color: var(--text);
-		font-size: 0.8rem;
-	}
-
-	.day-chip .slot {
-		font-weight: 800;
-	}
-
-	.day-chip.slot-a {
-		border-color: rgba(91, 157, 255, 0.35);
-		background: rgba(91, 157, 255, 0.1);
-	}
-
-	.day-chip.slot-b {
-		border-color: rgba(110, 231, 168, 0.35);
-		background: rgba(110, 231, 168, 0.1);
-	}
-
-	.unlink {
+	.chip-x {
 		border: none;
 		background: transparent;
 		color: var(--danger);
 		padding: 0;
-		cursor: pointer;
 		line-height: 1;
 	}
 
-	.assign-field {
+	.exercise-settings {
 		display: grid;
-		gap: 0.2rem;
-		margin-top: 0.45rem;
-		font-size: 0.78rem;
+		gap: 0.5rem;
+	}
+
+	.exercise-setting-row {
+		display: grid;
+		grid-template-columns: 1fr auto auto auto;
+		gap: 0.5rem;
+		align-items: end;
+		padding: 0.5rem;
+		border-radius: 8px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+	}
+
+	.exercise-setting-main {
+		display: grid;
+		gap: 0.1rem;
+	}
+
+	.exercise-setting-row label {
+		display: grid;
+		gap: 0.15rem;
+		font-size: 0.72rem;
 		color: var(--muted);
 	}
 
-	.assign-field select {
+	.field-input,
+	.field-select {
 		background: var(--surface-2);
 		border: 1px solid var(--border);
 		border-radius: 8px;
 		color: var(--text);
 		padding: 0.35rem 0.5rem;
-		max-width: 200px;
+		min-width: 0;
 	}
 
-	.gap-note {
-		margin: 0.65rem 0 0;
+	.field-input.narrow {
+		width: 3rem;
+	}
+
+	.assign-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 0.5rem;
+	}
+
+	.assign-card {
+		padding: 0.65rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.assign-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.phase-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+	}
+
+	.phase-card {
+		padding: 0.65rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.phase-card label {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.72rem;
+		color: var(--muted);
+	}
+
+	.template-picker {
+		margin-top: 0.5rem;
+	}
+
+	.template-picker label {
+		display: grid;
+		gap: 0.2rem;
 		font-size: 0.78rem;
-		color: var(--danger);
+		color: var(--muted);
+		max-width: 240px;
+	}
+
+	@media (max-width: 720px) {
+		.exercise-setting-row {
+			grid-template-columns: 1fr;
+		}
+
+		.meso-tab {
+			min-width: 7.5rem;
+		}
 	}
 </style>
