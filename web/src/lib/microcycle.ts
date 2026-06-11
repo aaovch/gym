@@ -21,6 +21,8 @@ export type WorkoutTemplate = {
 
 export type Microcycle = {
 	index: number;
+	mesoIndex: number;
+	indexInMeso: number;
 	startDate: string;
 	endDate: string;
 	days: TrainingDay[];
@@ -30,10 +32,31 @@ export type Microcycle = {
 	gapAfterDays: number | null;
 };
 
+/** Перерыв между микроциклами, с которого начинаем новый мезоблок. */
+export const MESOCYCLE_GAP_DAYS = 14;
+
+/** Типичная длина мезоцикла в полных микроциклах A+B. */
+export const MESOCYCLE_TARGET_MICROS = 4;
+
+/** Максимальная длительность мезоцикла по календарю. */
+export const MESOCYCLE_MAX_DAYS = 42;
+
+export type Mesocycle = {
+	index: number;
+	startDate: string;
+	endDate: string;
+	durationDays: number;
+	microcycles: Microcycle[];
+	completeMicrocycles: number;
+	label: string;
+	gapAfterDays: number | null;
+};
+
 export type MicrocycleOverview = {
 	templates: WorkoutTemplate[];
 	days: TrainingDay[];
 	cycles: Microcycle[];
+	mesocycles: Mesocycle[];
 	byDate: Map<string, TrainingDay>;
 };
 
@@ -159,6 +182,8 @@ function buildMicrocycles(days: TrainingDay[]): Microcycle[] {
 		const dayB = bucket.find((day) => day.slot === 'B') ?? null;
 		cycles.push({
 			index: cycles.length + 1,
+			mesoIndex: 0,
+			indexInMeso: 0,
 			startDate: bucket[0].date,
 			endDate: bucket[bucket.length - 1].date,
 			days: bucket,
@@ -193,6 +218,99 @@ function buildMicrocycles(days: TrainingDay[]): Microcycle[] {
 	return cycles;
 }
 
+function mesocycleLabel(microcycles: Microcycle[]): string {
+	const exercises = new Set<string>();
+	for (const micro of microcycles) {
+		for (const day of micro.days) {
+			for (const exercise of day.exercises) {
+				if (!isCardio(exercise)) exercises.add(exercise);
+			}
+		}
+	}
+
+	const names = [...exercises];
+	if (names.some((item) => item.includes('Сплит')) && names.some((item) => item.includes('Жим гантелей лёжа'))) {
+		return 'сплит + жим лёжа';
+	}
+	if (names.some((item) => item.includes('Приседания')) && names.some((item) => item.includes('лендмайн'))) {
+		return 'присед + лендмайн';
+	}
+	if (names.some((item) => item.includes('Вертикальный жим'))) {
+		return 'жим + присед';
+	}
+
+	const picks = names.slice(0, 2).map(shortExerciseName);
+	return picks.length ? picks.join(' + ') : 'блок';
+}
+
+function buildMesocycles(cycles: Microcycle[]): Mesocycle[] {
+	const mesocycles: Mesocycle[] = [];
+	let bucket: Microcycle[] = [];
+
+	const flush = () => {
+		if (bucket.length === 0) return;
+		const startDate = bucket[0].startDate;
+		const endDate = bucket[bucket.length - 1].endDate;
+		const mesoIndex = mesocycles.length + 1;
+		const microcycles = bucket.map((micro, index) => ({
+			...micro,
+			mesoIndex,
+			indexInMeso: index + 1
+		}));
+
+		mesocycles.push({
+			index: mesoIndex,
+			startDate,
+			endDate,
+			durationDays: daysBetween(startDate, endDate),
+			microcycles,
+			completeMicrocycles: microcycles.filter((micro) => micro.complete).length,
+			label: mesocycleLabel(microcycles),
+			gapAfterDays: null
+		});
+		bucket = [];
+	};
+
+	for (const micro of cycles) {
+		if (bucket.length > 0) {
+			const last = bucket[bucket.length - 1];
+			const gap =
+				last.gapAfterDays ?? daysBetween(last.endDate, micro.startDate);
+			const mesoSpan = daysBetween(bucket[0].startDate, micro.startDate);
+			const completeInMeso = bucket.filter((item) => item.complete).length;
+
+			if (
+				gap >= MESOCYCLE_GAP_DAYS ||
+				completeInMeso >= MESOCYCLE_TARGET_MICROS ||
+				mesoSpan >= MESOCYCLE_MAX_DAYS
+			) {
+				flush();
+			}
+		}
+		bucket.push(micro);
+	}
+	flush();
+
+	for (let i = 0; i < mesocycles.length - 1; i++) {
+		mesocycles[i].gapAfterDays = daysBetween(
+			mesocycles[i].endDate,
+			mesocycles[i + 1].startDate
+		);
+	}
+
+	return mesocycles;
+}
+
+function attachMesocycles(cycles: Microcycle[], mesocycles: Mesocycle[]): Microcycle[] {
+	const byIndex = new Map<number, Microcycle>();
+	for (const meso of mesocycles) {
+		for (const micro of meso.microcycles) {
+			byIndex.set(micro.index, micro);
+		}
+	}
+	return cycles.map((micro) => byIndex.get(micro.index) ?? micro);
+}
+
 export function buildMicrocycleOverview(sessions: WorkoutSession[]): MicrocycleOverview {
 	const dayGroups = groupSessionsByDate(sessions);
 	const [centroidA, centroidB] = detectTemplates(dayGroups);
@@ -221,14 +339,20 @@ export function buildMicrocycleOverview(sessions: WorkoutSession[]): MicrocycleO
 		}
 	];
 
-	const cycles = buildMicrocycles(days.filter((day) => day.slot !== 'unknown'));
+	const rawCycles = buildMicrocycles(days.filter((day) => day.slot !== 'unknown'));
+	const mesocycles = buildMesocycles(rawCycles);
+	const cycles = attachMesocycles(rawCycles, mesocycles);
 	const byDate = new Map(days.map((day) => [day.date, day]));
 
-	return { templates, days, cycles, byDate };
+	return { templates, days, cycles, mesocycles, byDate };
 }
 
 export function microcycleForDate(cycles: Microcycle[], date: string): Microcycle | null {
 	return cycles.find((cycle) => date >= cycle.startDate && date <= cycle.endDate) ?? null;
+}
+
+export function mesocycleForDate(mesocycles: Mesocycle[], date: string): Mesocycle | null {
+	return mesocycles.find((meso) => date >= meso.startDate && date <= meso.endDate) ?? null;
 }
 
 export function slotLabel(slot: WorkoutSlot): string {
@@ -241,4 +365,9 @@ export function slotColor(slot: WorkoutSlot): string {
 	if (slot === 'A') return '#5b9dff';
 	if (slot === 'B') return '#6ee7a8';
 	return '#94a3b8';
+}
+
+export function mesocycleColor(index: number): string {
+	const palette = ['#a78bfa', '#fbbf24', '#34d399', '#f472b6', '#5b9dff', '#fb923c'];
+	return palette[(index - 1) % palette.length];
 }

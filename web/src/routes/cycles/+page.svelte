@@ -1,25 +1,31 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { formatDateRu } from '$lib/format';
-	import { slotColor, slotLabel } from '$lib/microcycle';
+	import {
+		MESOCYCLE_TARGET_MICROS,
+		mesocycleColor,
+		slotColor,
+		slotLabel
+	} from '$lib/microcycle';
 	import { workoutView } from '$lib/workout-store';
 
-	const { templates, cycles } = $derived($workoutView.microcycles);
-	const completeCount = $derived(cycles.filter((cycle) => cycle.complete).length);
+	const { templates, mesocycles } = $derived($workoutView.microcycles);
+	const microCount = $derived(mesocycles.reduce((sum, meso) => sum + meso.microcycles.length, 0));
 </script>
 
 <section class="card intro">
 	<div>
-		<h2>Микроциклы</h2>
+		<h2>Мезо- и микроциклы</h2>
 		<p class="muted">
-			Автоопределение двух тренировок A и B по составу упражнений в каждый день. Микроцикл —
-			пара A + B подряд (перерыв &gt; 3 нед. начинает новый цикл).
+			<strong>Микроцикл</strong> — пара тренировок A + B. <strong>Мезоцикл</strong> — блок из
+			нескольких микроциклов (~{MESOCYCLE_TARGET_MICROS} полных), новый начинается после длинного
+			перерыва (&gt; 2 нед.), смены блока или ~6 недель тренировок.
 		</p>
 	</div>
 </section>
 
 <section class="card templates">
-	<h3>Шаблоны тренировок</h3>
+	<h3>Шаблоны A / B</h3>
 	<div class="template-grid">
 		{#each templates as template}
 			<article class="template-card" style="--slot-color: {slotColor(template.slot)}">
@@ -29,11 +35,6 @@
 				</div>
 				<p class="muted">{template.label}</p>
 				<p class="meta">{template.sessions} дней в базе</p>
-				<ul>
-					{#each template.exercises as exercise}
-						<li>{exercise}</li>
-					{/each}
-				</ul>
 			</article>
 		{/each}
 	</div>
@@ -41,59 +42,66 @@
 
 <section class="card">
 	<div class="toolbar">
-		<h3>История циклов</h3>
-		<p class="muted">{cycles.length} циклов · {completeCount} полных (A+B)</p>
+		<h3>История блоков</h3>
+		<p class="muted">{mesocycles.length} мезоциклов · {microCount} микроциклов</p>
 	</div>
 
-	<div class="cycle-list">
-		{#each [...cycles].reverse() as cycle}
-			<article class="cycle-card" class:complete={cycle.complete} class:incomplete={!cycle.complete}>
-				<div class="cycle-head">
+	<div class="meso-list">
+		{#each [...mesocycles].reverse() as meso}
+			<article
+				class="meso-card"
+				style="--meso-color: {mesocycleColor(meso.index)}"
+			>
+				<div class="meso-head">
 					<div>
-						<p class="cycle-title">Микроцикл #{cycle.index}</p>
-						<p class="muted">
-							{formatDateRu(cycle.startDate)} — {formatDateRu(cycle.endDate)}
+						<p class="meso-title">Мезоцикл #{meso.index}</p>
+						<p class="muted meso-sub">
+							{formatDateRu(meso.startDate)} — {formatDateRu(meso.endDate)}
+							· {meso.durationDays} дн.
+							· {meso.label}
 						</p>
 					</div>
-					<span class="status" class:ok={cycle.complete}>
-						{cycle.complete ? 'A + B' : 'неполный'}
+					<span class="meso-badge">
+						{meso.completeMicrocycles}/{meso.microcycles.length} микро
 					</span>
 				</div>
 
-				<div class="cycle-days">
-					{#if cycle.dayA}
-						<a
-							class="day-chip slot-a"
-							href="{base}/?date={cycle.dayA.date}"
-						>
-							<span class="slot">A</span>
-							<span>{formatDateRu(cycle.dayA.date)}</span>
-						</a>
-					{/if}
-					{#if cycle.dayB}
-						<a
-							class="day-chip slot-b"
-							href="{base}/?date={cycle.dayB.date}"
-						>
-							<span class="slot">B</span>
-							<span>{formatDateRu(cycle.dayB.date)}</span>
-						</a>
-					{/if}
-					{#each cycle.days.filter((day) => day !== cycle.dayA && day !== cycle.dayB) as day}
-						<a
-							class="day-chip"
-							class:slot-a={day.slot === 'A'}
-							class:slot-b={day.slot === 'B'}
-							href="{base}/?date={day.date}"
-						>
-							<span class="slot">{day.slot}</span>
-							<span>{formatDateRu(day.date)}</span>
-						</a>
+				<div class="micro-list">
+					{#each meso.microcycles as micro}
+						<div class="micro-card" class:complete={micro.complete}>
+							<div class="micro-head">
+								<span class="micro-index">μ{micro.indexInMeso}</span>
+								<span class="muted">
+									{formatDateRu(micro.startDate)} — {formatDateRu(micro.endDate)}
+								</span>
+								<span class="micro-status" class:ok={micro.complete}>
+									{micro.complete ? 'A+B' : 'частично'}
+								</span>
+							</div>
+							<div class="cycle-days">
+								{#if micro.dayA}
+									<a class="day-chip slot-a" href="{base}/?date={micro.dayA.date}">
+										<span class="slot">A</span>
+										<span>{formatDateRu(micro.dayA.date)}</span>
+									</a>
+								{/if}
+								{#if micro.dayB}
+									<a class="day-chip slot-b" href="{base}/?date={micro.dayB.date}">
+										<span class="slot">B</span>
+										<span>{formatDateRu(micro.dayB.date)}</span>
+									</a>
+								{/if}
+							</div>
+						</div>
 					{/each}
 				</div>
 
-				{#if cycle.gapAfterDays !== null && cycle.gapAfterDays > 21}
-					<p class="gap-note">После цикла перерыв {Math.round(cycle.gapAfterDays / 7)} нед.</p>
+				{#if meso.gapAfterDays !== null && meso.gapAfterDays >= 14}
+					<p class="gap-note">
+						До следующего мезоблока {meso.gapAfterDays >= 14
+							? `${Math.round(meso.gapAfterDays / 7)} нед.`
+							: `${meso.gapAfterDays} дн.`}
+					</p>
 				{/if}
 			</article>
 		{/each}
@@ -109,7 +117,7 @@
 
 	.template-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 		gap: 0.85rem;
 		margin-top: 0.85rem;
 	}
@@ -141,16 +149,9 @@
 	}
 
 	.meta {
-		margin: 0.35rem 0 0.5rem;
+		margin: 0.35rem 0 0;
 		font-size: 0.82rem;
 		color: var(--muted);
-	}
-
-	ul {
-		margin: 0;
-		padding-left: 1rem;
-		color: var(--muted);
-		font-size: 0.82rem;
 	}
 
 	.toolbar {
@@ -162,69 +163,103 @@
 		margin-bottom: 1rem;
 	}
 
-	.cycle-list {
+	.meso-list {
 		display: grid;
-		gap: 0.75rem;
+		gap: 0.85rem;
 	}
 
-	.cycle-card {
-		padding: 0.85rem;
-		border-radius: 12px;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
+	.meso-card {
+		padding: 0.9rem;
+		border-radius: 14px;
+		border: 1px solid color-mix(in srgb, var(--meso-color) 40%, var(--border));
+		background: color-mix(in srgb, var(--meso-color) 7%, var(--surface-2));
 	}
 
-	.cycle-card.complete {
-		border-color: rgba(110, 231, 168, 0.25);
-	}
-
-	.cycle-card.incomplete {
-		border-color: rgba(251, 191, 36, 0.25);
-	}
-
-	.cycle-head {
+	.meso-head {
 		display: flex;
 		justify-content: space-between;
 		gap: 0.75rem;
 		align-items: start;
-		margin-bottom: 0.65rem;
+		margin-bottom: 0.75rem;
 	}
 
-	.cycle-title {
+	.meso-title {
 		margin: 0;
 		font-weight: 700;
+		color: var(--meso-color);
 	}
 
-	.status {
+	.meso-sub {
+		margin: 0.2rem 0 0;
+		font-size: 0.85rem;
+	}
+
+	.meso-badge {
 		font-size: 0.78rem;
-		padding: 0.25rem 0.5rem;
+		padding: 0.25rem 0.55rem;
 		border-radius: 999px;
-		border: 1px solid rgba(251, 191, 36, 0.35);
+		border: 1px solid color-mix(in srgb, var(--meso-color) 45%, var(--border));
+		color: var(--meso-color);
+		white-space: nowrap;
+	}
+
+	.micro-list {
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.micro-card {
+		padding: 0.65rem 0.75rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+	}
+
+	.micro-card.complete {
+		border-color: rgba(110, 231, 168, 0.22);
+	}
+
+	.micro-head {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.45rem;
+		font-size: 0.82rem;
+		flex-wrap: wrap;
+	}
+
+	.micro-index {
+		font-weight: 800;
+		color: var(--muted);
+	}
+
+	.micro-status {
+		margin-left: auto;
+		font-size: 0.75rem;
 		color: #fbbf24;
 	}
 
-	.status.ok {
-		border-color: rgba(110, 231, 168, 0.35);
+	.micro-status.ok {
 		color: var(--accent);
 	}
 
 	.cycle-days {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.4rem;
+		gap: 0.35rem;
 	}
 
 	.day-chip {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.4rem;
-		padding: 0.35rem 0.55rem;
+		gap: 0.35rem;
+		padding: 0.3rem 0.5rem;
 		border-radius: 999px;
 		border: 1px solid var(--border);
-		background: var(--surface);
+		background: var(--surface-2);
 		text-decoration: none;
 		color: var(--text);
-		font-size: 0.82rem;
+		font-size: 0.8rem;
 	}
 
 	.day-chip .slot {
@@ -242,7 +277,7 @@
 	}
 
 	.gap-note {
-		margin: 0.55rem 0 0;
+		margin: 0.65rem 0 0;
 		font-size: 0.78rem;
 		color: var(--danger);
 	}

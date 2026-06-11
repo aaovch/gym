@@ -2,7 +2,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/stores';
 	import { formatDateRu, todayIso } from '$lib/format';
-	import { microcycleForDate, slotColor, slotLabel } from '$lib/microcycle';
+	import { mesocycleColor, mesocycleForDate, microcycleForDate, slotColor, slotLabel } from '$lib/microcycle';
 	import { deleteSession, workoutView } from '$lib/workout-store';
 
 	let selectedDate = $state(todayIso());
@@ -16,6 +16,7 @@
 
 	const trainingDay = $derived($workoutView.microcycles.byDate.get(selectedDate) ?? null);
 	const microcycle = $derived(microcycleForDate($workoutView.microcycles.cycles, selectedDate));
+	const mesocycle = $derived(mesocycleForDate($workoutView.microcycles.mesocycles, selectedDate));
 	const template = $derived(
 		trainingDay
 			? ($workoutView.microcycles.templates.find((item) => item.slot === trainingDay.slot) ?? null)
@@ -63,6 +64,16 @@
 		</label>
 	</div>
 
+	{#if mesocycle}
+		<div class="meso-banner" style="--meso-color: {mesocycleColor(mesocycle.index)}">
+			<strong>Мезоцикл #{mesocycle.index}</strong>
+			<span class="muted">
+				· {mesocycle.label} · {formatDateRu(mesocycle.startDate)} — {formatDateRu(mesocycle.endDate)}
+				· микро {microcycle?.indexInMeso ?? '—'}/{mesocycle.microcycles.length}
+			</span>
+		</div>
+	{/if}
+
 	{#if trainingDay && trainingDay.slot !== 'unknown'}
 		<div class="cycle-banner" style="--slot-color: {slotColor(trainingDay.slot)}">
 			<div>
@@ -75,8 +86,8 @@
 			{#if microcycle}
 				<p class="cycle-meta muted">
 					Микроцикл #{microcycle.index}
-					· {formatDateRu(microcycle.startDate)} — {formatDateRu(microcycle.endDate)}
-					· {microcycle.complete ? 'полный' : 'неполный'}
+					{#if microcycle.mesoIndex}(в мезо #{microcycle.mesoIndex}, μ{microcycle.indexInMeso}){/if}
+					· {microcycle.complete ? 'полный A+B' : 'неполный'}
 				</p>
 			{/if}
 		</div>
@@ -216,6 +227,19 @@
 
 	.meta {
 		font-size: 0.9rem;
+	}
+
+	.meso-banner {
+		margin-bottom: 0.65rem;
+		padding: 0.6rem 0.85rem;
+		border-radius: 12px;
+		border: 1px solid color-mix(in srgb, var(--meso-color) 40%, var(--border));
+		background: color-mix(in srgb, var(--meso-color) 10%, var(--surface-2));
+		font-size: 0.9rem;
+	}
+
+	.meso-banner strong {
+		color: var(--meso-color);
 	}
 
 	.cycle-banner {
