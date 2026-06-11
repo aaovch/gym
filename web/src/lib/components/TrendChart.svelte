@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { buildTimeChartLayout, dateToMs, yScale } from '$lib/chart-time';
 	import { fmtNum, formatDateRu } from '$lib/format';
 	import type { TrendPoint } from '$lib/types';
 
@@ -6,47 +7,113 @@
 		title,
 		points,
 		color = '#6ee7a8',
-		compact = false
+		compact = false,
+		gapDays = 21
 	}: {
 		title: string;
 		points: TrendPoint[];
 		color?: string;
 		compact?: boolean;
+		gapDays?: number;
 	} = $props();
 
-	const max = $derived(points.length ? Math.max(...points.map((p) => p.est1rm)) : 0);
-	const min = $derived(points.length ? Math.min(...points.map((p) => p.est1rm)) : 0);
-	const span = $derived(Math.max(max - min, 1));
+	const layout = $derived(
+		buildTimeChartLayout(points, {
+			height: compact ? 160 : 220,
+			gapDays,
+			maxTicks: compact ? 4 : 6
+		})
+	);
+
+	const sortedPoints = $derived([...points].sort((a, b) => a.date.localeCompare(b.date)));
+
+	const yMin = $derived(sortedPoints.length ? Math.min(...sortedPoints.map((p) => p.est1rm)) : 0);
+	const yMax = $derived(sortedPoints.length ? Math.max(...sortedPoints.map((p) => p.est1rm)) : 0);
 </script>
 
 <div class="chart-card" class:compact>
 	<div class="chart-head">
-		<h4>{title}</h4>
-		{#if points.length > 0}
-			<span class="latest">{fmtNum(points[points.length - 1].est1rm)} кг</span>
+		<div>
+			<h4>{title}</h4>
+			{#if layout && layout.gaps.length > 0}
+				<p class="gap-hint muted">{layout.gaps.length} перерыв{layout.gaps.length === 1 ? '' : layout.gaps.length < 5 ? 'а' : 'ов'} на графике</p>
+			{/if}
+		</div>
+		{#if sortedPoints.length > 0}
+			<span class="latest">{fmtNum(sortedPoints[sortedPoints.length - 1].est1rm)} кг</span>
 		{/if}
 	</div>
 
-	{#if points.length === 0}
+	{#if !layout}
 		<p class="muted empty">Нет данных для графика.</p>
 	{:else}
-		<svg viewBox="0 0 640 180" class="chart" role="img" aria-label="График 1ПМ: {title}">
-			{#each points as point, index}
-				{@const x = 40 + (index / Math.max(points.length - 1, 1)) * 560}
-				{@const y = 150 - ((point.est1rm - min) / span) * 110}
-				{#if index > 0}
-					{@const prev = points[index - 1]}
-					{@const px = 40 + ((index - 1) / Math.max(points.length - 1, 1)) * 560}
-					{@const py = 150 - ((prev.est1rm - min) / span) * 110}
-					<line x1={px} y1={py} x2={x} y2={y} stroke={color} stroke-opacity="0.85" stroke-width="2" />
+		<svg
+			viewBox="0 0 {layout.width} {layout.height}"
+			class="chart"
+			role="img"
+			aria-label="График 1ПМ по датам: {title}"
+		>
+			{#each layout.dateTicks as tick}
+				<line
+					x1={tick.x}
+					y1={layout.plotTop}
+					x2={tick.x}
+					y2={layout.plotBottom}
+					class="grid-line"
+				/>
+				<text x={tick.x} y={layout.height - 6} class="axis-label" text-anchor="middle">{tick.label}</text>
+			{/each}
+
+			{#each layout.gaps as gap}
+				<rect
+					x={gap.startX}
+					y={layout.plotTop}
+					width={Math.max(gap.endX - gap.startX, 2)}
+					height={layout.plotHeight}
+					class="gap-band"
+					rx="2"
+				/>
+				{#if gap.endX - gap.startX > 28}
+					<text
+						x={(gap.startX + gap.endX) / 2}
+						y={layout.plotTop + 14}
+						class="gap-label"
+						text-anchor="middle"
+					>
+						{gap.label}
+					</text>
 				{/if}
-				<circle cx={x} cy={y} r="4" fill={color} />
+			{/each}
+
+			{#each layout.segments as segment}
+				{#each segment as point, index}
+					{@const x = layout.xScale(point.date)}
+					{@const y = yScale(point.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
+					{#if index > 0}
+						{@const prev = segment[index - 1]}
+						{@const px = layout.xScale(prev.date)}
+						{@const py = yScale(prev.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
+						<line x1={px} y1={py} x2={x} y2={y} stroke={color} stroke-opacity="0.9" stroke-width="2" />
+					{/if}
+					<circle cx={x} cy={y} r="4" fill={color} />
+					<title>{formatDateRu(point.date)} — {fmtNum(point.est1rm)} кг</title>
+				{/each}
 			{/each}
 		</svg>
 
 		{#if !compact}
 			<ul class="trend-list">
-				{#each points.slice(-6) as point}
+				{#each sortedPoints as point, index}
+					{#if index > 0}
+						{@const gap = Math.round(
+							(dateToMs(point.date) - dateToMs(sortedPoints[index - 1].date)) / 86400000
+						)}
+						{#if gap > gapDays}
+							<li class="gap-row">
+								<span>перерыв {gap >= 14 ? `${Math.round(gap / 7)} нед.` : `${gap} дн.`}</span>
+							</li>
+						{/if}
+					{/if}
 					<li>
 						<span>{formatDateRu(point.date)}</span>
 						<strong>{fmtNum(point.est1rm)} кг</strong>
@@ -73,7 +140,7 @@
 		display: flex;
 		justify-content: space-between;
 		gap: 0.75rem;
-		align-items: baseline;
+		align-items: start;
 		margin-bottom: 0.5rem;
 	}
 
@@ -83,9 +150,15 @@
 		font-weight: 600;
 	}
 
+	.gap-hint {
+		margin: 0.15rem 0 0;
+		font-size: 0.78rem;
+	}
+
 	.latest {
 		color: var(--muted);
 		font-size: 0.85rem;
+		white-space: nowrap;
 	}
 
 	.empty {
@@ -98,6 +171,32 @@
 		height: auto;
 		display: block;
 		margin-bottom: 0.65rem;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+	}
+
+	.grid-line {
+		stroke: rgba(255, 255, 255, 0.06);
+		stroke-width: 1;
+	}
+
+	.axis-label {
+		fill: var(--muted);
+		font-size: 10px;
+	}
+
+	.gap-band {
+		fill: rgba(255, 143, 143, 0.1);
+		stroke: rgba(255, 143, 143, 0.2);
+		stroke-width: 1;
+		stroke-dasharray: 4 3;
+	}
+
+	.gap-label {
+		fill: var(--danger);
+		font-size: 10px;
+		opacity: 0.85;
 	}
 
 	.trend-list {
@@ -105,7 +204,6 @@
 		padding: 0;
 		margin: 0;
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 		gap: 0.35rem;
 	}
 
@@ -118,5 +216,14 @@
 		border: 1px solid var(--border);
 		border-radius: 8px;
 		background: var(--surface);
+	}
+
+	.gap-row {
+		justify-content: center;
+		border-style: dashed;
+		border-color: rgba(255, 143, 143, 0.35);
+		background: rgba(255, 143, 143, 0.06);
+		color: var(--danger);
+		font-size: 0.75rem;
 	}
 </style>

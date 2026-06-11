@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { base } from '$app/paths';
+	import TrendChart from '$lib/components/TrendChart.svelte';
 	import { fmtNum, fmtSet, formatDateRu } from '$lib/format';
 	import { workoutView } from '$lib/workout-store';
 	import type { StrengthSummary, TrendPoint } from '$lib/types';
@@ -109,34 +110,7 @@
 			<button class="ghost" onclick={() => (selectedExercise = null)}>Закрыть</button>
 		</div>
 
-		{#if trendPoints.length === 0}
-			<p class="muted">Нет точек для графика.</p>
-		{:else}
-			{@const max = Math.max(...trendPoints.map((p) => p.est1rm))}
-			{@const min = Math.min(...trendPoints.map((p) => p.est1rm))}
-			{@const span = Math.max(max - min, 1)}
-			<svg viewBox="0 0 640 220" class="chart" role="img" aria-label="График 1ПМ">
-				{#each trendPoints as point, index}
-					{@const x = 40 + (index / Math.max(trendPoints.length - 1, 1)) * 560}
-					{@const y = 190 - ((point.est1rm - min) / span) * 150}
-					{#if index > 0}
-						{@const prev = trendPoints[index - 1]}
-						{@const px = 40 + ((index - 1) / Math.max(trendPoints.length - 1, 1)) * 560}
-						{@const py = 190 - ((prev.est1rm - min) / span) * 150}
-						<line x1={px} y1={py} x2={x} y2={y} stroke="rgba(110,231,168,0.85)" stroke-width="2" />
-					{/if}
-					<circle cx={x} cy={y} r="4" fill="#6ee7a8" />
-				{/each}
-			</svg>
-			<ul class="trend-list">
-				{#each trendPoints as point}
-					<li>
-						<span>{formatDateRu(point.date)}</span>
-						<strong>{fmtNum(point.est1rm)} кг</strong>
-					</li>
-				{/each}
-			</ul>
-		{/if}
+		<TrendChart title="1ПМ по датам" points={trendPoints} />
 	</section>
 {/if}
 
@@ -210,31 +184,4 @@
 		padding: 0.45rem 0.75rem;
 	}
 
-	.chart {
-		width: 100%;
-		height: auto;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		margin-bottom: 1rem;
-	}
-
-	.trend-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		gap: 0.5rem;
-	}
-
-	.trend-list li {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.75rem;
-		padding: 0.55rem 0.75rem;
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		background: var(--surface-2);
-	}
 </style>
