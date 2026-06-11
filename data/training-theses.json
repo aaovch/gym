@@ -1,7 +1,39 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-11T00:00:00.000Z",
+  "updatedAt": "2026-06-11T12:00:00.000Z",
   "groups": [
+    {
+      "id": "strength-training-principles",
+      "title": "Принципы силовой тренировки",
+      "tags": ["strength", "fundamentals"],
+      "theses": [
+        {
+          "id": "st-progressive-overload",
+          "text": "Принцип прогрессивной перегрузки",
+          "tags": ["progression", "overload"]
+        },
+        {
+          "id": "st-variation",
+          "text": "Принцип вариативности",
+          "tags": ["variation", "periodization"]
+        },
+        {
+          "id": "st-individualization",
+          "text": "Принцип индивидуализации",
+          "tags": ["individualization"]
+        },
+        {
+          "id": "st-specificity",
+          "text": "Принцип специфичности",
+          "tags": ["specificity"]
+        },
+        {
+          "id": "st-continuity",
+          "text": "Принцип непрерывности",
+          "tags": ["continuity", "consistency"]
+        }
+      ]
+    },
     {
       "id": "ofp-strength",
       "title": "Принципы силовой подготовки в рамках ОФП",
