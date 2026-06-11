@@ -4,6 +4,7 @@ import { sessionsToEntries } from './database';
 import { fetchWorkoutDatabase, saveWorkoutDatabase, verifyGitHubToken } from './github';
 import { clearLocalDatabase, loadLocalDatabase, pickNewerDatabase, saveLocalDatabase } from './storage';
 import { buildWorkoutData } from './stats';
+import { buildMicrocycleOverview } from './microcycle';
 import type { WorkoutDatabase, WorkoutSession } from './types';
 
 type SyncState = {
@@ -32,12 +33,14 @@ const syncState = writable<SyncState>({
 export const workoutView = derived(database, ($database) => {
 	const entries = sessionsToEntries($database.sessions);
 	const computed = buildWorkoutData(entries);
+	const microcycles = buildMicrocycleOverview($database.sessions);
 	return {
 		entries,
 		summary: computed.summary,
 		trend: computed.trend,
 		sessions: $database.sessions,
-		updatedAt: $database.updatedAt
+		updatedAt: $database.updatedAt,
+		microcycles
 	};
 });
 

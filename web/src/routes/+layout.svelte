@@ -40,6 +40,7 @@
 
 	const tabs = [
 		{ href: `${base}/`, label: 'Сегодня', exact: true },
+		{ href: `${base}/cycles`, label: 'Микроцикл', exact: false },
 		{ href: `${base}/body`, label: 'Карта', exact: false },
 		{ href: `${base}/history`, label: 'История', exact: false },
 		{ href: `${base}/stats`, label: 'Статистика', exact: false },

@@ -1,11 +1,26 @@
 <script lang="ts">
 	import { base } from '$app/paths';
+	import { page } from '$app/stores';
 	import { formatDateRu, todayIso } from '$lib/format';
+	import { microcycleForDate, slotColor, slotLabel } from '$lib/microcycle';
 	import { deleteSession, workoutView } from '$lib/workout-store';
 
 	let selectedDate = $state(todayIso());
 	let busyId = $state<string | null>(null);
 	let error = $state('');
+
+	$effect(() => {
+		const fromUrl = $page.url.searchParams.get('date');
+		if (fromUrl) selectedDate = fromUrl;
+	});
+
+	const trainingDay = $derived($workoutView.microcycles.byDate.get(selectedDate) ?? null);
+	const microcycle = $derived(microcycleForDate($workoutView.microcycles.cycles, selectedDate));
+	const template = $derived(
+		trainingDay
+			? ($workoutView.microcycles.templates.find((item) => item.slot === trainingDay.slot) ?? null)
+			: null
+	);
 
 	const entriesForDate = $derived(
 		$workoutView.entries
@@ -47,6 +62,25 @@
 			</datalist>
 		</label>
 	</div>
+
+	{#if trainingDay && trainingDay.slot !== 'unknown'}
+		<div class="cycle-banner" style="--slot-color: {slotColor(trainingDay.slot)}">
+			<div>
+				<span class="slot-badge">{trainingDay.slot}</span>
+				<strong>{slotLabel(trainingDay.slot)}</strong>
+				{#if template}
+					<span class="muted"> · {template.label}</span>
+				{/if}
+			</div>
+			{#if microcycle}
+				<p class="cycle-meta muted">
+					Микроцикл #{microcycle.index}
+					· {formatDateRu(microcycle.startDate)} — {formatDateRu(microcycle.endDate)}
+					· {microcycle.complete ? 'полный' : 'неполный'}
+				</p>
+			{/if}
+		</div>
+	{/if}
 
 	{#if entriesForDate.length === 0}
 		<p class="empty">Нет записей на {formatDateRu(selectedDate)}.</p>
@@ -182,5 +216,31 @@
 
 	.meta {
 		font-size: 0.9rem;
+	}
+
+	.cycle-banner {
+		margin-bottom: 1rem;
+		padding: 0.75rem 0.85rem;
+		border-radius: 12px;
+		border: 1px solid color-mix(in srgb, var(--slot-color) 35%, var(--border));
+		background: color-mix(in srgb, var(--slot-color) 10%, var(--surface-2));
+	}
+
+	.slot-badge {
+		display: inline-grid;
+		place-items: center;
+		width: 1.5rem;
+		height: 1.5rem;
+		margin-right: 0.35rem;
+		border-radius: 999px;
+		background: var(--slot-color);
+		color: #0f1115;
+		font-size: 0.8rem;
+		font-weight: 800;
+	}
+
+	.cycle-meta {
+		margin: 0.35rem 0 0;
+		font-size: 0.82rem;
 	}
 </style>
