@@ -35,6 +35,31 @@
       ]
     },
     {
+      "id": "load-recovery-balance",
+      "title": "Соответствие нагрузок и восстановления",
+      "tags": ["recovery", "periodization", "fatigue"],
+      "theses": [
+        {
+          "id": "lr-overtraining",
+          "text": "Нагрузка до полного восстановления — накопление усталости, тренд вниз (перетрен)",
+          "tags": ["overtraining", "fatigue"],
+          "note": "Схема a: восстановление не успевает до следующей нагрузки"
+        },
+        {
+          "id": "lr-supercompensation",
+          "text": "Восстановление выше исходного уровня и нагрузка на пике — суперкомпенсация, прогресс",
+          "tags": ["supercompensation", "progression"],
+          "note": "Схема b: следующая нагрузка в фазе суперкомпенсации"
+        },
+        {
+          "id": "lr-maintenance",
+          "text": "Восстановление до базового уровня без суперкомпенсации — поддержание, стагнация",
+          "tags": ["maintenance", "stagnation"],
+          "note": "Схема c: тренд горизонтальный"
+        }
+      ]
+    },
+    {
       "id": "adapt-anatomical",
       "title": "Адаптации к силовой тренировке · анатомическая",
       "tags": ["adaptations", "anatomy"],
