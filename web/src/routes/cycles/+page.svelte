@@ -2,13 +2,19 @@
 	import { base } from '$app/paths';
 	import {
 		addMicrocycle,
+		addProtocolPhase,
 		assignDate,
+		createProtocolTemplate,
+		duplicateProtocolTemplate,
 		emptyCyclePlan,
 		markAnchorManual,
 		removeMacrocycle,
 		removeMesocycle,
 		removeMicrocycle,
 		removeExerciseFromMeso,
+		removeProtocolPhase,
+		removeProtocolTemplate,
+		resetProtocolTemplate,
 		syncMesoExercises,
 		unassignDate,
 		updateExerciseProtocol,
@@ -36,7 +42,7 @@
 		previewMacroPlan,
 		type MacroBlockInput
 	} from '$lib/macro-constructor';
-	import { DEFAULT_PROTOCOL_TEMPLATE } from '$lib/protocol';
+	import { DEFAULT_PROTOCOL_TEMPLATE, isBundledProtocolId, isCustomProtocolId } from '$lib/protocol';
 	import {
 		clearCyclePlanState,
 		importCyclePlanFromAuto,
@@ -90,6 +96,7 @@
 	const workoutTemplates = $derived(view.workoutTemplates);
 	const cyclePlanView = $derived(view.cyclePlanView);
 	const plan = $derived(cyclePlanView.plan);
+	const editorPlan = $derived(plan ?? view.cyclePlanForCalc);
 	const displayMacros = $derived(cyclePlanView.macrocycles ?? []);
 	const displayOrphans = $derived(cyclePlanView.orphanMesocycles ?? []);
 	const displayMesos = $derived(cyclePlanView.mesocycles);
@@ -122,10 +129,13 @@
 	});
 
 	const activeTemplate = $derived(
-		plan?.templates.find((item) => item.id === selectedTemplateId) ??
-			plan?.templates[0] ??
+		editorPlan.templates.find((item) => item.id === selectedTemplateId) ??
+			editorPlan.templates[0] ??
 			DEFAULT_PROTOCOL_TEMPLATE
 	);
+
+	const activeTemplateIsBundled = $derived(isBundledProtocolId(activeTemplate.id));
+	const activeTemplateIsCustom = $derived(isCustomProtocolId(activeTemplate.id));
 
 	const activeProtocolGuide = $derived(thesesStore.protocolGuideFor(activeTemplate.id));
 
@@ -299,6 +309,68 @@
 			});
 		}
 		constructorSelection = next;
+	}
+
+	function ensurePlanForEditor(): boolean {
+		if (workoutStore.cyclePlan) return true;
+		saveCyclePlanState(emptyCyclePlan());
+		return Boolean(workoutStore.cyclePlan);
+	}
+
+	function toggleProtocolEditor() {
+		if (showProtocolEditor) {
+			showProtocolEditor = false;
+			return;
+		}
+		if (!ensurePlanForEditor()) return;
+		showProtocolEditor = true;
+	}
+
+	function handleCreateProtocolTemplate() {
+		if (!ensurePlanForEditor()) return;
+		const current = workoutStore.cyclePlan!;
+		const next = createProtocolTemplate(current);
+		save(next);
+		const created = next.templates[next.templates.length - 1];
+		if (created) selectedTemplateId = created.id;
+	}
+
+	function handleDuplicateProtocolTemplate() {
+		if (!ensurePlanForEditor()) return;
+		const current = workoutStore.cyclePlan!;
+		const next = duplicateProtocolTemplate(current, activeTemplate.id);
+		save(next);
+		const created = next.templates[next.templates.length - 1];
+		if (created) selectedTemplateId = created.id;
+	}
+
+	function handleResetProtocolTemplate() {
+		if (!ensurePlanForEditor() || !activeTemplateIsBundled) return;
+		if (!confirm('Сбросить шаблон к значениям по умолчанию?')) return;
+		save(resetProtocolTemplate(workoutStore.cyclePlan!, activeTemplate.id));
+	}
+
+	function handleRemoveProtocolTemplate() {
+		if (!ensurePlanForEditor() || !activeTemplateIsCustom) return;
+		if (!confirm('Удалить этот шаблон?')) return;
+		const next = removeProtocolTemplate(workoutStore.cyclePlan!, activeTemplate.id);
+		save(next);
+		selectedTemplateId = next.templates[0]?.id ?? DEFAULT_PROTOCOL_TEMPLATE.id;
+	}
+
+	function handleAddProtocolPhase() {
+		if (!ensurePlanForEditor()) return;
+		save(addProtocolPhase(workoutStore.cyclePlan!, activeTemplate.id));
+	}
+
+	function handleRemoveProtocolPhase(index: number) {
+		if (!ensurePlanForEditor()) return;
+		save(removeProtocolPhase(workoutStore.cyclePlan!, activeTemplate.id, index));
+	}
+
+	function handleTemplateMeta(field: 'name' | 'description', value: string) {
+		if (!ensurePlanForEditor()) return;
+		save(updateTemplate(workoutStore.cyclePlan!, { ...activeTemplate, [field]: value }));
 	}
 
 	function ensurePlanForConstructor(): boolean {
@@ -562,7 +634,8 @@
 		field: 'label' | 'intensityPct' | 'microFrom' | 'microTo',
 		value: string
 	) {
-		if (!plan) return;
+		if (!ensurePlanForEditor()) return;
+		const current = workoutStore.cyclePlan!;
 		const phases = activeTemplate.phases.map((phase, i) => {
 			if (i !== index) return phase;
 			if (field === 'label') return { ...phase, label: value };
@@ -570,7 +643,7 @@
 			if (!Number.isFinite(num)) return phase;
 			return { ...phase, [field]: num };
 		});
-		save(updateTemplate(plan, { ...activeTemplate, phases }));
+		save(updateTemplate(current, { ...activeTemplate, phases }));
 	}
 
 	function shortProtocolName(name: string): string {
@@ -987,6 +1060,14 @@
 	<div class="head-actions">
 		<button type="button" class="btn primary" onclick={openMacroConstructor}>+ Макроцикл</button>
 		<button type="button" class="btn" onclick={() => openMesoConstructor()}>+ Мезо</button>
+		<button
+			type="button"
+			class="btn"
+			class:active={showProtocolEditor}
+			onclick={toggleProtocolEditor}
+		>
+			Шаблоны протокола
+		</button>
 		{#if !usingManual}
 			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
 		{:else}
@@ -1000,9 +1081,6 @@
 				{#if showMoreActions}
 					<div class="more-menu">
 						<button type="button" onclick={() => refreshMesoAnchorsFromData(true)}>Пересчитать 1ПМ</button>
-						<button type="button" onclick={() => (showProtocolEditor = !showProtocolEditor)}>
-							{showProtocolEditor ? 'Скрыть шаблоны %' : 'Шаблоны протокола'}
-						</button>
 						<button type="button" class="danger" onclick={clearCyclePlanState}>Сбросить план</button>
 					</div>
 				{/if}
@@ -1241,23 +1319,61 @@
 	</section>
 {/if}
 
-{#if showProtocolEditor && plan}
-	<section class="card">
-		<h3>Шаблоны протокола (% от 1ПМ)</h3>
-		<p class="muted">Методы силовой подготовки — назначаются каждому упражнению отдельно во вкладке «Настройки».</p>
-		<div class="template-picker">
+{#if showProtocolEditor}
+	<section class="card protocol-editor">
+		<div class="protocol-editor-head">
+			<div>
+				<h3>Шаблоны протокола (% от 1ПМ)</h3>
+				<p class="muted">
+					Методы силовой подготовки — назначаются каждому упражнению отдельно во вкладке «Настройки».
+				</p>
+			</div>
+			<button type="button" class="btn ghost-link" onclick={() => (showProtocolEditor = false)}>
+				Закрыть
+			</button>
+		</div>
+
+		<div class="protocol-editor-toolbar">
 			<label>
 				<span>Редактировать</span>
 				<select bind:value={selectedTemplateId} class="field-select">
-					{#each plan.templates as tpl}
+					{#each editorPlan.templates as tpl (tpl.id)}
 						<option value={tpl.id}>{tpl.name}</option>
 					{/each}
 				</select>
 			</label>
+			<button type="button" class="btn small" onclick={handleCreateProtocolTemplate}>+ Новый</button>
+			<button type="button" class="btn small" onclick={handleDuplicateProtocolTemplate}>Дублировать</button>
+			{#if activeTemplateIsBundled}
+				<button type="button" class="btn small" onclick={handleResetProtocolTemplate}>Сбросить</button>
+			{/if}
+			{#if activeTemplateIsCustom}
+				<button type="button" class="btn small danger" onclick={handleRemoveProtocolTemplate}>
+					Удалить
+				</button>
+			{/if}
 		</div>
-		{#if activeTemplate.description}
-			<p class="protocol-description muted">{activeTemplate.description}</p>
-		{/if}
+
+		<div class="protocol-meta">
+			<label>
+				<span>Название</span>
+				<input
+					class="field-input"
+					value={activeTemplate.name}
+					disabled={activeTemplateIsBundled}
+					onchange={(e) => handleTemplateMeta('name', e.currentTarget.value)}
+				/>
+			</label>
+			<label class="protocol-description-field">
+				<span>Описание</span>
+				<textarea
+					class="field-input"
+					rows="2"
+					value={activeTemplate.description ?? ''}
+					onchange={(e) => handleTemplateMeta('description', e.currentTarget.value)}
+				></textarea>
+			</label>
+		</div>
 		{#if activeProtocolGuide}
 			<div class="protocol-guide-inline">
 				{#if activeProtocolGuide.example}
@@ -1325,7 +1441,6 @@
 						class="field-input"
 						type="text"
 						value={phase.label}
-						disabled={!editMode}
 						onchange={(e) => handlePhaseChange(index, 'label', e.currentTarget.value)}
 					/>
 					<label>
@@ -1335,7 +1450,6 @@
 							type="number"
 							step="2.5"
 							value={phase.intensityPct}
-							disabled={!editMode}
 							onchange={(e) => handlePhaseChange(index, 'intensityPct', e.currentTarget.value)}
 						/>
 					</label>
@@ -1345,7 +1459,6 @@
 							class="field-input narrow"
 							type="number"
 							value={phase.microFrom}
-							disabled={!editMode}
 							onchange={(e) => handlePhaseChange(index, 'microFrom', e.currentTarget.value)}
 						/>
 						<span>—</span>
@@ -1353,13 +1466,22 @@
 							class="field-input narrow"
 							type="number"
 							value={phase.microTo}
-							disabled={!editMode}
 							onchange={(e) => handlePhaseChange(index, 'microTo', e.currentTarget.value)}
 						/>
 					</label>
+					{#if activeTemplate.phases.length > 1}
+						<button
+							type="button"
+							class="btn small danger phase-remove"
+							onclick={() => handleRemoveProtocolPhase(index)}
+						>
+							×
+						</button>
+					{/if}
 				</div>
 			{/each}
 		</div>
+		<button type="button" class="btn small" onclick={handleAddProtocolPhase}>+ Фаза (μ)</button>
 	</section>
 {/if}
 
@@ -1926,12 +2048,6 @@
 
 	.protocol-catalog-list li {
 		line-height: 1.35;
-	}
-
-	.protocol-description {
-		margin: 0.75rem 0 0;
-		font-size: 0.88rem;
-		line-height: 1.4;
 	}
 
 	.protocol-guide-inline {
@@ -2808,6 +2924,62 @@
 		align-items: center;
 	}
 
+	.protocol-editor-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 1rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.protocol-editor-head h3 {
+		margin: 0 0 0.25rem;
+	}
+
+	.protocol-editor-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: flex-end;
+		margin-bottom: 0.75rem;
+	}
+
+	.protocol-editor-toolbar label {
+		display: grid;
+		gap: 0.2rem;
+		font-size: 0.78rem;
+		color: var(--muted);
+		min-width: 220px;
+	}
+
+	.protocol-meta {
+		display: grid;
+		gap: 0.65rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.protocol-meta label {
+		display: grid;
+		gap: 0.25rem;
+		font-size: 0.78rem;
+		color: var(--muted);
+	}
+
+	.protocol-description-field textarea {
+		resize: vertical;
+		min-height: 3rem;
+	}
+
+	.phase-card {
+		position: relative;
+	}
+
+	.phase-remove {
+		justify-self: end;
+		min-width: 2rem;
+		padding-inline: 0.5rem;
+	}
+
 	.phase-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -2831,18 +3003,6 @@
 		gap: 0.35rem;
 		font-size: 0.72rem;
 		color: var(--muted);
-	}
-
-	.template-picker {
-		margin-top: 0.5rem;
-	}
-
-	.template-picker label {
-		display: grid;
-		gap: 0.2rem;
-		font-size: 0.78rem;
-		color: var(--muted);
-		max-width: 240px;
 	}
 
 	@media (max-width: 720px) {

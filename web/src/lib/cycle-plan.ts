@@ -1,12 +1,14 @@
 import { dateToMs } from './chart-time';
 import {
 	bundledProtocolTemplates,
+	bundledProtocolById,
 	DEFAULT_PROTOCOL_TEMPLATE,
 	type MesoAnchor1rm,
 	type ProtocolPhase,
 	type ProtocolTemplate,
 	best1rmInRange,
 	isBundledProtocolStub,
+	isCustomProtocolId,
 	phaseForMicro,
 	pickMesoExercises,
 	plannedSessionIntensity,
@@ -858,6 +860,89 @@ export function updateTemplate(plan: CyclePlan, template: ProtocolTemplate): Cyc
 		? plan.templates.map((item) => (item.id === template.id ? template : item))
 		: [...plan.templates, template];
 	return touchPlan({ ...plan, templates });
+}
+
+export function createProtocolTemplate(plan: CyclePlan, name = 'Мой протокол'): CyclePlan {
+	const id = newId('custom');
+	const template: ProtocolTemplate = {
+		id,
+		name: name.trim() || 'Мой протокол',
+		description: '',
+		phases: [{ id: `${id}-w1`, label: 'Неделя 1', intensityPct: 70, microFrom: 1, microTo: 1 }]
+	};
+	return touchPlan({ ...plan, templates: [...plan.templates, template] });
+}
+
+export function duplicateProtocolTemplate(plan: CyclePlan, templateId: string): CyclePlan {
+	const source = plan.templates.find((item) => item.id === templateId);
+	if (!source) return plan;
+	const id = newId('custom');
+	const copy: ProtocolTemplate = {
+		...structuredClone(source),
+		id,
+		name: `${source.name} (копия)`,
+		phases: source.phases.map((phase, index) => ({
+			...phase,
+			id: `${id}-w${index + 1}`
+		}))
+	};
+	return touchPlan({ ...plan, templates: [...plan.templates, copy] });
+}
+
+export function resetProtocolTemplate(plan: CyclePlan, templateId: string): CyclePlan {
+	const bundled = bundledProtocolById(templateId);
+	if (!bundled) return plan;
+	return updateTemplate(plan, bundled);
+}
+
+export function removeProtocolTemplate(plan: CyclePlan, templateId: string): CyclePlan {
+	if (!isCustomProtocolId(templateId)) return plan;
+	const fallbackId = DEFAULT_PROTOCOL_TEMPLATE.id;
+	return touchPlan({
+		...plan,
+		templates: plan.templates.filter((item) => item.id !== templateId),
+		mesocycles: plan.mesocycles.map((meso) => {
+			const templateIdForMeso =
+				meso.templateId === templateId ? fallbackId : meso.templateId;
+			const exerciseProtocols = { ...(meso.exerciseProtocols ?? {}) };
+			for (const [exercise, protoId] of Object.entries(exerciseProtocols)) {
+				if (protoId === templateId) exerciseProtocols[exercise] = fallbackId;
+			}
+			return { ...meso, templateId: templateIdForMeso, exerciseProtocols };
+		})
+	});
+}
+
+export function addProtocolPhase(plan: CyclePlan, templateId: string): CyclePlan {
+	const template = plan.templates.find((item) => item.id === templateId);
+	if (!template) return plan;
+	const nextMicro = template.phases.length + 1;
+	const phase: ProtocolPhase = {
+		id: `${templateId}-w${nextMicro}`,
+		label: `Неделя ${nextMicro}`,
+		intensityPct: template.phases[template.phases.length - 1]?.intensityPct ?? 70,
+		microFrom: nextMicro,
+		microTo: nextMicro
+	};
+	return updateTemplate(plan, { ...template, phases: [...template.phases, phase] });
+}
+
+export function removeProtocolPhase(
+	plan: CyclePlan,
+	templateId: string,
+	phaseIndex: number
+): CyclePlan {
+	const template = plan.templates.find((item) => item.id === templateId);
+	if (!template || template.phases.length <= 1) return plan;
+	const phases = template.phases
+		.filter((_, index) => index !== phaseIndex)
+		.map((phase, index) => ({
+			...phase,
+			id: `${templateId}-w${index + 1}`,
+			microFrom: index + 1,
+			microTo: index + 1
+		}));
+	return updateTemplate(plan, { ...template, phases });
 }
 
 export function removeMesocycle(plan: CyclePlan, mesoId: string): CyclePlan {
