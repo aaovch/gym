@@ -4,8 +4,10 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
+    "sync:data": "python ../scripts/sync_static_data.py",
+    "repair:data": "tsx scripts/repair-data.ts",
+    "dev": "npm run sync:data && vite dev",
+    "build": "npm run sync:data && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
@@ -13,6 +15,7 @@
     "@sveltejs/kit": "^2.21.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "svelte": "^5.28.0",
+    "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.5"
   }

@@ -8,11 +8,12 @@
 		resolveMesoMicroSelection
 	} from '$lib/cycle-plan';
 	import {
-		createSession,
-		emptyRowInput,
-		rowInputToSessionRow,
-		uniqueExercises
-	} from '$lib/database';
+	createLog,
+	emptyRowInput,
+	logToSession,
+	rowInputToSessionRow,
+	uniqueExercisesFromDb
+} from '$lib/database';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { isCardioExercise } from '$lib/protocol';
 	import { thesesStore } from '$lib/training-theses';
@@ -23,8 +24,8 @@
 		TRAINING_VOLUME_GUIDE_ID,
 		volumeCheckLabel
 	} from '$lib/volume-guide';
-	import { saveSession, workoutStore } from '$lib/workout-store';
-	import type { RowInput, WorkoutSession } from '$lib/types';
+	import { saveLog, workoutStore } from '$lib/workout-store';
+	import type { ExerciseLog, RowInput, WorkoutSession } from '$lib/types';
 
 	let exercise = $state('');
 	let date = $state(todayIso());
@@ -36,7 +37,7 @@
 	let busy = $state(false);
 
 	const view = $derived(workoutStore.view);
-	const exercises = $derived(uniqueExercises(view.sessions));
+	const exercises = $derived(uniqueExercisesFromDb(workoutStore.database));
 	const editId = $derived.by(() => (browser ? page.url.searchParams.get('id') : null));
 	const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
 	const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
@@ -62,7 +63,8 @@
 			trainingContext.meso.plan,
 			trainingContext.micro.plan,
 			name,
-			anchor
+			anchor,
+			view.keyMaps
 		);
 	});
 
@@ -112,14 +114,21 @@
 		extraRows = [];
 	}
 
-	const previewSession = $derived.by((): WorkoutSession | null => {
+	const urlSession = $derived.by(() => (browser ? page.url.searchParams.get('session') : null));
+
+	const previewLog = $derived.by((): ExerciseLog | null => {
 		const name = exercise.trim();
 		if (!name) return null;
 		const rows = [mainRow, ...extraRows]
 			.map(rowInputToSessionRow)
 			.filter((row): row is NonNullable<typeof row> => row !== null);
 		if (rows.length === 0) return null;
-		return createSession(name, date, rows, editingId ?? crypto.randomUUID());
+		return createLog(workoutStore.database, name, date, rows, editingId ?? crypto.randomUUID()).log;
+	});
+
+	const previewSession = $derived.by((): WorkoutSession | null => {
+		if (!previewLog) return null;
+		return logToSession(workoutStore.database, previewLog);
 	});
 
 	const volumeGuideRows = $derived(
@@ -148,16 +157,30 @@
 	});
 
 	async function submit() {
-		if (!previewSession) return;
+		if (!previewLog) return;
 		busy = true;
 		error = '';
 		status = '';
 		try {
+			const { db, log } = createLog(
+				workoutStore.database,
+				exercise.trim(),
+				date,
+				previewLog.blocks,
+				previewLog.id,
+				previewLog.microSessionId
+			);
+			workoutStore.database = db;
+			const sessionIndex = urlSession != null ? Number(urlSession) : undefined;
 			const context =
 				urlMeso && urlMicro && trainingContext
-					? { mesoId: trainingContext.meso.plan.id, microId: trainingContext.micro.plan.id }
+					? {
+							mesoId: trainingContext.meso.plan.id,
+							microId: trainingContext.micro.plan.id,
+							indexInMicro: Number.isFinite(sessionIndex) ? sessionIndex : undefined
+						}
 					: undefined;
-			await saveSession(previewSession, context);
+			await saveLog(log, context);
 			status = editingId ? 'Тренировка обновлена.' : 'Тренировка сохранена.';
 			if (!editingId) resetForm();
 		} catch (err) {

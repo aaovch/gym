@@ -5,12 +5,21 @@
 	import {
 		defaultActiveMesoMicro,
 		exerciseTargetOnMicro,
-		exercisesForWorkoutSlot,
+		exercisesForMicroSession,
 		resolveMesoMicroSelection,
-		suggestWorkoutSlot
+		suggestSessionIndex
 	} from '$lib/cycle-plan';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
-	import { mesocycleColor, slotColor, slotLabel, type WorkoutSlot } from '$lib/microcycle';
+	import { microHasDate } from '$lib/micro-plan';
+	import {
+		indexToSlot,
+		mesocycleColor,
+		sessionIndexLabel,
+		slotColor,
+		slotLabel,
+		slotToIndex,
+		type WorkoutSlot
+	} from '$lib/microcycle';
 	import RmLabels from '$lib/components/RmLabels.svelte';
 	import { thesesStore } from '$lib/training-theses';
 	import {
@@ -54,26 +63,22 @@
 	const mesocycle = $derived(trainingContext?.meso ?? null);
 	const microcycle = $derived(trainingContext?.micro ?? null);
 
-	const suggestedSlot = $derived.by((): WorkoutSlot => {
-		if (!microcycle) return 'A';
-		return suggestWorkoutSlot(
-			microcycle,
-			selectedDate,
-			view.entries,
-			view.workoutTemplates
-		);
+	const suggestedIndex = $derived.by((): number => {
+		if (!microcycle) return 0;
+		return suggestSessionIndex(microcycle, selectedDate, view.entries, view.workoutTemplates);
 	});
 
-	const activeSlot = $derived(slotPick ?? suggestedSlot);
+	const activeIndex = $derived(slotPick != null ? slotToIndex(slotPick) : suggestedIndex);
+	const activeSlot = $derived(indexToSlot(activeIndex));
 
 	const slotExercises = $derived.by(() => {
 		if (!mesocycle) return [];
-		return exercisesForWorkoutSlot(mesocycle, view.workoutTemplates, activeSlot);
+		return exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex);
 	});
 
 	const trainingDay = $derived(view.microcycles.byDate.get(selectedDate) ?? null);
 	const template = $derived(
-		view.workoutTemplates.find((item) => item.slot === activeSlot) ?? null
+		view.workoutTemplates.find((item) => item.indexInMicro === activeIndex) ?? null
 	);
 
 	const entriesForDate = $derived(
@@ -99,6 +104,7 @@
 				microcycle.plan,
 				exercise,
 				anchor,
+				view.keyMaps,
 				entry
 			);
 			if (row) hints.set(exercise, row);
@@ -139,7 +145,7 @@
 		params.set('date', selectedDate);
 		if (mesocycle) params.set('meso', mesocycle.plan.id);
 		if (microcycle) params.set('micro', microcycle.plan.id);
-		params.set('slot', activeSlot);
+		params.set('session', String(activeIndex));
 		return `${base}/add?${params.toString()}`;
 	}
 
@@ -193,7 +199,7 @@
 							onclick={() => {
 								mesoPick = meso.plan.id;
 								microPick =
-									meso.microcycles.find((micro) => micro.plan.dates.includes(selectedDate))
+									meso.microcycles.find((micro) => microHasDate(micro.plan, selectedDate))
 										?.plan.id ??
 									meso.microcycles.find((micro) => !micro.complete)?.plan.id ??
 									meso.microcycles[0]?.plan.id ??
@@ -247,16 +253,17 @@
 				<span class="picker-label">Тренировка</span>
 				<div class="slot-tabs">
 					{#each ['A', 'B'] as slot (slot)}
+					{@const slotKey = slot as WorkoutSlot}
 						<button
 							type="button"
 							class="slot-tab"
-							class:active={activeSlot === slot}
-							style="--slot-color: {slotColor(slot)}"
-							onclick={() => (slotPick = slot)}
+							class:active={activeSlot === slotKey}
+							style="--slot-color: {slotColor(slotKey)}"
+							onclick={() => (slotPick = slotKey)}
 						>
 							<span class="slot-badge">{slot}</span>
-							{slotLabel(slot)}
-							{#if template && activeSlot === slot}
+							{slotLabel(slotKey)}
+							{#if template && activeSlot === slotKey}
 								<span class="muted"> · {template.label}</span>
 							{/if}
 						</button>
@@ -266,7 +273,7 @@
 
 			{#if slotExercises.length > 0}
 				<div class="workout-plan">
-					<h3>Упражнения · {slotLabel(activeSlot)}</h3>
+					<h3>Упражнения · {sessionIndexLabel(activeIndex)}</h3>
 					<div class="exercise-cards">
 						{#each slotExercises as exercise (exercise)}
 							{@const entry = entryByExercise.get(exercise)}

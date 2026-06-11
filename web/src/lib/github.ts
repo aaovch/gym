@@ -1,8 +1,16 @@
+import {
+	parseCyclePlan,
+	parseWorkoutDatabase,
+	serializeCyclePlan,
+	serializeWorkoutDatabase
+} from './storage';
+import type { CyclePlan } from './cycle-plan';
 import type { WorkoutDatabase } from './types';
 
 export const GITHUB_OWNER = 'aaovch';
 export const GITHUB_REPO = 'gym';
-export const DATA_PATH = 'data/workouts.json';
+export const WORKOUTS_PATH = 'data/workouts.json';
+export const CYCLE_PLAN_PATH = 'data/cycle-plan.json';
 
 const API = 'https://api.github.com';
 
@@ -24,6 +32,59 @@ function base64ToUtf8(base64: string): string {
 	return new TextDecoder().decode(bytes);
 }
 
+async function fetchRepoFile(token: string, path: string): Promise<{ content: string; sha: string } | null> {
+	const response = await fetch(
+		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+		{ headers: authHeaders(token) }
+	);
+
+	if (response.status === 404) return null;
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error((error as { message?: string }).message ?? `GitHub API error ${response.status}`);
+	}
+
+	const payload = await response.json();
+	return {
+		content: base64ToUtf8(payload.content as string),
+		sha: payload.sha as string
+	};
+}
+
+async function saveRepoFile(
+	token: string,
+	path: string,
+	content: string,
+	sha: string | null,
+	message: string
+): Promise<string> {
+	const body: Record<string, string> = {
+		message,
+		content: utf8ToBase64(content)
+	};
+	if (sha) body.sha = sha;
+
+	const response = await fetch(
+		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+		{
+			method: 'PUT',
+			headers: {
+				...authHeaders(token),
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(body)
+		}
+	);
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error((error as { message?: string }).message ?? `GitHub API error ${response.status}`);
+	}
+
+	const payload = await response.json();
+	return payload.content.sha as string;
+}
+
 export async function verifyGitHubToken(token: string): Promise<string> {
 	const response = await fetch(`${API}/user`, { headers: authHeaders(token) });
 	if (!response.ok) {
@@ -36,21 +97,9 @@ export async function verifyGitHubToken(token: string): Promise<string> {
 export async function fetchWorkoutDatabase(
 	token: string
 ): Promise<{ db: WorkoutDatabase; sha: string }> {
-	const response = await fetch(
-		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(DATA_PATH)}`,
-		{ headers: authHeaders(token) }
-	);
-
-	if (!response.ok) {
-		const error = await response.json().catch(() => ({}));
-		throw new Error(error.message ?? `GitHub API error ${response.status}`);
-	}
-
-	const payload = await response.json();
-	return {
-		db: JSON.parse(base64ToUtf8(payload.content)) as WorkoutDatabase,
-		sha: payload.sha
-	};
+	const file = await fetchRepoFile(token, WORKOUTS_PATH);
+	if (!file) throw new Error('workouts.json не найден в репозитории');
+	return { db: parseWorkoutDatabase(file.content), sha: file.sha };
 }
 
 export async function saveWorkoutDatabase(
@@ -59,27 +108,25 @@ export async function saveWorkoutDatabase(
 	sha: string,
 	message: string
 ): Promise<string> {
-	const response = await fetch(
-		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(DATA_PATH)}`,
-		{
-			method: 'PUT',
-			headers: {
-				...authHeaders(token),
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				message,
-				content: utf8ToBase64(JSON.stringify(db, null, 2)),
-				sha
-			})
-		}
-	);
-
-	if (!response.ok) {
-		const error = await response.json().catch(() => ({}));
-		throw new Error(error.message ?? `GitHub API error ${response.status}`);
-	}
-
-	const payload = await response.json();
-	return payload.content.sha as string;
+	return saveRepoFile(token, WORKOUTS_PATH, serializeWorkoutDatabase(db), sha, message);
 }
+
+export async function fetchCyclePlan(
+	token: string
+): Promise<{ plan: CyclePlan | null; sha: string | null }> {
+	const file = await fetchRepoFile(token, CYCLE_PLAN_PATH);
+	if (!file) return { plan: null, sha: null };
+	return { plan: parseCyclePlan(file.content), sha: file.sha };
+}
+
+export async function saveCyclePlanRemote(
+	token: string,
+	plan: CyclePlan,
+	sha: string | null,
+	message: string
+): Promise<string> {
+	return saveRepoFile(token, CYCLE_PLAN_PATH, serializeCyclePlan(plan), sha, message);
+}
+
+/** @deprecated use WORKOUTS_PATH */
+export const DATA_PATH = WORKOUTS_PATH;

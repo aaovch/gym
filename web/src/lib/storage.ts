@@ -1,6 +1,13 @@
 import { browser } from '$app/environment';
 import type { CyclePlan } from './cycle-plan';
-import { emptyCyclePlan } from './cycle-plan';
+import { emptyCyclePlan, normalizeCyclePlan } from './cycle-plan';
+import {
+	compactCyclePlan,
+	compactWorkoutDatabase,
+	normalizeStoredCyclePlan,
+	normalizeWorkoutDatabase,
+	stringifyCompact
+} from './json-store';
 import type { WorkoutDatabase } from './types';
 
 const DB_KEY = 'gym_workout_db';
@@ -11,7 +18,7 @@ export function loadLocalDatabase(): WorkoutDatabase | null {
 	try {
 		const raw = localStorage.getItem(DB_KEY);
 		if (!raw) return null;
-		return JSON.parse(raw) as WorkoutDatabase;
+		return normalizeWorkoutDatabase(JSON.parse(raw));
 	} catch {
 		return null;
 	}
@@ -19,7 +26,7 @@ export function loadLocalDatabase(): WorkoutDatabase | null {
 
 export function saveLocalDatabase(db: WorkoutDatabase) {
 	if (!browser) return;
-	localStorage.setItem(DB_KEY, JSON.stringify(db));
+	localStorage.setItem(DB_KEY, stringifyCompact(compactWorkoutDatabase(db)));
 }
 
 export function clearLocalDatabase() {
@@ -32,7 +39,9 @@ export function loadCyclePlan(): CyclePlan | null {
 	try {
 		const raw = localStorage.getItem(CYCLE_PLAN_KEY);
 		if (!raw) return null;
-		return JSON.parse(raw) as CyclePlan;
+		const plan = normalizeStoredCyclePlan(JSON.parse(raw));
+		if (!plan) return null;
+		return normalizeCyclePlan(plan);
 	} catch {
 		return null;
 	}
@@ -40,7 +49,8 @@ export function loadCyclePlan(): CyclePlan | null {
 
 export function saveCyclePlan(plan: CyclePlan) {
 	if (!browser) return;
-	localStorage.setItem(CYCLE_PLAN_KEY, JSON.stringify(plan));
+	const normalized = normalizeCyclePlan(plan);
+	localStorage.setItem(CYCLE_PLAN_KEY, stringifyCompact(compactCyclePlan(normalized)));
 }
 
 export function clearCyclePlan() {
@@ -64,4 +74,22 @@ export function pickNewerDatabase(a: WorkoutDatabase, b: WorkoutDatabase | null)
 	const aTime = Date.parse(a.updatedAt || '0');
 	const bTime = Date.parse(b.updatedAt || '0');
 	return bTime > aTime ? b : a;
+}
+
+/** Сериализация для GitHub / файлов. */
+export function serializeWorkoutDatabase(db: WorkoutDatabase): string {
+	return stringifyCompact(compactWorkoutDatabase(db));
+}
+
+export function parseWorkoutDatabase(raw: string): WorkoutDatabase {
+	return normalizeWorkoutDatabase(JSON.parse(raw));
+}
+
+export function serializeCyclePlan(plan: CyclePlan): string {
+	return stringifyCompact(compactCyclePlan(normalizeCyclePlan(plan)));
+}
+
+export function parseCyclePlan(raw: string): CyclePlan | null {
+	const plan = normalizeStoredCyclePlan(JSON.parse(raw));
+	return plan ? normalizeCyclePlan(plan) : null;
 }

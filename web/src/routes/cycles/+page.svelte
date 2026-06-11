@@ -25,8 +25,10 @@
 		type EnrichedMesocycle,
 		type ExerciseAnchorInfo
 	} from '$lib/cycle-plan';
+	import { mesoProtocolId } from '$lib/exercise-keys';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
-	import { mesocycleColor, slotColor, slotLabel } from '$lib/microcycle';
+	import { microDates } from '$lib/micro-plan';
+	import { mesocycleColor, sessionIndexColor, sessionIndexLabel } from '$lib/microcycle';
 	import {
 		createMesocycleFromConstructor,
 		defaultMesoStartDate,
@@ -95,6 +97,7 @@
 	let constructorSelection = $state<Map<string, ConstructorRow>>(new Map());
 
 	const view = $derived(workoutStore.view);
+	const keyMaps = $derived(view.keyMaps);
 	const protocolTemplates = $derived(view.protocolTemplates);
 	const workoutTemplates = $derived(view.workoutTemplates);
 	const cyclePlanView = $derived(view.cyclePlanView);
@@ -178,13 +181,17 @@
 
 	const constructorPreview = $derived.by(() => {
 		if (!plan || !showMesoConstructor || constructorExercises.length === 0) return [];
-		return previewMesoPlan(plan, {
-			label: constructorLabel,
-			startDate: constructorStart || defaultMesoStartDate(view.entries),
-			microCount: constructorMicroCount,
-			defaultProtocolId: 'submax-effort',
-			exercises: constructorExercises
-		});
+		return previewMesoPlan(
+			plan,
+			{
+				label: constructorLabel,
+				startDate: constructorStart || defaultMesoStartDate(view.entries),
+				microCount: constructorMicroCount,
+				defaultProtocolId: 'submax-effort',
+				exercises: constructorExercises
+			},
+			keyMaps
+		);
 	});
 
 	const constructorSuggestedMicros = $derived.by(() => {
@@ -207,11 +214,15 @@
 
 	const macroPreview = $derived.by(() => {
 		if (!plan || !showMacroConstructor || !macroBlocksReady) return [];
-		return previewMacroPlan(plan, {
-			label: macroLabel,
-			startDate: macroStart || defaultMacroStartDate(view.entries),
-			blocks: macroBlockInputs
-		});
+		return previewMacroPlan(
+			plan,
+			{
+				label: macroLabel,
+				startDate: macroStart || defaultMacroStartDate(view.entries),
+				blocks: macroBlockInputs
+			},
+			keyMaps
+		);
 	});
 
 	function exercisesFromSelection(selection: Map<string, ConstructorRow>): MesoExerciseSetup[] {
@@ -483,11 +494,15 @@
 
 	function confirmMacroConstructor() {
 		if (!plan || !macroBlocksReady) return;
-		const next = createMacrocycleFromConstructor(plan, {
-			label: macroLabel,
-			startDate: macroStart || defaultMacroStartDate(view.entries),
-			blocks: macroBlockInputs
-		});
+		const next = createMacrocycleFromConstructor(
+			plan,
+			{
+				label: macroLabel,
+				startDate: macroStart || defaultMacroStartDate(view.entries),
+				blocks: macroBlockInputs
+			},
+			keyMaps
+		);
 		save(next);
 		const macro = next.macrocycles[next.macrocycles.length - 1];
 		macroPick = macro?.id ?? null;
@@ -532,14 +547,18 @@
 
 	function confirmMesoConstructor() {
 		if (!plan || constructorExercises.length === 0) return;
-		const next = createMesocycleFromConstructor(plan, {
-			label: constructorLabel,
-			startDate: constructorStart || defaultMesoStartDate(view.entries),
-			microCount: constructorMicroCount,
-			defaultProtocolId: 'submax-effort',
-			exercises: constructorExercises,
-			macroId: mesoConstructorMacroId ?? undefined
-		});
+		const next = createMesocycleFromConstructor(
+			plan,
+			{
+				label: constructorLabel,
+				startDate: constructorStart || defaultMesoStartDate(view.entries),
+				microCount: constructorMicroCount,
+				defaultProtocolId: 'submax-effort',
+				exercises: constructorExercises,
+				macroId: mesoConstructorMacroId ?? undefined
+			},
+			keyMaps
+		);
 		save(next);
 		const meso = next.mesocycles[next.mesocycles.length - 1];
 		if (meso?.macroId) macroPick = meso.macroId;
@@ -561,7 +580,7 @@
 	}
 
 	function exerciseTemplateId(meso: EnrichedMesocycle, exercise: string): string {
-		return meso.plan.exerciseProtocols?.[exercise] ?? meso.plan.templateId;
+		return mesoProtocolId(meso.plan, exercise, keyMaps) ?? meso.plan.templateId;
 	}
 
 	function anchorSourceLabel(info: ExerciseAnchorInfo): string {
@@ -619,7 +638,7 @@
 		if (!plan) return;
 		const parsed = Number(value.replace(',', '.'));
 		if (!Number.isFinite(parsed) || parsed <= 0) return;
-		save(markAnchorManual(plan, meso.plan.id, exercise, parsed));
+		save(markAnchorManual(plan, meso.plan.id, exercise, parsed, keyMaps));
 	}
 
 	function handleSyncExercises(meso: EnrichedMesocycle) {
@@ -631,7 +650,8 @@
 				mesoExerciseNames(meso),
 				view.entries,
 				meso.plan.startDate,
-				meso.plan.endDate
+				meso.plan.endDate,
+				keyMaps
 			)
 		);
 	}
@@ -643,14 +663,15 @@
 				plan,
 				meso.plan.id,
 				exercise,
-				templateId === meso.plan.templateId ? null : templateId
+				templateId === meso.plan.templateId ? null : templateId,
+				keyMaps
 			)
 		);
 	}
 
 	function handleRemoveExercise(meso: EnrichedMesocycle, exercise: string) {
 		if (!plan) return;
-		save(removeExerciseFromMeso(plan, meso.plan.id, exercise));
+		save(removeExerciseFromMeso(plan, meso.plan.id, exercise, keyMaps));
 	}
 
 	function handlePhaseChange(
@@ -1126,9 +1147,9 @@
 		<h3>Шаблоны тренировок A / B</h3>
 		<div class="ab-grid">
 			{#each workoutTemplates as template}
-				<article class="ab-card" style="--slot-color: {slotColor(template.slot)}">
-					<span class="slot-badge">{template.slot}</span>
-					<strong>{slotLabel(template.slot)}</strong>
+				<article class="ab-card" style="--slot-color: {sessionIndexColor(template.indexInMicro)}">
+					<span class="slot-badge">{template.indexInMicro === 0 ? 'A' : 'B'}</span>
+					<strong>{sessionIndexLabel(template.indexInMicro)}</strong>
 					<p class="muted">{template.label}</p>
 					<p class="meta">{template.sessions} дней в базе</p>
 				</article>
@@ -1957,13 +1978,13 @@
 										</button>
 									</div>
 									<div class="chip-row">
-										{#each micro.plan.dates as date}
+										{#each microDates(micro.plan) as date}
 											<span class="chip">
 												{formatDateRu(date)}
 												<button type="button" class="chip-x" onclick={() => handleUnassign(date)}>×</button>
 											</span>
 										{/each}
-										{#if micro.plan.dates.length === 0}
+										{#if microDates(micro.plan).length === 0}
 											<span class="muted">нет дней</span>
 										{/if}
 									</div>

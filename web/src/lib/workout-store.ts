@@ -8,8 +8,10 @@ export {
 	refreshFromGitHub,
 	refreshMesoAnchorsFromData,
 	repairPlanMicroDatesFromAuto,
+	repairWorkoutLinksFromData,
 	resetToBundled,
 	saveCyclePlanState,
+	saveLog,
 	saveSession,
 	workoutStore
 } from './workout-store.svelte';

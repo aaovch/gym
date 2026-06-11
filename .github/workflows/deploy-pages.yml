@@ -24,8 +24,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Export workout data
-        run: python scripts/export_workout_data.py
+      - name: Sync static data
+        run: python scripts/sync_static_data.py
 
       - uses: actions/setup-node@v4
         with:

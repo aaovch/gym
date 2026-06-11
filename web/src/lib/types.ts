@@ -1,29 +1,56 @@
+import type { MovementBlockId } from './muscle-groups';
+
 export type SessionRow = {
 	sets: [number, number][];
 	comment?: string | null;
 };
 
-export type WorkoutSession = {
-	id: string;
-	exercise: string;
-	date: string;
-	rows: SessionRow[];
-};
-
-export type WorkoutDatabase = {
-	version: 1;
-	updatedAt: string;
-	sessions: WorkoutSession[];
-};
+/** Блок подходов внутри записи по упражнению. */
+export type SetBlock = SessionRow;
 
 export type ExerciseKind = 'strength' | 'run' | 'jumps';
 
+export type Exercise = {
+	id: string;
+	name: string;
+	kind: ExerciseKind;
+	movementBlocks: MovementBlockId[];
+};
+
+/** Факт выполнения упражнения (раньше WorkoutSession). */
+export type ExerciseLog = {
+	id: string;
+	exerciseId: string;
+	date: string;
+	blocks: SetBlock[];
+	microSessionId?: string;
+};
+
+export type WorkoutDatabase = {
+	version: 3;
+	updatedAt: string;
+	exercises: Exercise[];
+	logs: ExerciseLog[];
+};
+
+/** Развёрнутый вид записи для stats/UI (exercise = имя из каталога). */
+export type WorkoutSession = {
+	id: string;
+	exerciseId: string;
+	exercise: string;
+	date: string;
+	rows: SessionRow[];
+	microSessionId?: string;
+};
+
 export type WorkoutEntry = {
 	id?: string;
+	exerciseId?: string;
 	exercise: string;
 	date: string;
 	parts: string[];
 	sets: [number, number][];
+	microSessionId?: string;
 };
 
 export type StrengthSummary = {

@@ -1,11 +1,13 @@
 import type { CyclePlan, MacrocyclePlan, MesocyclePlan } from './cycle-plan';
 import { buildProtocolMatrix, type ExerciseAnchorInfo, type ProtocolMatrixRow } from './cycle-plan';
 import { dateToMs } from './chart-time';
+import { defaultMicroSessions } from './micro-plan';
 import {
 	buildMesocyclePlan,
 	type MesoConstructorInput,
 	type MesoExerciseSetup
 } from './meso-constructor';
+import { toExerciseId, type ExerciseKeyMaps } from './exercise-keys';
 import { DEFAULT_PROTOCOL_TEMPLATE } from './protocol';
 
 /** Средняя длительность одного микроцикла в календаре (дней). */
@@ -71,7 +73,11 @@ function blockAnchorInfo(exercises: MesoExerciseSetup[]): Record<string, Exercis
 	return anchorInfo;
 }
 
-export function previewMacroPlan(plan: CyclePlan, input: MacroConstructorInput): MacroBlockPreview[] {
+export function previewMacroPlan(
+	plan: CyclePlan,
+	input: MacroConstructorInput,
+	keyMaps: ExerciseKeyMaps
+): MacroBlockPreview[] {
 	if (input.blocks.length === 0) return [];
 
 	let currentStart = input.startDate;
@@ -90,16 +96,18 @@ export function previewMacroPlan(plan: CyclePlan, input: MacroConstructorInput):
 			startDate: currentStart,
 			endDate: mesoCalendarEnd(currentStart, block.microCount),
 			templateId: defaultProtocolId,
-			anchor1rm: Object.fromEntries(block.exercises.map((row) => [row.exercise, row.anchor1rm])),
+			anchor1rm: Object.fromEntries(
+				block.exercises.map((row) => [toExerciseId(row.exercise, keyMaps), row.anchor1rm])
+			),
 			exerciseProtocols: Object.fromEntries(
 				block.exercises
 					.filter((row) => row.protocolId !== defaultProtocolId)
-					.map((row) => [row.exercise, row.protocolId])
+					.map((row) => [toExerciseId(row.exercise, keyMaps), row.protocolId])
 			),
 			microcycles: Array.from({ length: block.microCount }, (_, index) => ({
 				id: `preview-micro-${index + 1}`,
 				indexInMeso: index + 1,
-				dates: []
+				sessions: defaultMicroSessions()
 			}))
 		};
 
@@ -115,7 +123,8 @@ export function previewMacroPlan(plan: CyclePlan, input: MacroConstructorInput):
 				mesoPlan.microcycles,
 				plan,
 				blockAnchorInfo(block.exercises),
-				[]
+				[],
+				keyMaps
 			)
 		});
 
@@ -127,7 +136,8 @@ export function previewMacroPlan(plan: CyclePlan, input: MacroConstructorInput):
 
 export function createMacrocycleFromConstructor(
 	plan: CyclePlan,
-	input: MacroConstructorInput
+	input: MacroConstructorInput,
+	keyMaps: ExerciseKeyMaps
 ): CyclePlan {
 	if (input.blocks.length === 0) return plan;
 
@@ -147,7 +157,7 @@ export function createMacrocycleFromConstructor(
 			exercises: block.exercises,
 			macroId
 		};
-		const meso = buildMesocyclePlan(mesoInput);
+		const meso = buildMesocyclePlan(mesoInput, keyMaps);
 		mesoIds.push(meso.id);
 		newMesos.push(meso);
 		currentStart = nextMesoStartDate(currentStart, block.microCount);

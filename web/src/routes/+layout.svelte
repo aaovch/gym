@@ -18,7 +18,7 @@
 	let showSettings = $state(false);
 
 	onMount(() => {
-		workoutStore.bootstrap(data.bundled);
+		workoutStore.bootstrap(data.bundled, data.bundledCyclePlan ?? null);
 		thesesStore.bootstrap(data.theses);
 		workoutStore.connectIfTokenSaved();
 	});
@@ -37,6 +37,7 @@
 		{ href: `${base}/body`, label: 'Карта', exact: false },
 		{ href: `${base}/history`, label: 'История', exact: false },
 		{ href: `${base}/stats`, label: 'Статистика', exact: false },
+		{ href: `${base}/schema`, label: 'Схемы', exact: false },
 		{ href: `${base}/add`, label: 'Запись', exact: false }
 	];
 
@@ -44,7 +45,8 @@
 		setGitHubToken(githubToken);
 		if (!githubToken.trim()) {
 			workoutStore.patchSync({
-				sha: null,
+				workoutsSha: null,
+				cyclePlanSha: null,
 				githubLogin: null,
 				syncing: false,
 				error: '',
@@ -92,9 +94,11 @@
 		<section class="container card settings">
 			<h2>Синхронизация</h2>
 			<p class="muted">
-				Все тренировки хранятся в JSON. Приложение сохраняет их локально в браузере. GitHub token
-				нужен только чтобы отправить копию в <code>data/workouts.json</code> репозитория и обновить
-				сайт. Fine-grained token: Contents Read and write для <code>aaovch/gym</code>, или classic
+				Тренировки — <code>data/workouts.json</code>, план циклов —
+				<code>data/cycle-plan.json</code>. Локально в браузере и опционально в GitHub.
+			</p>
+			<p class="muted">
+				Fine-grained token: Contents Read and write для <code>aaovch/gym</code>, или classic
 				<code>repo</code>.
 			</p>
 			<div class="settings-row">

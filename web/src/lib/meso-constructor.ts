@@ -3,6 +3,8 @@ import {
 	buildProtocolMatrix,
 	type ExerciseAnchorInfo
 } from './cycle-plan';
+import { toExerciseId, type ExerciseKeyMaps } from './exercise-keys';
+import { defaultMicroSessions } from './micro-plan';
 import type { WorkoutTemplate } from './microcycle';
 import {
 	DEFAULT_PROTOCOL_TEMPLATE,
@@ -77,7 +79,8 @@ export function resolveExerciseAnchor(
 
 function buildPreviewMesoPlan(
 	plan: CyclePlan,
-	input: MesoConstructorInput
+	input: MesoConstructorInput,
+	keyMaps: ExerciseKeyMaps
 ): { mesoPlan: MesocyclePlan; microPlans: MicrocyclePlan[]; anchorInfo: Record<string, ExerciseAnchorInfo> } {
 	const defaultProtocolId = input.defaultProtocolId ?? plan.templates[0]?.id ?? DEFAULT_PROTOCOL_TEMPLATE.id;
 	const exerciseProtocols: Record<string, string> = {};
@@ -86,9 +89,10 @@ function buildPreviewMesoPlan(
 	const anchorInfo: Record<string, ExerciseAnchorInfo> = {};
 
 	for (const row of input.exercises) {
-		anchor1rm[row.exercise] = row.anchor1rm;
-		if (row.manual) anchor1rmManual[row.exercise] = true;
-		if (row.protocolId !== defaultProtocolId) exerciseProtocols[row.exercise] = row.protocolId;
+		const id = toExerciseId(row.exercise, keyMaps);
+		anchor1rm[id] = row.anchor1rm;
+		if (row.manual) anchor1rmManual[id] = true;
+		if (row.protocolId !== defaultProtocolId) exerciseProtocols[id] = row.protocolId;
 		anchorInfo[row.exercise] = {
 			anchor: row.anchor1rm,
 			source: row.manual ? 'manual' : 'prior',
@@ -102,7 +106,7 @@ function buildPreviewMesoPlan(
 	const microPlans: MicrocyclePlan[] = Array.from({ length: input.microCount }, (_, index) => ({
 		id: `preview-micro-${index + 1}`,
 		indexInMeso: index + 1,
-		dates: []
+		sessions: defaultMicroSessions()
 	}));
 
 	const mesoPlan: MesocyclePlan = {
@@ -120,10 +124,14 @@ function buildPreviewMesoPlan(
 	return { mesoPlan, microPlans, anchorInfo };
 }
 
-export function previewMesoPlan(plan: CyclePlan, input: MesoConstructorInput): ProtocolMatrixRow[] {
+export function previewMesoPlan(
+	plan: CyclePlan,
+	input: MesoConstructorInput,
+	keyMaps: ExerciseKeyMaps
+): ProtocolMatrixRow[] {
 	if (input.exercises.length === 0 || input.microCount < 1) return [];
-	const { mesoPlan, microPlans, anchorInfo } = buildPreviewMesoPlan(plan, input);
-	return buildProtocolMatrix(mesoPlan, microPlans, plan, anchorInfo, []);
+	const { mesoPlan, microPlans, anchorInfo } = buildPreviewMesoPlan(plan, input, keyMaps);
+	return buildProtocolMatrix(mesoPlan, microPlans, plan, anchorInfo, [], keyMaps);
 }
 
 export function suggestedMicroCount(templates: ProtocolTemplate[], exercises: MesoExerciseSetup[]): number {
@@ -140,9 +148,10 @@ export function suggestedMicroCount(templates: ProtocolTemplate[], exercises: Me
 
 export function createMesocycleFromConstructor(
 	plan: CyclePlan,
-	input: MesoConstructorInput
+	input: MesoConstructorInput,
+	keyMaps: ExerciseKeyMaps
 ): CyclePlan {
-	const meso = buildMesocyclePlan(input);
+	const meso = buildMesocyclePlan(input, keyMaps);
 	const macroId = input.macroId;
 
 	if (!macroId) {
@@ -163,16 +172,17 @@ export function createMesocycleFromConstructor(
 	};
 }
 
-export function buildMesocyclePlan(input: MesoConstructorInput): MesocyclePlan {
+export function buildMesocyclePlan(input: MesoConstructorInput, keyMaps: ExerciseKeyMaps): MesocyclePlan {
 	const defaultProtocolId = input.defaultProtocolId ?? DEFAULT_PROTOCOL_TEMPLATE.id;
 	const exerciseProtocols: Record<string, string> = {};
 	const anchor1rm: Record<string, number> = {};
 	const anchor1rmManual: Record<string, boolean> = {};
 
 	for (const row of input.exercises) {
-		anchor1rm[row.exercise] = row.anchor1rm;
-		if (row.manual) anchor1rmManual[row.exercise] = true;
-		if (row.protocolId !== defaultProtocolId) exerciseProtocols[row.exercise] = row.protocolId;
+		const id = toExerciseId(row.exercise, keyMaps);
+		anchor1rm[id] = row.anchor1rm;
+		if (row.manual) anchor1rmManual[id] = true;
+		if (row.protocolId !== defaultProtocolId) exerciseProtocols[id] = row.protocolId;
 	}
 
 	return {
@@ -188,7 +198,7 @@ export function buildMesocyclePlan(input: MesoConstructorInput): MesocyclePlan {
 		microcycles: Array.from({ length: input.microCount }, (_, index) => ({
 			id: `micro-${crypto.randomUUID().slice(0, 8)}`,
 			indexInMeso: index + 1,
-			dates: []
+			sessions: defaultMicroSessions()
 		}))
 	};
 }

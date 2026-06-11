@@ -3,17 +3,16 @@ import type { WorkoutSession } from './types';
 
 const CARDIO_RE = /бег|кардио|элипс/i;
 
-export type WorkoutSlot = 'A' | 'B' | 'unknown';
-
+/** Элемент микроцикла — один визит в зал (0 = «A», 1 = «B» в UI). */
 export type TrainingDay = {
 	date: string;
 	exercises: string[];
-	slot: WorkoutSlot;
+	indexInMicro: number;
 	confidence: number;
 };
 
 export type WorkoutTemplate = {
-	slot: WorkoutSlot;
+	indexInMicro: number;
 	label: string;
 	exercises: string[];
 	sessions: number;
@@ -26,7 +25,10 @@ export type Microcycle = {
 	startDate: string;
 	endDate: string;
 	days: TrainingDay[];
+	sessions: [TrainingDay | null, TrainingDay | null];
+	/** @deprecated используй sessions[0] */
 	dayA: TrainingDay | null;
+	/** @deprecated используй sessions[1] */
 	dayB: TrainingDay | null;
 	complete: boolean;
 	gapAfterDays: number | null;
@@ -158,17 +160,21 @@ function classifyDay(
 	exercises: string[],
 	centroidA: Set<string>,
 	centroidB: Set<string>
-): Pick<TrainingDay, 'slot' | 'confidence'> {
+): Pick<TrainingDay, 'indexInMicro' | 'confidence'> {
 	const set = new Set(exercises.filter((item) => !isCardio(item)));
-	if (set.size === 0) return { slot: 'unknown', confidence: 0 };
+	if (set.size === 0) return { indexInMicro: -1, confidence: 0 };
 
 	const scoreA = jaccard(set, centroidA);
 	const scoreB = jaccard(set, centroidB);
 	const minMatch = 0.28;
 
-	if (scoreA < minMatch && scoreB < minMatch) return { slot: 'unknown', confidence: Math.max(scoreA, scoreB) };
-	if (scoreA >= scoreB) return { slot: 'A', confidence: scoreA };
-	return { slot: 'B', confidence: scoreB };
+	if (scoreA < minMatch && scoreB < minMatch) return { indexInMicro: -1, confidence: Math.max(scoreA, scoreB) };
+	if (scoreA >= scoreB) return { indexInMicro: 0, confidence: scoreA };
+	return { indexInMicro: 1, confidence: scoreB };
+}
+
+function microSessionsFromDays(days: TrainingDay[]): [TrainingDay | null, TrainingDay | null] {
+	return [days.find((day) => day.indexInMicro === 0) ?? null, days.find((day) => day.indexInMicro === 1) ?? null];
 }
 
 function buildMicrocycles(days: TrainingDay[]): Microcycle[] {
@@ -178,8 +184,7 @@ function buildMicrocycles(days: TrainingDay[]): Microcycle[] {
 
 	const flush = () => {
 		if (bucket.length === 0) return;
-		const dayA = bucket.find((day) => day.slot === 'A') ?? null;
-		const dayB = bucket.find((day) => day.slot === 'B') ?? null;
+		const sessions = microSessionsFromDays(bucket);
 		cycles.push({
 			index: cycles.length + 1,
 			mesoIndex: 0,
@@ -187,9 +192,10 @@ function buildMicrocycles(days: TrainingDay[]): Microcycle[] {
 			startDate: bucket[0].date,
 			endDate: bucket[bucket.length - 1].date,
 			days: bucket,
-			dayA,
-			dayB,
-			complete: Boolean(dayA && dayB),
+			sessions,
+			dayA: sessions[0],
+			dayB: sessions[1],
+			complete: Boolean(sessions[0] && sessions[1]),
 			gapAfterDays: null
 		});
 		bucket = [];
@@ -198,12 +204,12 @@ function buildMicrocycles(days: TrainingDay[]): Microcycle[] {
 	for (const day of sorted) {
 		if (bucket.length > 0) {
 			const gap = daysBetween(bucket[bucket.length - 1].date, day.date);
-			const hasA = bucket.some((item) => item.slot === 'A');
-			const hasB = bucket.some((item) => item.slot === 'B');
+			const has0 = bucket.some((item) => item.indexInMicro === 0);
+			const has1 = bucket.some((item) => item.indexInMicro === 1);
 
 			if (gap > TRAINING_GAP_DAYS) {
 				flush();
-			} else if (hasA && hasB && day.slot === 'A') {
+			} else if (has0 && has1 && day.indexInMicro === 0) {
 				flush();
 			}
 		}
@@ -274,8 +280,7 @@ function buildMesocycles(cycles: Microcycle[]): Mesocycle[] {
 	for (const micro of cycles) {
 		if (bucket.length > 0) {
 			const last = bucket[bucket.length - 1];
-			const gap =
-				last.gapAfterDays ?? daysBetween(last.endDate, micro.startDate);
+			const gap = last.gapAfterDays ?? daysBetween(last.endDate, micro.startDate);
 			const mesoSpan = daysBetween(bucket[0].startDate, micro.startDate);
 			const completeInMeso = bucket.filter((item) => item.complete).length;
 
@@ -292,10 +297,7 @@ function buildMesocycles(cycles: Microcycle[]): Mesocycle[] {
 	flush();
 
 	for (let i = 0; i < mesocycles.length - 1; i++) {
-		mesocycles[i].gapAfterDays = daysBetween(
-			mesocycles[i].endDate,
-			mesocycles[i + 1].startDate
-		);
+		mesocycles[i].gapAfterDays = daysBetween(mesocycles[i].endDate, mesocycles[i + 1].startDate);
 	}
 
 	return mesocycles;
@@ -321,25 +323,25 @@ export function buildMicrocycleOverview(sessions: WorkoutSession[]): MicrocycleO
 		...classifyDay(day.exercises, centroidA, centroidB)
 	}));
 
-	const countA = days.filter((day) => day.slot === 'A').length;
-	const countB = days.filter((day) => day.slot === 'B').length;
+	const count0 = days.filter((day) => day.indexInMicro === 0).length;
+	const count1 = days.filter((day) => day.indexInMicro === 1).length;
 
 	const templates: WorkoutTemplate[] = [
 		{
-			slot: 'A',
+			indexInMicro: 0,
 			label: templateLabel(centroidA, centroidB),
 			exercises: [...centroidA].sort((a, b) => a.localeCompare(b, 'ru')),
-			sessions: countA
+			sessions: count0
 		},
 		{
-			slot: 'B',
+			indexInMicro: 1,
 			label: templateLabel(centroidB, centroidA),
 			exercises: [...centroidB].sort((a, b) => a.localeCompare(b, 'ru')),
-			sessions: countB
+			sessions: count1
 		}
 	];
 
-	const rawCycles = buildMicrocycles(days.filter((day) => day.slot !== 'unknown'));
+	const rawCycles = buildMicrocycles(days.filter((day) => day.indexInMicro >= 0));
 	const mesocycles = buildMesocycles(rawCycles);
 	const cycles = attachMesocycles(rawCycles, mesocycles);
 	const byDate = new Map(days.map((day) => [day.date, day]));
@@ -355,16 +357,39 @@ export function mesocycleForDate(mesocycles: Mesocycle[], date: string): Mesocyc
 	return mesocycles.find((meso) => date >= meso.startDate && date <= meso.endDate) ?? null;
 }
 
+export function sessionIndexLabel(indexInMicro: number): string {
+	if (indexInMicro === 0) return 'Тренировка A';
+	if (indexInMicro === 1) return 'Тренировка B';
+	return `День ${indexInMicro + 1}`;
+}
+
+export function sessionIndexColor(indexInMicro: number): string {
+	if (indexInMicro === 0) return '#5b9dff';
+	if (indexInMicro === 1) return '#6ee7a8';
+	return '#94a3b8';
+}
+
+/** @deprecated используй indexInMicro */
+export type WorkoutSlot = 'A' | 'B' | 'unknown';
+
+export function slotToIndex(slot: WorkoutSlot): number {
+	if (slot === 'A') return 0;
+	if (slot === 'B') return 1;
+	return -1;
+}
+
+export function indexToSlot(indexInMicro: number): WorkoutSlot {
+	if (indexInMicro === 0) return 'A';
+	if (indexInMicro === 1) return 'B';
+	return 'unknown';
+}
+
 export function slotLabel(slot: WorkoutSlot): string {
-	if (slot === 'A') return 'Тренировка A';
-	if (slot === 'B') return 'Тренировка B';
-	return 'Не определено';
+	return sessionIndexLabel(slotToIndex(slot));
 }
 
 export function slotColor(slot: WorkoutSlot): string {
-	if (slot === 'A') return '#5b9dff';
-	if (slot === 'B') return '#6ee7a8';
-	return '#94a3b8';
+	return sessionIndexColor(slotToIndex(slot));
 }
 
 export function mesocycleColor(index: number): string {

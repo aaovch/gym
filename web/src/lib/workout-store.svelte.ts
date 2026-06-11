@@ -1,5 +1,5 @@
 import { getGitHubToken } from './auth';
-	import {
+import {
 	assignSessionToMicro,
 	autoMesocyclesAsView,
 	buildCyclePlanView,
@@ -8,25 +8,31 @@ import { getGitHubToken } from './auth';
 	importPlanFromAuto,
 	refreshAllMesoAnchors,
 	repairMicroDatesFromAuto,
+	suggestSessionIndex,
 	type CyclePlan
 } from './cycle-plan';
+import { repairWorkoutLinks, summarizeLogMicroLinks } from './data-repair';
+import { buildWorkoutKeyMaps } from './exercise-keys';
 import { sessionsToEntries } from './database';
-import { fetchWorkoutDatabase, saveWorkoutDatabase, verifyGitHubToken } from './github';
+import { fetchCyclePlan, fetchWorkoutDatabase, saveCyclePlanRemote, saveWorkoutDatabase, verifyGitHubToken } from './github';
+import { logsToSessions as expandLogs } from './json-store';
 import {
 	clearCyclePlan,
 	clearLocalDatabase,
 	loadCyclePlan,
 	loadLocalDatabase,
+	pickNewerCyclePlan,
 	pickNewerDatabase,
 	saveCyclePlan,
 	saveLocalDatabase
 } from './storage';
 import { buildWorkoutData } from './stats';
 import { buildMicrocycleOverview } from './microcycle';
-import type { WorkoutDatabase, WorkoutSession } from './types';
+import type { ExerciseLog, WorkoutDatabase, WorkoutEntry, WorkoutSession } from './types';
 
 type SyncState = {
-	sha: string | null;
+	workoutsSha: string | null;
+	cyclePlanSha: string | null;
 	githubLogin: string | null;
 	syncing: boolean;
 	error: string;
@@ -35,31 +41,36 @@ type SyncState = {
 };
 
 function emptyDatabase(): WorkoutDatabase {
-	return { version: 1, updatedAt: '', sessions: [] };
+	return { version: 3, updatedAt: '', exercises: [], logs: [] };
 }
 
-function normalizeLoadedCyclePlan(plan: CyclePlan | null): CyclePlan | null {
+function normalizeLoadedCyclePlan(
+	plan: CyclePlan | null,
+	byDate?: Map<string, import('./microcycle').TrainingDay>
+): CyclePlan | null {
 	if (!plan) return null;
-	const merged = normalizeCyclePlan(plan);
+	const merged = normalizeCyclePlan(plan, byDate);
 	const changed = JSON.stringify(merged) !== JSON.stringify(plan);
 	if (changed) saveCyclePlan(merged);
 	return merged;
 }
 
 function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
-	const entries = sessionsToEntries(database.sessions);
+	const sessions = expandLogs(database);
+	const entries = sessionsToEntries(sessions);
+	const keyMaps = buildWorkoutKeyMaps(database.exercises, entries);
 	const computed = buildWorkoutData(entries);
-	const microcycles = buildMicrocycleOverview(database.sessions);
+	const microcycles = buildMicrocycleOverview(sessions);
 	const allDates = [...new Set(entries.map((entry) => entry.date))].sort();
-	const cyclePlanView = buildCyclePlanView(cyclePlan, microcycles, entries, allDates);
+	const cyclePlanView = buildCyclePlanView(cyclePlan, microcycles, entries, allDates, database.exercises);
 	const mesocycles =
 		cyclePlanView.usingManualPlan && cyclePlanView.mesocycles.length > 0
 			? cyclePlanView.mesocycles
 			: autoMesocyclesAsView(microcycles, entries);
 	const cyclePlanForCalc: CyclePlan = cyclePlan
-		? normalizeCyclePlan(cyclePlan)
+		? normalizeCyclePlan(cyclePlan, microcycles.byDate)
 		: {
-				version: 1,
+				version: 3,
 				updatedAt: '',
 				templates: bundledProtocolTemplates(),
 				macrocycles: [],
@@ -70,13 +81,16 @@ function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 		entries,
 		summary: computed.summary,
 		trend: computed.trend,
-		sessions: database.sessions,
+		sessions,
+		logs: database.logs,
+		exercises: database.exercises,
 		updatedAt: database.updatedAt,
 		microcycles,
 		cyclePlan,
 		cyclePlanForCalc,
 		cyclePlanView: { ...cyclePlanView, mesocycles },
 		allDates,
+		keyMaps,
 		templates: cyclePlanForCalc.templates,
 		protocolTemplates: cyclePlanForCalc.templates,
 		workoutTemplates: microcycles.templates
@@ -87,7 +101,8 @@ class WorkoutStore {
 	database = $state.raw<WorkoutDatabase>(emptyDatabase());
 	cyclePlan = $state.raw<CyclePlan | null>(normalizeLoadedCyclePlan(loadCyclePlan()));
 	sync = $state<SyncState>({
-		sha: null,
+		workoutsSha: null,
+		cyclePlanSha: null,
 		githubLogin: null,
 		syncing: false,
 		error: '',
@@ -103,12 +118,21 @@ class WorkoutStore {
 		this.sync = { ...this.sync, ...patch };
 	}
 
-	bootstrap(bundled: WorkoutDatabase) {
+	bootstrap(bundled: WorkoutDatabase, bundledCyclePlan: CyclePlan | null = null) {
 		const local = loadLocalDatabase();
 		const initial = pickNewerDatabase(bundled, local);
 		const source =
 			local && Date.parse(local.updatedAt) > Date.parse(bundled.updatedAt || '0') ? 'local' : 'bundled';
 		this.applyDatabase(initial, source);
+
+		const localPlan = loadCyclePlan();
+		const planCandidates = [localPlan, bundledCyclePlan].filter(
+			(item): item is CyclePlan => item != null
+		);
+		if (planCandidates.length > 0) {
+			const bestPlan = planCandidates.reduce((winner, item) => pickNewerCyclePlan(winner, item));
+			this.cyclePlan = normalizeLoadedCyclePlan(bestPlan, this.view.microcycles.byDate);
+		}
 	}
 
 	connectIfTokenSaved() {
@@ -138,13 +162,34 @@ class WorkoutStore {
 	}
 
 	private persistCyclePlan(plan: CyclePlan) {
-		const next = { ...plan, updatedAt: new Date().toISOString() };
+		const next = normalizeCyclePlan(
+			{ ...plan, updatedAt: new Date().toISOString() },
+			this.view.microcycles.byDate
+		);
 		this.cyclePlan = next;
 		saveCyclePlan(next);
+		const token = getGitHubToken();
+		if (token) {
+			void this.persistCyclePlanToGitHub(token, next);
+		}
+	}
+
+	private async persistCyclePlanToGitHub(token: string, plan: CyclePlan) {
+		try {
+			let sha = this.sync.cyclePlanSha;
+			if (!sha) {
+				const remote = await fetchCyclePlan(token);
+				sha = remote.sha;
+			}
+			const nextSha = await saveCyclePlanRemote(token, plan, sha, 'Update cycle plan from app');
+			this.patchSync({ cyclePlanSha: nextSha });
+		} catch {
+			// план остаётся локально
+		}
 	}
 
 	private async persistToGitHub(token: string, db: WorkoutDatabase, message: string) {
-		let sha = this.sync.sha;
+		let sha = this.sync.workoutsSha;
 		if (!sha) {
 			const remote = await fetchWorkoutDatabase(token);
 			sha = remote.sha;
@@ -152,7 +197,7 @@ class WorkoutStore {
 
 		const nextSha = await saveWorkoutDatabase(token, db, sha, message);
 		this.patchSync({
-			sha: nextSha,
+			workoutsSha: nextSha,
 			source: 'github',
 			error: '',
 			message: 'Сохранено в GitHub. Сайт обновится через 1–2 минуты.'
@@ -172,34 +217,67 @@ class WorkoutStore {
 		}
 	}
 
-	async saveSession(
-		session: WorkoutSession,
-		context?: { mesoId: string; microId: string }
+	async saveLog(
+		log: ExerciseLog,
+		context?: { mesoId: string; microId: string; indexInMicro?: number }
 	) {
 		const db = this.database;
-		const index = db.sessions.findIndex((item) => item.id === session.id);
-		const sessions =
-			index === -1
-				? [...db.sessions, session]
-				: db.sessions.map((item) => (item.id === session.id ? session : item));
+		const index = db.logs.findIndex((item) => item.id === log.id);
+		const logs =
+			index === -1 ? [...db.logs, log] : db.logs.map((item) => (item.id === log.id ? log : item));
 
-		this.database = { ...db, sessions };
-		await this.persistDatabase(`Update workout: ${session.exercise} (${session.date})`);
+		this.database = { ...db, logs };
+		const name = db.exercises.find((e) => e.id === log.exerciseId)?.name ?? log.exerciseId;
+		await this.persistDatabase(`Update workout: ${name} (${log.date})`);
 
 		if (!context?.mesoId || !context?.microId) return;
 
 		const plan = this.cyclePlan;
 		if (!plan) return;
 
-		const next = assignSessionToMicro(plan, context.mesoId, context.microId, session.date);
+		const microView = this.view.cyclePlanView.mesocycles
+			.find((m) => m.plan.id === context.mesoId)
+			?.microcycles.find((m) => m.plan.id === context.microId);
+		const indexInMicro =
+			context.indexInMicro ??
+			(microView
+				? suggestSessionIndex(microView, log.date, this.view.entries, this.view.workoutTemplates)
+				: 0);
+
+		const next = assignSessionToMicro(
+			plan,
+			context.mesoId,
+			context.microId,
+			log.date,
+			indexInMicro
+		);
 		if (next !== plan) this.persistCyclePlan(next);
 	}
 
-	async deleteSession(sessionId: string) {
+	async saveSession(
+		session: WorkoutSession,
+		context?: { mesoId: string; microId: string; indexInMicro?: number }
+	) {
+		const log: ExerciseLog = {
+			id: session.id,
+			exerciseId: session.exerciseId,
+			date: session.date,
+			blocks: session.rows,
+			microSessionId: session.microSessionId
+		};
+		await this.saveLog(log, context);
+	}
+
+	async deleteLog(logId: string) {
 		const db = this.database;
-		const target = db.sessions.find((item) => item.id === sessionId);
-		this.database = { ...db, sessions: db.sessions.filter((item) => item.id !== sessionId) };
-		await this.persistDatabase(`Delete workout: ${target?.exercise ?? sessionId}`);
+		const target = db.logs.find((item) => item.id === logId);
+		const name = target ? db.exercises.find((e) => e.id === target.exerciseId)?.name : logId;
+		this.database = { ...db, logs: db.logs.filter((item) => item.id !== logId) };
+		await this.persistDatabase(`Delete workout: ${name ?? logId}`);
+	}
+
+	async deleteSession(sessionId: string) {
+		await this.deleteLog(sessionId);
 	}
 
 	resetToBundled(bundled: WorkoutDatabase) {
@@ -233,7 +311,9 @@ class WorkoutStore {
 	refreshMesoAnchorsFromData(keepManual = true) {
 		const plan = this.cyclePlan;
 		if (!plan) return;
-		this.persistCyclePlan(refreshAllMesoAnchors(plan, this.view.entries, keepManual));
+		this.persistCyclePlan(
+			refreshAllMesoAnchors(plan, this.view.entries, keepManual, this.view.keyMaps)
+		);
 		this.patchSync({
 			message: keepManual
 				? '1ПМ пересчитаны из данных (ручные значения сохранены).'
@@ -253,6 +333,48 @@ class WorkoutStore {
 		});
 	}
 
+	async repairWorkoutLinks() {
+		const result = repairWorkoutLinks(this.database, this.cyclePlan, this.view.entries, {
+			importPlanIfEmpty: true,
+			repairPlanDates: true
+		});
+
+		this.database = result.database;
+		saveLocalDatabase(result.database);
+
+		if (result.plan) {
+			this.persistCyclePlan(result.plan);
+		}
+
+		const linkSummary = summarizeLogMicroLinks(result.database.logs);
+		const parts = [
+			result.logsLinked > 0 ? `привязано логов: ${result.logsLinked}` : '',
+			result.planImported ? 'план импортирован' : '',
+			result.planDatesRepaired ? 'даты μ восстановлены' : '',
+			result.anchorsRefreshed ? 'якоря пересчитаны' : ''
+		].filter(Boolean);
+
+		const token = getGitHubToken();
+		if (token) {
+			await this.persistToGitHub(result.database, 'Repair workout data links');
+			if (result.plan) {
+				await this.persistCyclePlanToGitHub(token, result.plan);
+			}
+		} else {
+			this.patchSync({
+				source: this.sync.source === 'github' ? 'github' : 'local'
+			});
+		}
+
+		this.patchSync({
+			message:
+				parts.length > 0
+					? `Данные восстановлены (${parts.join(', ')}). Логов с microSessionId: ${linkSummary.linked}/${linkSummary.total}.`
+					: `Связи в порядке. Логов с microSessionId: ${linkSummary.linked}/${linkSummary.total}.`,
+			error: ''
+		});
+	}
+
 	clearCyclePlanState() {
 		clearCyclePlan();
 		this.cyclePlan = null;
@@ -266,8 +388,10 @@ class WorkoutStore {
 		this.patchSync({ syncing: true, error: '', message: '' });
 		try {
 			const login = await verifyGitHubToken(token);
-			const { db: remote, sha } = await fetchWorkoutDatabase(token);
+			const [{ db: remote, sha: workoutsSha }, { plan: remotePlan, sha: cyclePlanSha }] =
+				await Promise.all([fetchWorkoutDatabase(token), fetchCyclePlan(token)]);
 			const local = loadLocalDatabase();
+			const localPlan = loadCyclePlan();
 			const current = this.database;
 			const best = [current, local, remote]
 				.filter((item): item is WorkoutDatabase => item !== null)
@@ -276,8 +400,18 @@ class WorkoutStore {
 			this.applyDatabase(best, best === remote ? 'github' : this.sync.source);
 			saveLocalDatabase(best);
 
+			const planCandidates = [this.cyclePlan, localPlan, remotePlan].filter(
+				(item): item is CyclePlan => item != null
+			);
+			if (planCandidates.length > 0) {
+				const bestPlan = planCandidates.reduce((winner, item) => pickNewerCyclePlan(winner, item));
+				this.cyclePlan = normalizeLoadedCyclePlan(bestPlan, this.view.microcycles.byDate);
+				if (bestPlan === remotePlan && remotePlan) saveCyclePlan(remotePlan);
+			}
+
 			this.sync = {
-				sha,
+				workoutsSha,
+				cyclePlanSha,
 				githubLogin: login,
 				syncing: false,
 				error: '',
@@ -298,6 +432,9 @@ class WorkoutStore {
 
 	async pushToGitHub(token: string) {
 		await this.persistToGitHub(token, this.database, 'Sync workouts from app');
+		if (this.cyclePlan) {
+			await this.persistCyclePlanToGitHub(token, this.cyclePlan);
+		}
 	}
 }
 
@@ -307,8 +444,8 @@ export async function connectGitHub(token: string) {
 	await workoutStore.connectGitHub(token);
 }
 
-export function bootstrapWorkoutStore(bundled: WorkoutDatabase) {
-	workoutStore.bootstrap(bundled);
+export function bootstrapWorkoutStore(bundled: WorkoutDatabase, bundledCyclePlan: CyclePlan | null = null) {
+	workoutStore.bootstrap(bundled, bundledCyclePlan);
 }
 
 export async function refreshFromGitHub(token = getGitHubToken()) {
@@ -321,9 +458,16 @@ export async function pushToGitHub(token = getGitHubToken()) {
 	await workoutStore.pushToGitHub(token);
 }
 
+export async function saveLog(
+	log: ExerciseLog,
+	context?: { mesoId: string; microId: string; indexInMicro?: number }
+) {
+	await workoutStore.saveLog(log, context);
+}
+
 export async function saveSession(
 	session: WorkoutSession,
-	context?: { mesoId: string; microId: string }
+	context?: { mesoId: string; microId: string; indexInMicro?: number }
 ) {
 	await workoutStore.saveSession(session, context);
 }
@@ -350,6 +494,10 @@ export function refreshMesoAnchorsFromData(keepManual = true) {
 
 export function repairPlanMicroDatesFromAuto() {
 	workoutStore.repairMicroDatesFromAuto();
+}
+
+export async function repairWorkoutLinksFromData() {
+	await workoutStore.repairWorkoutLinks();
 }
 
 export function clearCyclePlanState() {
