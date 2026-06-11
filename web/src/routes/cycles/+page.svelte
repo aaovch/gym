@@ -61,6 +61,7 @@
 		label: string;
 		microCount: number;
 		defaultProtocolId: string;
+		selection: Map<string, ConstructorRow>;
 	};
 
 	let editMode = $state(false);
@@ -162,21 +163,101 @@
 			label: block.label,
 			microCount: block.microCount,
 			defaultProtocolId: block.defaultProtocolId,
-			exercises: constructorExercises.map((row) => ({
-				...row,
-				protocolId: block.defaultProtocolId
-			}))
+			exercises: exercisesFromSelection(block.selection)
 		}))
 	);
 
+	const macroBlocksReady = $derived(
+		macroBlockInputs.some((block) => block.exercises.length > 0 && block.microCount >= 1)
+	);
+
 	const macroPreview = $derived.by(() => {
-		if (!plan || !showMacroConstructor || constructorExercises.length === 0) return [];
+		if (!plan || !showMacroConstructor || !macroBlocksReady) return [];
 		return previewMacroPlan(plan, {
 			label: macroLabel,
 			startDate: macroStart || defaultMacroStartDate(view.entries),
 			blocks: macroBlockInputs
 		});
 	});
+
+	function exercisesFromSelection(selection: Map<string, ConstructorRow>): MesoExerciseSetup[] {
+		return [...selection.entries()]
+			.filter(([, row]) => row.enabled && row.anchor1rm > 0)
+			.map(([exercise, row]) => ({
+				exercise,
+				protocolId: row.protocolId,
+				anchor1rm: row.anchor1rm,
+				manual: row.manual
+			}));
+	}
+
+	function createBlockSelection(
+		defaultProtocolId: string,
+		seed?: Map<string, ConstructorRow>
+	): Map<string, ConstructorRow> {
+		const start = macroStart || defaultMacroStartDate(view.entries);
+		const templateExercises = new Set(workoutTemplates.flatMap((item) => item.exercises));
+		const next = new Map<string, ConstructorRow>();
+
+		for (const exercise of knownExercises) {
+			const seedRow = seed?.get(exercise);
+			const resolved = resolveExerciseAnchor(view.entries, exercise, start);
+			next.set(exercise, {
+				enabled: seedRow?.enabled ?? templateExercises.has(exercise),
+				protocolId: seedRow?.protocolId ?? defaultProtocolId,
+				anchor1rm: seedRow?.manual
+					? seedRow.anchor1rm
+					: (resolved.value ?? seedRow?.anchor1rm ?? 0),
+				manual: seedRow?.manual ?? false,
+				anchorSource: seedRow?.manual ? 'вручную' : resolved.source
+			});
+		}
+		return next;
+	}
+
+	function patchMacroBlockRow(
+		blockId: string,
+		exercise: string,
+		patch: Partial<ConstructorRow>
+	) {
+		macroBlocks = macroBlocks.map((block) => {
+			if (block.id !== blockId) return block;
+			const next = new Map(block.selection);
+			const current = next.get(exercise);
+			if (!current) return block;
+			next.set(exercise, { ...current, ...patch });
+			return { ...block, selection: next };
+		});
+	}
+
+	function refreshMacroAnchors(keepManual = true) {
+		const start = macroStart || defaultMacroStartDate(view.entries);
+		macroBlocks = macroBlocks.map((block) => {
+			const next = new Map(block.selection);
+			for (const [exercise, row] of next) {
+				if (keepManual && row.manual) continue;
+				const resolved = resolveExerciseAnchor(view.entries, exercise, start);
+				next.set(exercise, {
+					...row,
+					anchor1rm: resolved.value ?? row.anchor1rm,
+					anchorSource: resolved.source,
+					manual: false
+				});
+			}
+			return { ...block, selection: next };
+		});
+	}
+
+	function applyBlockSuggestedMicroCount(blockId: string) {
+		if (!plan) return;
+		const block = macroBlocks.find((item) => item.id === blockId);
+		if (!block) return;
+		const exercises = exercisesFromSelection(block.selection);
+		if (exercises.length === 0) return;
+		patchMacroBlock(blockId, {
+			microCount: suggestedMicroCount(plan.templates, exercises)
+		});
+	}
 
 	function patchConstructorRow(exercise: string, patch: Partial<ConstructorRow>) {
 		const next = new Map(constructorSelection);
@@ -229,31 +310,38 @@
 	}
 
 	function initMacroBlocks() {
+		const block1Id = crypto.randomUUID();
+		const block1Selection = createBlockSelection('submax-effort');
 		macroBlocks = [
 			{
-				id: crypto.randomUUID(),
+				id: block1Id,
 				label: 'Блок 1 — накопление',
 				microCount: 4,
-				defaultProtocolId: 'submax-effort'
+				defaultProtocolId: 'submax-effort',
+				selection: block1Selection
 			},
 			{
 				id: crypto.randomUUID(),
 				label: 'Блок 2 — интенсификация',
 				microCount: 4,
-				defaultProtocolId: 'max-effort'
+				defaultProtocolId: 'max-effort',
+				selection: createBlockSelection('max-effort', block1Selection)
 			}
 		];
 	}
 
 	function addMacroBlock() {
 		const num = macroBlocks.length + 1;
+		const last = macroBlocks[macroBlocks.length - 1];
+		const defaultProtocolId = 'submax-effort';
 		macroBlocks = [
 			...macroBlocks,
 			{
 				id: crypto.randomUUID(),
 				label: `Блок ${num}`,
-				microCount: 4,
-				defaultProtocolId: 'submax-effort'
+				microCount: last?.microCount ?? 4,
+				defaultProtocolId,
+				selection: createBlockSelection(defaultProtocolId, last?.selection)
 			}
 		];
 	}
@@ -264,7 +352,23 @@
 	}
 
 	function patchMacroBlock(id: string, patch: Partial<Omit<MacroBlockDraft, 'id'>>) {
-		macroBlocks = macroBlocks.map((block) => (block.id === id ? { ...block, ...patch } : block));
+		macroBlocks = macroBlocks.map((block) => {
+			if (block.id !== id) return block;
+			const updated = { ...block, ...patch };
+			if (
+				patch.defaultProtocolId &&
+				patch.defaultProtocolId !== block.defaultProtocolId
+			) {
+				const next = new Map(block.selection);
+				for (const [exercise, row] of next) {
+					if (row.protocolId === block.defaultProtocolId) {
+						next.set(exercise, { ...row, protocolId: patch.defaultProtocolId });
+					}
+				}
+				updated.selection = next;
+			}
+			return updated;
+		});
 	}
 
 	function openMacroConstructor() {
@@ -274,7 +378,6 @@
 		macroLabel = `Макро ${macroNum}`;
 		macroStart = defaultMacroStartDate(view.entries);
 		initMacroBlocks();
-		initConstructorSelection();
 		showMacroConstructor = true;
 	}
 
@@ -283,7 +386,7 @@
 	}
 
 	function confirmMacroConstructor() {
-		if (!plan || constructorExercises.length === 0 || macroBlockInputs.length === 0) return;
+		if (!plan || !macroBlocksReady) return;
 		const next = createMacrocycleFromConstructor(plan, {
 			label: macroLabel,
 			startDate: macroStart || defaultMacroStartDate(view.entries),
@@ -484,7 +587,7 @@
 			<div>
 				<h3 id="macro-constructor-title">Конструктор макроцикла</h3>
 				<p class="muted">
-					Макроцикл — цепочка мезо-блоков с общими упражнениями. Для каждого блока задайте метод и число μ.
+					Макроцикл — цепочка мезо-блоков. У каждого блока свой набор упражнений, метод и число μ.
 				</p>
 			</div>
 			<button type="button" class="btn ghost-link" onclick={closeMacroConstructor}>Закрыть</button>
@@ -501,7 +604,7 @@
 					class="field-input"
 					type="date"
 					bind:value={macroStart}
-					onchange={() => refreshConstructorAnchors(true)}
+					onchange={() => refreshMacroAnchors(true)}
 				/>
 			</label>
 		</div>
@@ -534,6 +637,13 @@
 									patchMacroBlock(block.id, { microCount: Number(e.currentTarget.value) || 4 })}
 							/>
 						</label>
+						<button
+							type="button"
+							class="btn small"
+							onclick={() => applyBlockSuggestedMicroCount(block.id)}
+						>
+							μ по протоколам
+						</button>
 						<label>
 							<span>Метод</span>
 							<select
@@ -561,59 +671,82 @@
 						<p class="muted macro-block-dates">
 							{formatDateRu(macroPreview[index].startDate)} — {formatDateRu(macroPreview[index].endDate)}
 							· {macroPreview[index].microCount} μ · {shortProtocolName(macroPreview[index].protocolName)}
+							· {exercisesFromSelection(block.selection).length} упр.
 						</p>
 					{/if}
+
+					<details class="macro-block-exercises" open>
+						<summary>Упражнения блока</summary>
+						<div class="constructor-table-wrap">
+							<table class="constructor-table">
+								<thead>
+									<tr>
+										<th></th>
+										<th>Упражнение</th>
+										<th>1ПМ, кг</th>
+										<th>Источник</th>
+										<th>Метод</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each knownExercises as exercise (exercise)}
+										{@const row = block.selection.get(exercise)}
+										{#if row}
+											<tr class:disabled={!row.enabled}>
+												<td>
+													<input
+														type="checkbox"
+														checked={row.enabled}
+														onchange={(e) =>
+															patchMacroBlockRow(block.id, exercise, {
+																enabled: e.currentTarget.checked
+															})}
+													/>
+												</td>
+												<td>{exercise}</td>
+												<td>
+													<input
+														class="field-input"
+														type="number"
+														step="0.5"
+														value={row.anchor1rm || ''}
+														disabled={!row.enabled}
+														onchange={(e) => {
+															const parsed = Number(e.currentTarget.value.replace(',', '.'));
+															if (!Number.isFinite(parsed) || parsed <= 0) return;
+															patchMacroBlockRow(block.id, exercise, {
+																anchor1rm: parsed,
+																manual: true,
+																anchorSource: 'вручную'
+															});
+														}}
+													/>
+												</td>
+												<td class="muted source-cell">{row.anchorSource}</td>
+												<td>
+													<select
+														class="field-select"
+														value={row.protocolId}
+														disabled={!row.enabled}
+														onchange={(e) =>
+															patchMacroBlockRow(block.id, exercise, {
+																protocolId: e.currentTarget.value
+															})}
+													>
+														{#each plan.templates as tpl (tpl.id)}
+															<option value={tpl.id}>{tpl.name}</option>
+														{/each}
+													</select>
+												</td>
+											</tr>
+										{/if}
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</details>
 				</article>
 			{/each}
-		</div>
-
-		<h4 class="constructor-subtitle">Упражнения (общие для всех блоков)</h4>
-		<div class="constructor-table-wrap">
-			<table class="constructor-table">
-				<thead>
-					<tr>
-						<th></th>
-						<th>Упражнение</th>
-						<th>1ПМ, кг</th>
-						<th>Источник</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each knownExercises as exercise (exercise)}
-						{@const row = constructorSelection.get(exercise)}
-						{#if row}
-							<tr class:disabled={!row.enabled}>
-								<td>
-									<input
-										type="checkbox"
-										checked={row.enabled}
-										onchange={(e) =>
-											patchConstructorRow(exercise, { enabled: e.currentTarget.checked })}
-									/>
-								</td>
-								<td>{exercise}</td>
-								<td>
-									<input
-										class="field-input"
-										type="number"
-										step="0.5"
-										min="0"
-										value={row.anchor1rm || ''}
-										onchange={(e) => {
-											const parsed = Number(e.currentTarget.value.replace(',', '.'));
-											patchConstructorRow(exercise, {
-												anchor1rm: Number.isFinite(parsed) ? parsed : 0,
-												manual: true
-											});
-										}}
-									/>
-								</td>
-								<td class="muted">{row.manual ? 'вручную' : row.anchorSource}</td>
-							</tr>
-						{/if}
-					{/each}
-				</tbody>
-			</table>
 		</div>
 
 		{#if macroPreview.length > 0}
@@ -650,7 +783,7 @@
 				{/each}
 			</div>
 		{:else}
-			<p class="muted constructor-empty">Отметьте упражнения и задайте 1ПМ.</p>
+			<p class="muted constructor-empty">В каждом блоке отметьте хотя бы одно упражнение с 1ПМ.</p>
 		{/if}
 
 		<div class="constructor-actions">
@@ -658,7 +791,7 @@
 			<button
 				type="button"
 				class="btn primary"
-				disabled={constructorExercises.length === 0 || macroBlocks.length === 0}
+				disabled={!macroBlocksReady || macroBlocks.length === 0}
 				onclick={confirmMacroConstructor}
 			>
 				Создать макроцикл
@@ -2021,11 +2154,6 @@
 		margin-bottom: 1rem;
 	}
 
-	.constructor-subtitle {
-		margin: 1rem 0 0.5rem;
-		font-size: 0.95rem;
-	}
-
 	.macro-blocks {
 		display: grid;
 		gap: 0.65rem;
@@ -2070,6 +2198,21 @@
 	.macro-block-dates {
 		margin: 0.5rem 0 0;
 		font-size: 0.82rem;
+	}
+
+	.macro-block-exercises {
+		margin-top: 0.75rem;
+	}
+
+	.macro-block-exercises summary {
+		cursor: pointer;
+		font-size: 0.88rem;
+		font-weight: 600;
+		margin-bottom: 0.5rem;
+	}
+
+	.macro-block-exercises .constructor-table-wrap {
+		margin-top: 0.35rem;
 	}
 
 	.macro-preview {
