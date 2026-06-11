@@ -19,6 +19,30 @@ export type TrainingThesesDoc = {
 	version: 1;
 	updatedAt: string;
 	groups: TrainingThesisGroup[];
+	matrices?: IntensityAdaptationMatrix[];
+};
+
+export type IntensityBand = {
+	id: string;
+	label: string;
+	fromPct: number;
+	toPct: number;
+};
+
+export type AdaptationIntensityRow = {
+	id: string;
+	label: string;
+	/** Звёзды по колонкам (1–maxStars): чем больше, тем лучше проходит адаптация. */
+	stars: number[];
+};
+
+export type IntensityAdaptationMatrix = {
+	id: string;
+	title: string;
+	note?: string;
+	maxStars?: number;
+	bands: IntensityBand[];
+	rows: AdaptationIntensityRow[];
 };
 
 type ThesesLocalOverlay = {
@@ -29,7 +53,7 @@ type ThesesLocalOverlay = {
 const LOCAL_KEY = 'gym_training_theses';
 
 function emptyDoc(): TrainingThesesDoc {
-	return { version: 1, updatedAt: '', groups: [] };
+	return { version: 1, updatedAt: '', groups: [], matrices: [] };
 }
 
 function emptyOverlay(): ThesesLocalOverlay {
@@ -81,8 +105,25 @@ class TrainingThesesStore {
 
 	groups = $derived.by(() => mergeGroups(this.bundled, this.overlay));
 
+	matrices = $derived.by(() => this.bundled.matrices ?? []);
+
 	bootstrap(doc: TrainingThesesDoc) {
 		this.bundled = doc;
+	}
+
+	/** Звёзды адаптации при заданном %1ПМ (для подсказок в плане). */
+	starsAtPct(matrixId: string, adaptationId: string, pct: number): number | null {
+		const matrix = this.matrices.find((item) => item.id === matrixId);
+		if (!matrix) return null;
+		const row = matrix.rows.find((item) => item.id === adaptationId);
+		if (!row) return null;
+		const bandIndex = matrix.bands.findIndex((band, index) => {
+			const isLast = index === matrix.bands.length - 1;
+			if (pct < band.fromPct) return false;
+			return isLast ? pct <= band.toPct : pct < band.toPct;
+		});
+		if (bandIndex === -1) return null;
+		return row.stars[bandIndex] ?? null;
 	}
 
 	allTheses = $derived.by(() =>
@@ -125,4 +166,9 @@ export const thesesStore = new TrainingThesesStore();
 
 export function bootstrapTheses(doc: TrainingThesesDoc) {
 	thesesStore.bootstrap(doc);
+}
+
+export function formatAdaptationStars(stars: number, maxStars = 4): string {
+	const safe = Math.max(0, Math.min(maxStars, Math.round(stars)));
+	return `${'★'.repeat(safe)}${'☆'.repeat(maxStars - safe)}`;
 }

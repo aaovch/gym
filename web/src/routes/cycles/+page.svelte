@@ -26,7 +26,7 @@
 		saveCyclePlanState,
 		workoutStore
 	} from '$lib/workout-store';
-	import { thesesStore } from '$lib/training-theses';
+	import { thesesStore, formatAdaptationStars } from '$lib/training-theses';
 
 	type MesoTab = 'plan' | 'workouts' | 'settings';
 
@@ -247,7 +247,7 @@
 			{/each}
 		</div>
 
-		{#if thesesStore.groups.length > 0}
+		{#if thesesStore.groups.length > 0 || thesesStore.matrices.length > 0}
 			<div class="theses-block">
 				<h3>Тезисы и принципы</h3>
 				<p class="muted theses-note">
@@ -265,6 +265,43 @@
 								<li>{thesis.text}</li>
 							{/each}
 						</ol>
+					</article>
+				{/each}
+
+				{#each thesesStore.matrices as matrix (matrix.id)}
+					<article class="thesis-group intensity-matrix-block">
+						<h4>{matrix.title}</h4>
+						{#if matrix.note}
+							<p class="muted thesis-source">{matrix.note}</p>
+						{/if}
+						<div class="intensity-matrix-wrap">
+							<table class="intensity-matrix">
+								<thead>
+									<tr>
+										<th></th>
+										{#each matrix.bands as band (band.id)}
+											<th>{band.label}</th>
+										{/each}
+									</tr>
+								</thead>
+								<tbody>
+									{#each matrix.rows as row (row.id)}
+										<tr>
+											<th scope="row">{row.label}</th>
+											{#each row.stars as stars, index (matrix.bands[index]?.id ?? index)}
+												<td
+													class="stars-cell"
+													class:strong={stars >= (matrix.maxStars ?? 4) - 1}
+													title="{stars} из {matrix.maxStars ?? 4}"
+												>
+													<span aria-hidden="true">{formatAdaptationStars(stars, matrix.maxStars ?? 4)}</span>
+												</td>
+											{/each}
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
 					</article>
 				{/each}
 			</div>
@@ -824,6 +861,50 @@
 		gap: 0.35rem;
 		font-size: 0.88rem;
 		color: var(--text);
+	}
+
+	.intensity-matrix-wrap {
+		overflow-x: auto;
+		margin-top: 0.5rem;
+	}
+
+	.intensity-matrix {
+		width: 100%;
+		min-width: 32rem;
+		border-collapse: collapse;
+		font-size: 0.78rem;
+	}
+
+	.intensity-matrix th,
+	.intensity-matrix td {
+		padding: 0.4rem 0.35rem;
+		border: 1px solid var(--border);
+		text-align: center;
+		vertical-align: middle;
+	}
+
+	.intensity-matrix thead th {
+		background: var(--surface-2);
+		color: var(--muted);
+		font-weight: 600;
+		font-size: 0.72rem;
+	}
+
+	.intensity-matrix tbody th {
+		text-align: left;
+		font-weight: 600;
+		font-size: 0.75rem;
+		line-height: 1.25;
+	}
+
+	.intensity-matrix .stars-cell {
+		color: #fbbf24;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+	}
+
+	.intensity-matrix .stars-cell.strong {
+		color: #fde68a;
 	}
 
 	.ab-card {

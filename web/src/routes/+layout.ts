@@ -13,6 +13,6 @@ export const load: LayoutLoad = async ({ fetch }) => {
 	const bundled: WorkoutDatabase = await workoutsRes.json();
 	const theses: TrainingThesesDoc = thesesRes.ok
 		? await thesesRes.json()
-		: { version: 1, updatedAt: '', groups: [] };
+		: { version: 1, updatedAt: '', groups: [], matrices: [] };
 	return { bundled, theses };
 };
