@@ -48,18 +48,18 @@
   const view = $derived(workoutStore.view);
   const mesocycles = $derived(view.cyclePlanView.mesocycles);
 
-  const trainingContext = $derived.by(() => {
-    const mesoId = mesoPick ?? urlMeso;
-    const microId = microPick ?? urlMicro;
-    if (!mesoId || !microId) return null;
-    const meso = mesocycles.find((item) => item.plan.id === mesoId);
-    const micro = meso?.microcycles.find((item) => item.plan.id === microId);
-    if (!meso || !micro) return null;
-    return { meso, micro };
+  const selectedMesoId = $derived(mesoPick ?? urlMeso);
+  const selectedMicroId = $derived(microPick ?? urlMicro);
+
+  const mesocycle = $derived.by(() => {
+    if (!selectedMesoId) return null;
+    return mesocycles.find((item) => item.plan.id === selectedMesoId) ?? null;
   });
 
-  const mesocycle = $derived(trainingContext?.meso ?? null);
-  const microcycle = $derived(trainingContext?.micro ?? null);
+  const microcycle = $derived.by(() => {
+    if (!mesocycle || !selectedMicroId) return null;
+    return mesocycle.microcycles.find((item) => item.plan.id === selectedMicroId) ?? null;
+  });
   const activeIndex = $derived.by((): 0 | 1 | null => {
     if (slotPick != null) return slotPick === 'B' ? 1 : 0;
     return urlSession;
@@ -325,6 +325,8 @@
             </p>
           {:else if mesocycle && microcycle}
             <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
+          {:else if mesocycle}
+            <p>Выберите микроцикл, затем сессию A или B</p>
           {/if}
         </div>
         {#if sessionReady}
@@ -342,7 +344,7 @@
               <button
                 type="button"
                 class="choice"
-                class:active={mesocycle?.plan.id === meso.plan.id}
+                class:active={selectedMesoId === meso.plan.id}
                 style={`--choice-color: ${mesocycleColor(meso.index)}`}
                 onclick={() => {
                   mesoPick = meso.plan.id;
@@ -365,7 +367,7 @@
                 <button
                   type="button"
                   class="micro-choice"
-                  class:active={microcycle?.plan.id === micro.plan.id}
+                  class:active={selectedMicroId === micro.plan.id}
                   class:complete={micro.complete}
                   onclick={() => {
                     microPick = micro.plan.id;
