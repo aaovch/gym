@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
+  import { base } from '$app/paths';
   import { page } from '$app/stores';
   import { getGitHubToken, setGitHubToken } from '$lib/auth';
   import {
@@ -17,13 +18,14 @@
   let token = '';
 
   const navigation = [
-    { href: '/', label: 'Обзор', short: 'Обзор' },
-    { href: '/cycles', label: 'План', short: 'План' },
-    { href: '/history', label: 'Журнал', short: 'Журнал' },
-    { href: '/stats', label: 'Аналитика', short: 'Аналитика' }
+    { href: `${base}/`, route: '/', label: 'Обзор', short: 'Обзор' },
+    { href: `${base}/cycles`, route: '/cycles', label: 'План', short: 'План' },
+    { href: `${base}/history`, route: '/history', label: 'Журнал', short: 'Журнал' },
+    { href: `${base}/stats`, route: '/stats', label: 'Аналитика', short: 'Аналитика' }
   ];
 
   $: path = $page.url.pathname;
+  $: routePath = base && path.startsWith(base) ? path.slice(base.length) || '/' : path;
   $: view = workoutStore.view;
   $: macrocycles = view.cyclePlanView.macrocycles;
   $: mesocycles = view.cyclePlanView.mesocycles;
@@ -80,9 +82,9 @@
     await pushToGitHub(token);
   }
 
-  function isActive(href: string) {
-    if (href === '/') return path === '/';
-    return path.startsWith(href);
+  function isActive(route: string) {
+    if (route === '/') return routePath === '/';
+    return routePath.startsWith(route);
   }
 </script>
 
@@ -96,7 +98,7 @@
 
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href="/" aria-label="На главную">
+    <a class="brand" href={`${base}/`} aria-label="На главную">
       <span class="brand-mark">GP</span>
       <span>
         <strong>Gym Planner</strong>
@@ -114,14 +116,14 @@
 
     <nav class="primary-nav" aria-label="Основная навигация">
       {#each navigation as item}
-        <a href={item.href} class:active={isActive(item.href)}>
+        <a href={item.href} class:active={isActive(item.route)}>
           <span class="nav-marker"></span>
           {item.label}
         </a>
       {/each}
     </nav>
 
-    <a class="quick-action" href="/add">
+    <a class="quick-action" href={`${base}/add`}>
       <span>+</span>
       Записать тренировку
     </a>
@@ -158,9 +160,9 @@
 
   <nav class="mobile-nav" aria-label="Мобильная навигация">
     {#each navigation as item}
-      <a href={item.href} class:active={isActive(item.href)}>{item.short}</a>
+      <a href={item.href} class:active={isActive(item.route)}>{item.short}</a>
     {/each}
-    <a href="/add" class:active={path.startsWith('/add')}>Запись</a>
+    <a href={`${base}/add`} class:active={routePath.startsWith('/add')}>Запись</a>
   </nav>
 </div>
 
@@ -211,8 +213,8 @@
       </div>
 
       <div class="settings-links">
-        <a href="/schema" on:click={() => (settingsOpen = false)}>Структура данных</a>
-        <a href="/body" on:click={() => (settingsOpen = false)}>Карта нагрузки</a>
+        <a href={`${base}/schema`} on:click={() => (settingsOpen = false)}>Структура данных</a>
+        <a href={`${base}/body`} on:click={() => (settingsOpen = false)}>Карта нагрузки</a>
       </div>
 
       <div class="panel-actions">
