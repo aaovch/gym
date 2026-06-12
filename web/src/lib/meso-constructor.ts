@@ -140,11 +140,12 @@ function buildPreviewMesoPlan(
 export function previewMesoPlan(
 	plan: CyclePlan,
 	input: MesoConstructorInput,
-	keyMaps: ExerciseKeyMaps
+	keyMaps: ExerciseKeyMaps,
+	workoutTemplates: WorkoutTemplate[] = []
 ): ProtocolMatrixRow[] {
 	if (input.exercises.length === 0 || input.microCount < 1) return [];
 	const { mesoPlan, microPlans, anchorInfo } = buildPreviewMesoPlan(plan, input, keyMaps);
-	return buildProtocolMatrix(mesoPlan, microPlans, plan, anchorInfo, [], keyMaps);
+	return buildProtocolMatrix(mesoPlan, microPlans, plan, anchorInfo, [], keyMaps, { workoutTemplates });
 }
 
 export function suggestedMicroCount(templates: ProtocolTemplate[], exercises: MesoExerciseSetup[]): number {

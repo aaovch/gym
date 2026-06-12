@@ -186,7 +186,8 @@
 				defaultProtocolId: 'submax-effort',
 				exercises: constructorExercises
 			},
-			keyMaps
+			keyMaps,
+			workoutTemplates
 		);
 	});
 
@@ -681,21 +682,27 @@
 		return name.replace('4×микро', '4μ').replace('~80%', '80%');
 	}
 
-	function microSessionsDone(micro: EnrichedMicrocycle): number {
-		return Number(Boolean(micro.dayA)) + Number(Boolean(micro.dayB));
+	function sessionDayDate(micro: EnrichedMicrocycle, sessionIndex: 0 | 1): string | null {
+		return sessionIndex === 0 ? (micro.dayA?.date ?? null) : (micro.dayB?.date ?? null);
 	}
 
-	function microStatusLabel(micro: EnrichedMicrocycle): string {
-		const done = microSessionsDone(micro);
-		if (done === 0) return 'нет дней';
-		if (done === 2) return '2/2 дня';
-		return `${done}/2 дня`;
+	function sessionAddUrl(
+		mesoId: string,
+		microId: string,
+		date: string | null,
+		sessionIndex: 0 | 1
+	): string {
+		const params = new URLSearchParams({
+			date: date ?? todayIso(),
+			meso: mesoId,
+			micro: microId,
+			session: String(sessionIndex)
+		});
+		return `${base}/add?${params.toString()}`;
 	}
 
-	function microStatusTitle(micro: EnrichedMicrocycle): string {
-		const a = micro.dayA ? `A (${formatDateRu(micro.dayA.date)})` : 'A — нет';
-		const b = micro.dayB ? `B (${formatDateRu(micro.dayB.date)})` : 'B — нет';
-		return `В μ две тренировки по шаблону программы: ${a}; ${b}`;
+	function sessionColumnTitle(sessionIndex: 0 | 1): string {
+		return sessionIndex === 0 ? 'A' : 'B';
 	}
 </script>
 
@@ -900,7 +907,7 @@
 										<th>Упражнение</th>
 										<th>Якорь</th>
 										{#each blockPreview.matrix[0]?.cells ?? [] as cell}
-											<th>μ{cell.microIndex}</th>
+											<th>μ{cell.microIndex} {sessionColumnTitle(cell.sessionIndex)}</th>
 										{/each}
 									</tr>
 								</thead>
@@ -912,8 +919,10 @@
 												<RmLabels anchor={row.anchor} stacked />
 											</td>
 											{#each row.cells as cell}
-												<td class="pct">
-													{#if cell.pct != null && cell.targetWeight != null}
+												<td class="pct" class:na={!cell.applicable}>
+													{#if !cell.applicable}
+														<span class="fact-empty">—</span>
+													{:else if cell.pct != null && cell.targetWeight != null}
 														<span class="pct-val">{cell.pct}%</span>
 														<small>{fmtNum(cell.targetWeight)} кг</small>
 														{#if cell.label}
@@ -1092,8 +1101,8 @@
 								<th>Упражнение</th>
 								<th>Якорь</th>
 								<th>Метод</th>
-								{#each Array.from({ length: constructorMicroCount }, (_, index) => index + 1) as microIndex}
-									<th>μ{microIndex}</th>
+								{#each constructorPreview[0]?.cells ?? [] as cell}
+									<th>μ{cell.microIndex} {sessionColumnTitle(cell.sessionIndex)}</th>
 								{/each}
 							</tr>
 						</thead>
@@ -1104,8 +1113,10 @@
 									<td><RmLabels anchor={row.anchor} stacked /></td>
 									<td class="proto-name" title={row.templateName}>{shortProtocolName(row.templateName)}</td>
 									{#each row.cells as cell}
-										<td class="pct">
-											{#if cell.pct != null && cell.targetWeight != null}
+										<td class="pct" class:na={!cell.applicable}>
+											{#if !cell.applicable}
+												<span class="fact-empty">—</span>
+											{:else if cell.pct != null && cell.targetWeight != null}
 												<span class="pct-val">{cell.pct}%</span>
 												<small>{fmtNum(cell.targetWeight)} кг</small>
 												{#if cell.label}
@@ -1577,9 +1588,9 @@
 			{#if mesoTab === 'plan'}
 				<div class="tab-panel">
 					<p class="panel-hint muted">
-						План (% и кг) по якорному 1ПМ · факт — пик % от якоря за микроцикл (лучший подход).
-						В каждом μ две тренировки: <strong>A</strong> — первая, <strong>B</strong> — вторая (шаблоны
-						дней программы).
+						План (% и кг) по якорному 1ПМ · факт — лучший подход в конкретный день.
+						Колонки <strong>A</strong> и <strong>B</strong> — отдельные тренировки в μ; пустая ячейка
+						означает, что упражнение не входит в этот день.
 					</p>
 					<div class="matrix-wrap">
 						<table class="matrix">
@@ -1588,62 +1599,52 @@
 								<col class="col-rm" />
 								<col class="col-proto" />
 								{#each selectedMeso.microcycles as _micro}
-									<col class="col-micro" />
+									<col class="col-session" />
+									<col class="col-session" />
 								{/each}
 							</colgroup>
 							<thead>
 								<tr>
-									<th>Упражнение</th>
-									<th>Якорь / текущ.</th>
-									<th>Протокол</th>
-									{#each selectedMeso.microcycles as micro}
-										<th>μ{micro.plan.indexInMeso}</th>
+									<th rowspan="2">Упражнение</th>
+									<th rowspan="2">Якорь / текущ.</th>
+									<th rowspan="2">Протокол</th>
+									{#each selectedMeso.microcycles as micro (micro.plan.id)}
+										<th colspan="2">μ{micro.plan.indexInMeso}</th>
 									{/each}
 								</tr>
-								<tr class="micro-dates-row">
-									<th colspan="3" class="micro-dates-label">Тренировки A / B</th>
+								<tr class="session-head-row">
 									{#each selectedMeso.microcycles as micro (micro.plan.id)}
-										<th class="micro-dates-cell">
-											<div class="micro-days">
-												{#if micro.dayA}
-													<a
-														class="day-link a"
-														href="{base}/?date={micro.dayA.date}"
-														title={sessionIndexLabel(0)}
-													>
-														A · {formatDateRu(micro.dayA.date)}
+										{#each [0, 1] as sessionIndex}
+											{@const slot = sessionIndex as 0 | 1}
+											{@const date = sessionDayDate(micro, slot)}
+											<th
+												class="session-head"
+												class:session-a={slot === 0}
+												class:session-b={slot === 1}
+												title={sessionIndexLabel(slot)}
+											>
+												<span class="session-slot">{sessionColumnTitle(slot)}</span>
+												{#if date}
+													<a class="day-link" class:a={slot === 0} class:b={slot === 1} href="{base}/?date={date}">
+														{formatDateRu(date)}
 													</a>
 												{:else}
-													<span class="day-missing a" title={sessionIndexLabel(0)}>A · —</span>
+													<span class="day-missing">—</span>
 												{/if}
-												{#if micro.dayB}
-													<a
-														class="day-link b"
-														href="{base}/?date={micro.dayB.date}"
-														title={sessionIndexLabel(1)}
-													>
-														B · {formatDateRu(micro.dayB.date)}
-													</a>
-												{:else}
-													<span class="day-missing b" title={sessionIndexLabel(1)}>B · —</span>
-												{/if}
-											</div>
-											<div class="micro-dates-meta">
-												<span
-													class="micro-badge"
-													class:ok={micro.complete}
-													title={microStatusTitle(micro)}
-												>
-													{microStatusLabel(micro)}
-												</span>
 												<a
 													class="micro-log-link"
-													href={todayWorkoutUrl(selectedMeso.plan.id, micro.plan.id)}
+													href={sessionAddUrl(
+														selectedMeso.plan.id,
+														micro.plan.id,
+														date,
+														slot
+													)}
+													title="Записать тренировку"
 												>
 													+
 												</a>
-											</div>
-										</th>
+											</th>
+										{/each}
 									{/each}
 								</tr>
 							</thead>
@@ -1666,28 +1667,34 @@
 										{#each row.cells as cell}
 											<td
 												class="pct"
-												class:match={!cell.plannedOnly &&
+												class:na={!cell.applicable}
+												class:match={cell.applicable &&
+													!cell.plannedOnly &&
 													cell.pct != null &&
 													cell.factMaxPct != null &&
 													Math.abs(cell.factMaxPct - cell.pct) <= 3}
 												title={cell.label ?? ''}
 											>
-												<div class="cell-plan">
-													<span class="cell-label">план</span>
-													<span class="pct-val">{cell.pct != null ? `${cell.pct}%` : '—'}</span>
-													{#if cell.targetWeight != null}
-														<small>{fmtNum(cell.targetWeight)} кг</small>
-													{/if}
-												</div>
-												<div class="cell-fact">
-													<span class="cell-label">факт</span>
-													{#if cell.plannedOnly || cell.factMaxPct == null || cell.factMaxWeight == null}
-														<span class="fact-empty">—</span>
-													{:else}
-														<span class="fact-val">{fmtNum(cell.factMaxPct)}%</span>
-														<small>{fmtNum(cell.factMaxWeight)} кг</small>
-													{/if}
-												</div>
+												{#if !cell.applicable}
+													<span class="fact-empty">—</span>
+												{:else}
+													<div class="cell-plan">
+														<span class="cell-label">план</span>
+														<span class="pct-val">{cell.pct != null ? `${cell.pct}%` : '—'}</span>
+														{#if cell.targetWeight != null}
+															<small>{fmtNum(cell.targetWeight)} кг</small>
+														{/if}
+													</div>
+													<div class="cell-fact">
+														<span class="cell-label">факт</span>
+														{#if cell.plannedOnly || cell.factMaxPct == null || cell.factMaxWeight == null}
+															<span class="fact-empty">—</span>
+														{:else}
+															<span class="fact-val">{fmtNum(cell.factMaxPct)}%</span>
+															<small>{fmtNum(cell.factMaxWeight)} кг</small>
+														{/if}
+													</div>
+												{/if}
 											</td>
 										{/each}
 									</tr>
@@ -2490,8 +2497,8 @@
 		width: 5.5rem;
 	}
 
-	.matrix :global(col.col-micro) {
-		width: 6.5rem;
+	.matrix :global(col.col-session) {
+		width: 4.75rem;
 	}
 
 	.matrix th,
@@ -2601,36 +2608,40 @@
 		color: var(--accent);
 	}
 
-	.matrix .micro-dates-row th {
-		top: 1.65rem;
-		padding-top: 0.2rem;
-		padding-bottom: 0.45rem;
+	.matrix .session-head-row th {
+		top: 1.55rem;
+		padding: 0.25rem 0.2rem 0.4rem;
 		vertical-align: top;
 		font-weight: 500;
 	}
 
-	.matrix .micro-dates-label {
-		text-align: left;
+	.matrix .session-head {
+		display: grid;
+		gap: 0.2rem;
+		justify-items: center;
+	}
+
+	.matrix .session-slot {
 		font-size: 0.68rem;
+		font-weight: 800;
+		letter-spacing: 0.04em;
 	}
 
-	.matrix .micro-dates-cell {
-		padding-inline: 0.25rem;
+	.matrix .session-head.session-a .session-slot {
+		color: #5b9dff;
 	}
 
-	.micro-days {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-		align-items: stretch;
+	.matrix .session-head.session-b .session-slot {
+		color: #6ee7a8;
 	}
 
 	.day-link {
 		display: block;
-		padding: 0.2rem 0.35rem;
+		width: 100%;
+		padding: 0.18rem 0.3rem;
 		border-radius: 0;
 		text-decoration: none;
-		font-size: 0.68rem;
+		font-size: 0.64rem;
 		line-height: 1.2;
 		white-space: nowrap;
 		overflow: hidden;
@@ -2648,37 +2659,8 @@
 	}
 
 	.day-missing {
-		display: block;
-		padding: 0.2rem 0.35rem;
-		font-size: 0.68rem;
-		line-height: 1.2;
+		font-size: 0.64rem;
 		color: var(--muted);
-		border: 1px dashed var(--line);
-	}
-
-	.day-missing.a {
-		background: rgba(91, 157, 255, 0.04);
-	}
-
-	.day-missing.b {
-		background: rgba(110, 231, 168, 0.04);
-	}
-
-	.micro-dates-meta {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.35rem;
-		margin-top: 0.3rem;
-	}
-
-	.micro-badge {
-		font-size: 0.65rem;
-		color: #fbbf24;
-	}
-
-	.micro-badge.ok {
-		color: var(--accent);
 	}
 
 	.micro-log-link {
@@ -2692,6 +2674,10 @@
 		font-size: 0.85rem;
 		font-weight: 800;
 		line-height: 1;
+	}
+
+	.matrix .pct.na {
+		opacity: 0.35;
 	}
 
 	.gap-note {

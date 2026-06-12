@@ -96,12 +96,23 @@ export type EnrichedMicrocycle = {
 
 export type ProtocolMatrixCell = {
 	microIndex: number;
+	/** 0 = тренировка A, 1 = тренировка B. */
+	sessionIndex: 0 | 1;
+	/** Дата фактической тренировки в этом слоте, если назначена. */
+	date: string | null;
+	/** Упражнение входит в шаблон этого дня. */
+	applicable: boolean;
 	pct: number | null;
 	label: string | null;
 	targetWeight: number | null;
 	factMaxPct: number | null;
 	factMaxWeight: number | null;
 	plannedOnly: boolean;
+};
+
+export type BuildProtocolMatrixOptions = {
+	microViews?: EnrichedMicrocycle[];
+	workoutTemplates?: WorkoutTemplate[];
 };
 
 export type ProtocolMatrixRow = {
@@ -344,50 +355,85 @@ export function exercisesInMicro(
 	return pickMesoExercises([...names]).filter((exercise) => mesoAnchor(meso, exercise, keyMaps) != null);
 }
 
+function exerciseInSession(
+	exercise: string,
+	sessionIndex: 0 | 1,
+	templates: WorkoutTemplate[],
+	day: TrainingDay | null
+): boolean {
+	if (day?.exercises.includes(exercise)) return true;
+	const template = templates.find((item) => item.indexInMicro === sessionIndex);
+	if (template && template.exercises.length > 0) {
+		return template.exercises.includes(exercise);
+	}
+	return true;
+}
+
 export function buildProtocolMatrix(
 	mesoPlan: MesocyclePlan,
 	microPlans: MicrocyclePlan[],
 	cyclePlan: CyclePlan,
 	anchorInfo: Record<string, ExerciseAnchorInfo>,
 	entries: WorkoutEntry[],
-	keyMaps: ExerciseKeyMaps
+	keyMaps: ExerciseKeyMaps,
+	options: BuildProtocolMatrixOptions = {}
 ): ProtocolMatrixRow[] {
+	const { microViews = [], workoutTemplates = [] } = options;
+	const microViewByIndex = new Map(microViews.map((micro) => [micro.plan.indexInMeso, micro]));
+
 	return Object.keys(anchorInfo)
 		.sort((a, b) => a.localeCompare(b, 'ru'))
 		.map((exercise) => {
 			const template = templateForExercise(cyclePlan, mesoPlan, exercise, keyMaps);
 			const anchor = anchorInfo[exercise].anchor;
-			const cells = microPlans.map((micro) => {
-				const { pct, phase } = targetPctForExercise(cyclePlan, mesoPlan, micro, exercise, keyMaps);
-				let factMaxPct: number | null = null;
-				let factMaxWeight: number | null = null;
-				let plannedOnly = true;
+			const cells: ProtocolMatrixCell[] = [];
 
-				if (pct != null && pct > 0 && anchor) {
-					const entry = entries
-						.filter((item) => item.exercise === exercise && microHasDate(micro, item.date))
-						.sort((a, b) => b.date.localeCompare(a.date))[0];
+			for (const micro of microPlans) {
+				const microView = microViewByIndex.get(micro.indexInMeso);
+				for (const sessionIndex of [0, 1] as const) {
+					const day = sessionIndex === 0 ? (microView?.dayA ?? null) : (microView?.dayB ?? null);
+					const date = day?.date ?? null;
+					const applicable = exerciseInSession(exercise, sessionIndex, workoutTemplates, day);
+					const { pct, phase } = targetPctForExercise(cyclePlan, mesoPlan, micro, exercise, keyMaps);
+					let factMaxPct: number | null = null;
+					let factMaxWeight: number | null = null;
+					let plannedOnly = true;
 
-					if (entry?.sets.length) {
-						const row = sessionIntensity(entry, anchor, pct);
-						if (row) {
-							factMaxPct = row.maxPct;
-							factMaxWeight = row.maxWeight;
-							plannedOnly = false;
+					if (applicable && pct != null && pct > 0 && anchor) {
+						const entry = date
+							? entries
+									.filter((item) => item.exercise === exercise && item.date === date)
+									.sort((a, b) => b.date.localeCompare(a.date))[0]
+							: entries
+									.filter((item) => item.exercise === exercise && microHasDate(micro, item.date))
+									.sort((a, b) => b.date.localeCompare(a.date))[0];
+
+						if (entry?.sets.length) {
+							const row = sessionIntensity(entry, anchor, pct);
+							if (row) {
+								factMaxPct = row.maxPct;
+								factMaxWeight = row.maxWeight;
+								plannedOnly = false;
+							}
 						}
 					}
-				}
 
-				return {
-					microIndex: micro.indexInMeso,
-					pct,
-					label: phase?.label ?? null,
-					targetWeight: pct != null && pct > 0 && anchor ? targetWeight(anchor, pct) : null,
-					factMaxPct,
-					factMaxWeight,
-					plannedOnly
-				};
-			});
+					cells.push({
+						microIndex: micro.indexInMeso,
+						sessionIndex,
+						date,
+						applicable,
+						pct: applicable ? pct : null,
+						label: applicable ? (phase?.label ?? null) : null,
+						targetWeight:
+							applicable && pct != null && pct > 0 && anchor ? targetWeight(anchor, pct) : null,
+						factMaxPct: applicable ? factMaxPct : null,
+						factMaxWeight: applicable ? factMaxWeight : null,
+						plannedOnly
+					});
+				}
+			}
+
 			return {
 				exercise,
 				anchor,
@@ -587,7 +633,8 @@ function enrichSingleMesocycle(
 			plan,
 			anchorInfo,
 			entries,
-			keyMaps
+			keyMaps,
+			{ microViews: microcycles, workoutTemplates: overview.templates }
 		),
 		microcycles,
 		completeMicrocycles: microcycles.filter((m) => m.complete).length,
@@ -1385,7 +1432,8 @@ export function autoMesocyclesAsView(
 				cyclePlan,
 				anchorInfo,
 				entries,
-				keyMaps
+				keyMaps,
+				{ microViews: microcycles, workoutTemplates: overview.templates }
 			),
 			microcycles,
 			completeMicrocycles: meso.completeMicrocycles,
