@@ -363,7 +363,7 @@ export function buildProtocolMatrix(
 				let factMaxWeight: number | null = null;
 				let plannedOnly = true;
 
-				if (pct != null && anchor) {
+				if (pct != null && pct > 0 && anchor) {
 					const entry = entries
 						.filter((item) => item.exercise === exercise && microHasDate(micro, item.date))
 						.sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -382,7 +382,7 @@ export function buildProtocolMatrix(
 					microIndex: micro.indexInMeso,
 					pct,
 					label: phase?.label ?? null,
-					targetWeight: pct != null && anchor ? targetWeight(anchor, pct) : null,
+					targetWeight: pct != null && pct > 0 && anchor ? targetWeight(anchor, pct) : null,
 					factMaxPct,
 					factMaxWeight,
 					plannedOnly
@@ -407,7 +407,7 @@ export function exerciseTargetOnMicro(
 	entry?: WorkoutEntry
 ): ReturnType<typeof sessionIntensity> | null {
 	const { pct, phase, template } = targetPctForExercise(cyclePlan, meso, micro, exercise, keyMaps);
-	if (pct == null || !anchor) return null;
+	if (pct == null || pct <= 0 || !anchor) return null;
 	const label = phase ? `${template.name} · ${phase.label}` : template.name;
 	if (entry?.sets.length) {
 		const row = sessionIntensity(entry, anchor, pct);

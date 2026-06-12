@@ -183,6 +183,19 @@ export const DYNAMIC_EFFORT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
 	]
 };
 
+export const SUPPORTING_EFFORT_PROTOCOL_TEMPLATE: ProtocolTemplate = {
+	id: 'supporting-effort',
+	name: 'Метод поддерживающих усилий',
+	description:
+		'Этап поддержания силы (мощность/СФП) · силовая: μ2 — 3×2 (80%) кластер, μ4 — 5–6×1 (85%); μ1 и μ3 без силовой. Объём 15–30 повт., интенсивных 6–15 за тренировку.',
+	phases: [
+		{ id: 'su-w1', label: '—', intensityPct: 0, microFrom: 1, microTo: 1 },
+		{ id: 'su-w2', label: '3×2 кластер', intensityPct: 80, microFrom: 2, microTo: 2 },
+		{ id: 'su-w3', label: '—', intensityPct: 0, microFrom: 3, microTo: 3 },
+		{ id: 'su-w4', label: '5–6×1', intensityPct: 85, microFrom: 4, microTo: 4 }
+	]
+};
+
 export const CLUSTER_PROTOCOL_TEMPLATE: ProtocolTemplate = {
 	id: 'cluster',
 	name: 'Кластерный метод',
@@ -227,6 +240,7 @@ export const STRENGTH_PROTOCOL_TEMPLATES: ProtocolTemplate[] = [
 	REPEATED_EFFORT_PROTOCOL_TEMPLATE,
 	SUBMAX_EFFORT_PROTOCOL_TEMPLATE,
 	DYNAMIC_EFFORT_PROTOCOL_TEMPLATE,
+	SUPPORTING_EFFORT_PROTOCOL_TEMPLATE,
 	CLUSTER_PROTOCOL_TEMPLATE,
 	ISOMETRIC_MAX_PROTOCOL_TEMPLATE,
 	ECCENTRIC_OVERLOAD_PROTOCOL_TEMPLATE
