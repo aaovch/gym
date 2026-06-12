@@ -389,20 +389,6 @@
 		constructorAddPick = '';
 	}
 
-	function applyConstructorProtocolToRows() {
-		const next = new Map(constructorSelection);
-		for (const [exercise, row] of next) {
-			next.set(exercise, { ...row, protocolId: constructorProtocolId });
-		}
-		constructorSelection = next;
-		if (plan) {
-			const exercises = exercisesFromSelection(next);
-			if (exercises.length > 0) {
-				constructorMicroCount = suggestedMicroCount(plan.templates, exercises);
-			}
-		}
-	}
-
 	function ensurePlanForConstructor(): boolean {
 		if (plan) return true;
 		importCyclePlanFromAuto();
@@ -799,10 +785,11 @@
 							/>
 						</label>
 						<label>
-							<span>Метод</span>
+							<span>Метод блока</span>
 							<select
 								class="field-input"
 								value={block.defaultProtocolId}
+								title="Для новых упражнений; у уже добавленных — в таблице"
 								onchange={(e) =>
 									patchMacroBlock(block.id, { defaultProtocolId: e.currentTarget.value })}
 							>
@@ -848,6 +835,7 @@
 									<tr>
 										<th>Упражнение</th>
 										<th>Якорь, кг</th>
+										<th>Метод</th>
 										<th></th>
 									</tr>
 								</thead>
@@ -874,6 +862,20 @@
 															});
 														}}
 													/>
+												</td>
+												<td>
+													<select
+														class="field-select protocol-select"
+														value={row.protocolId}
+														onchange={(e) =>
+															patchMacroBlockRow(block.id, exercise, {
+																protocolId: e.currentTarget.value
+															})}
+													>
+														{#each plan.templates as tpl (tpl.id)}
+															<option value={tpl.id}>{shortProtocolName(tpl.name)}</option>
+														{/each}
+													</select>
 												</td>
 												<td class="row-actions">
 													<button
@@ -946,12 +948,8 @@
 				/>
 			</label>
 			<label>
-				<span>Метод</span>
-				<select
-					class="field-input"
-					bind:value={constructorProtocolId}
-					onchange={applyConstructorProtocolToRows}
-				>
+				<span>Метод для новых</span>
+				<select class="field-input" bind:value={constructorProtocolId}>
 					{#each protocolTemplates as template (template.id)}
 						<option value={template.id}>{template.name}</option>
 					{/each}
@@ -988,6 +986,7 @@
 						<tr>
 							<th>Упражнение</th>
 							<th>Якорь, кг</th>
+							<th>Метод</th>
 							<th></th>
 						</tr>
 					</thead>
@@ -1014,6 +1013,18 @@
 												});
 											}}
 										/>
+									</td>
+									<td>
+										<select
+											class="field-select protocol-select"
+											value={row.protocolId}
+											onchange={(e) =>
+												patchConstructorRow(exercise, { protocolId: e.currentTarget.value })}
+										>
+											{#each plan.templates as tpl (tpl.id)}
+												<option value={tpl.id}>{shortProtocolName(tpl.name)}</option>
+											{/each}
+										</select>
 									</td>
 									<td class="row-actions">
 										<button
@@ -2249,6 +2260,12 @@
 	.constructor-table.slim .field-input {
 		min-width: 5.5rem;
 		max-width: 7rem;
+	}
+
+	.constructor-table .protocol-select {
+		min-width: 8.5rem;
+		max-width: 12rem;
+		font-size: 0.75rem;
 	}
 
 	.constructor-table .row-actions {
