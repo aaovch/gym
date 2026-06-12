@@ -14,6 +14,13 @@ export const CYCLE_PLAN_PATH = 'data/cycle-plan.json';
 
 const API = 'https://api.github.com';
 
+class ShaConflictError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'ShaConflictError';
+	}
+}
+
 function authHeaders(token: string): HeadersInit {
 	return {
 		Authorization: `Bearer ${token}`,
@@ -67,31 +74,50 @@ async function saveRepoFile(
 	sha: string | null,
 	message: string
 ): Promise<string> {
-	const body: Record<string, string> = {
-		message,
-		content: utf8ToBase64(content)
-	};
-	if (sha) body.sha = sha;
+	const put = async (currentSha: string | null): Promise<string> => {
+		const body: Record<string, string> = {
+			message,
+			content: utf8ToBase64(content)
+		};
+		if (currentSha) body.sha = currentSha;
 
-	const response = await fetch(
-		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
-		{
-			method: 'PUT',
-			headers: {
-				...authHeaders(token),
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify(body)
+		const response = await fetch(
+			`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+			{
+				method: 'PUT',
+				headers: {
+					...authHeaders(token),
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(body)
+			}
+		);
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({}));
+			const detail = (error as { message?: string }).message ?? `GitHub API error ${response.status}`;
+			if (response.status === 409) {
+				throw new ShaConflictError(detail);
+			}
+			throw new Error(detail);
 		}
-	);
 
-	if (!response.ok) {
-		const error = await response.json().catch(() => ({}));
-		throw new Error((error as { message?: string }).message ?? `GitHub API error ${response.status}`);
+		const payload = await response.json();
+		return payload.content.sha as string;
+	};
+
+	try {
+		return await put(sha);
+	} catch (error) {
+		if (!(error instanceof ShaConflictError)) throw error;
+		const fresh = await fetchRepoFile(token, path);
+		if (!fresh) {
+			throw new Error(
+				'Конфликт синхронизации: файл в GitHub уже изменён. Обновите страницу и повторите отправку.'
+			);
+		}
+		return put(fresh.sha);
 	}
-
-	const payload = await response.json();
-	return payload.content.sha as string;
 }
 
 export async function verifyGitHubToken(token: string): Promise<string> {
@@ -114,7 +140,7 @@ export async function fetchWorkoutDatabase(
 export async function saveWorkoutDatabase(
 	token: string,
 	db: WorkoutDatabase,
-	sha: string,
+	sha: string | null,
 	message: string
 ): Promise<string> {
 	return saveRepoFile(token, WORKOUTS_PATH, serializeWorkoutDatabase(db), sha, message);

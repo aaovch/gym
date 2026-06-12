@@ -175,26 +175,13 @@ class WorkoutStore {
 	}
 
 	private async persistCyclePlanToGitHub(token: string, plan: CyclePlan) {
-		try {
-			let sha = this.sync.cyclePlanSha;
-			if (!sha) {
-				const remote = await fetchCyclePlan(token);
-				sha = remote.sha;
-			}
-			const nextSha = await saveCyclePlanRemote(token, plan, sha, 'Update cycle plan from app');
-			this.patchSync({ cyclePlanSha: nextSha });
-		} catch {
-			// план остаётся локально
-		}
+		const { sha } = await fetchCyclePlan(token);
+		const nextSha = await saveCyclePlanRemote(token, plan, sha, 'Sync cycle plan from app');
+		this.patchSync({ cyclePlanSha: nextSha });
 	}
 
 	private async persistToGitHub(token: string, db: WorkoutDatabase, message: string) {
-		let sha = this.sync.workoutsSha;
-		if (!sha) {
-			const remote = await fetchWorkoutDatabase(token);
-			sha = remote.sha;
-		}
-
+		const { sha } = await fetchWorkoutDatabase(token);
 		const nextSha = await saveWorkoutDatabase(token, db, sha, message);
 		this.patchSync({
 			workoutsSha: nextSha,
