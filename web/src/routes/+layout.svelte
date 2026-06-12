@@ -48,14 +48,16 @@
     ? activeMeso.microcycles.length * 2
     : 0;
   $: cycleProgress = totalSessions ? Math.round((completedSessions / totalSessions) * 100) : 0;
+  $: sync = workoutStore.sync;
   $: sourceLabel =
-    workoutStore.sync.source === 'github'
+    sync.source === 'github'
       ? 'GitHub'
-      : token.trim() && workoutStore.sync.source === 'local'
+      : token.trim() && sync.source === 'local'
         ? 'Локально · не отправлено'
-        : workoutStore.sync.source === 'local'
+        : sync.source === 'local'
           ? 'Локальные данные'
           : 'Данные сборки';
+  $: pendingGitHubSync = Boolean(token.trim()) && sync.source === 'local' && !sync.syncing;
 
   onMount(() => {
     workoutStore.bootstrap(data.bundled, data.bundledCyclePlan ?? null);
@@ -81,7 +83,12 @@
   }
 
   async function syncNow() {
-    await pushToGitHub(token);
+    if (sync.syncing) return;
+    try {
+      await pushToGitHub(token);
+    } catch {
+      // ошибка уже записана в workoutStore.sync.error
+    }
   }
 
   function isActive(route: string) {
@@ -207,11 +214,15 @@
           Токен
           <input bind:value={token} type="password" autocomplete="off" placeholder="github_pat_..." />
         </label>
-        {#if workoutStore.sync.message}
-          <p class="settings-success">{workoutStore.sync.message}</p>
-        {/if}
-        {#if workoutStore.sync.error}
-          <p class="settings-error">{workoutStore.sync.error}</p>
+        {#if sync.syncing}
+          <div class="sync-status busy" role="status" aria-live="polite">
+            <span class="sync-spinner" aria-hidden="true"></span>
+            {sync.message || 'Отправка в GitHub…'}
+          </div>
+        {:else if sync.error}
+          <div class="sync-status error" role="alert">{sync.error}</div>
+        {:else if sync.message}
+          <div class="sync-status ok" role="status">{sync.message}</div>
         {/if}
       </div>
 
@@ -226,21 +237,26 @@
         </button>
         {#if token.trim()}
           <button
-            class="button button-secondary"
+            class="button {pendingGitHubSync ? 'button-primary' : 'button-secondary'}"
             type="button"
-            disabled={workoutStore.sync.syncing}
+            disabled={sync.syncing}
+            aria-busy={sync.syncing}
             on:click={syncNow}
           >
-            {workoutStore.sync.syncing ? 'Отправка...' : 'Отправить в GitHub'}
+            {#if sync.syncing}
+              Отправка…
+            {:else}
+              Отправить в GitHub
+            {/if}
           </button>
         {/if}
         <button
           class="button button-primary"
           type="button"
-          disabled={workoutStore.sync.syncing}
+          disabled={sync.syncing}
           on:click={saveSettings}
         >
-          {workoutStore.sync.syncing ? 'Подключение...' : 'Сохранить'}
+          {sync.syncing ? 'Подключение...' : 'Сохранить'}
         </button>
       </div>
     </div>

@@ -183,12 +183,7 @@ class WorkoutStore {
 	private async persistToGitHub(token: string, db: WorkoutDatabase, message: string) {
 		const { sha } = await fetchWorkoutDatabase(token);
 		const nextSha = await saveWorkoutDatabase(token, db, sha, message);
-		this.patchSync({
-			workoutsSha: nextSha,
-			source: 'github',
-			error: '',
-			message: 'Сохранено в GitHub. Сайт обновится через 1–2 минуты.'
-		});
+		this.patchSync({ workoutsSha: nextSha });
 	}
 
 	private persistDatabase() {
@@ -401,12 +396,21 @@ class WorkoutStore {
 	}
 
 	async pushToGitHub(token: string) {
-		this.patchSync({ syncing: true, error: '', message: '' });
+		if (this.sync.syncing) return;
+
+		this.patchSync({ syncing: true, error: '', message: 'Отправка журнала тренировок…' });
 		try {
 			await this.persistToGitHub(token, this.database, 'Sync workouts from app');
 			if (this.cyclePlan) {
+				this.patchSync({ message: 'Отправка плана циклов…' });
 				await this.persistCyclePlanToGitHub(token, this.cyclePlan);
 			}
+			this.patchSync({
+				syncing: false,
+				error: '',
+				message: 'Отправлено в GitHub. Сайт обновится через 1–2 минуты.',
+				source: 'github'
+			});
 		} catch (error) {
 			this.patchSync({
 				syncing: false,
@@ -415,7 +419,6 @@ class WorkoutStore {
 			});
 			throw error;
 		}
-		this.patchSync({ syncing: false });
 	}
 }
 

@@ -584,6 +584,52 @@ label {
   color: var(--danger);
 }
 
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sync-status.busy {
+  color: var(--accent);
+  background: rgb(185 243 90 / 8%);
+  border-color: rgb(185 243 90 / 28%);
+}
+
+.sync-status.ok {
+  color: var(--accent);
+  background: rgb(185 243 90 / 6%);
+  border-color: rgb(185 243 90 / 22%);
+}
+
+.sync-status.error {
+  color: #ffd3d3;
+  background: rgb(255 114 114 / 10%);
+  border-color: rgb(255 114 114 / 24%);
+}
+
+.sync-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid rgb(185 243 90 / 22%);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: sync-spin 0.8s linear infinite;
+}
+
+@keyframes sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
