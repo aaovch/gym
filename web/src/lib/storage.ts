@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 import type { CyclePlan } from './cycle-plan';
-import { emptyCyclePlan, normalizeCyclePlan } from './cycle-plan';
+import { dedupeMesocyclesInPlan, emptyCyclePlan, normalizeCyclePlan } from './cycle-plan';
 import {
 	compactCyclePlan,
 	compactWorkoutDatabase,
@@ -42,7 +42,7 @@ export function loadCyclePlan(): CyclePlan | null {
 		if (!raw) return null;
 		const plan = normalizeStoredCyclePlan(JSON.parse(raw));
 		if (!plan) return null;
-		return normalizeCyclePlan(plan);
+		return dedupeMesocyclesInPlan(normalizeCyclePlan(plan));
 	} catch (error) {
 		console.error('Не удалось загрузить локальный план циклов:', error);
 		return null;
@@ -51,7 +51,7 @@ export function loadCyclePlan(): CyclePlan | null {
 
 export function saveCyclePlan(plan: CyclePlan) {
 	if (!browser) return;
-	const normalized = normalizeCyclePlan(plan);
+	const normalized = dedupeMesocyclesInPlan(normalizeCyclePlan(plan));
 	localStorage.setItem(CYCLE_PLAN_KEY, stringifyCompact(compactCyclePlan(normalized)));
 }
 
@@ -66,9 +66,6 @@ export function pickNewerCyclePlan(a: CyclePlan, b: CyclePlan | null): CyclePlan
 	const bTime = Date.parse(b.updatedAt || '0');
 	if (bTime !== aTime) return bTime > aTime ? b : a;
 	if (b.revision !== a.revision) return b.revision > a.revision ? b : a;
-	if (b.mesocycles.length !== a.mesocycles.length) {
-		return b.mesocycles.length > a.mesocycles.length ? b : a;
-	}
 	return a;
 }
 
@@ -130,9 +127,12 @@ export function mergeCyclePlans(...plans: Array<CyclePlan | null | undefined>): 
 		macrocycles: [...macroById.values()]
 	});
 
-	if (!changed) return merged;
+	const deduped = dedupeMesocyclesInPlan(merged, base.mesocycles.map((meso) => meso.id));
+	if (deduped.mesocycles.length !== merged.mesocycles.length) changed = true;
+
+	if (!changed) return deduped;
 	return {
-		...merged,
+		...deduped,
 		revision: Math.max(...candidates.map((plan) => plan.revision)) + 1,
 		updatedAt: new Date().toISOString()
 	};

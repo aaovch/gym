@@ -217,6 +217,112 @@ export function normalizeCyclePlan(plan: CyclePlan, _byDate?: Map<string, Traini
 	});
 }
 
+/** Ключ для слияния: один и тот же период тренировок, но разные id после импорта/merge. */
+export function mesoRangeKey(meso: MesocyclePlan): string | null {
+	const dates = meso.microcycles.flatMap((micro) => microDates(micro)).sort();
+	const start = dates[0] ?? meso.startDate;
+	const end = dates[dates.length - 1] ?? meso.endDate;
+	if (!start || !end) return null;
+	return `${start}|${end}`;
+}
+
+function mesoPlanScore(meso: MesocyclePlan, preferIds?: Set<string>): number {
+	let score = 0;
+	if (preferIds?.has(meso.id)) score += 1000;
+	score += Object.keys(meso.anchor1rm).length * 4;
+	score += Object.keys(meso.exerciseProtocols ?? {}).length * 2;
+	score += Object.keys(meso.exerciseSessions ?? {}).length * 3;
+	score += Object.keys(meso.anchor1rmManual ?? {}).length * 2;
+	score += meso.microcycles.flatMap((micro) => microDates(micro)).length;
+	return score;
+}
+
+function pickPreferredMeso(
+	a: MesocyclePlan,
+	b: MesocyclePlan,
+	preferIds?: Set<string>
+): MesocyclePlan {
+	const aScore = mesoPlanScore(a, preferIds);
+	const bScore = mesoPlanScore(b, preferIds);
+	return bScore > aScore ? b : a;
+}
+
+function dedupeMesocycles(
+	mesocycles: MesocyclePlan[],
+	preferIds?: Set<string>
+): { mesocycles: MesocyclePlan[]; idRemap: Map<string, string> } {
+	const byKey = new Map<string, MesocyclePlan>();
+	const idRemap = new Map<string, string>();
+
+	for (const meso of mesocycles) {
+		const key = mesoRangeKey(meso);
+		if (!key) continue;
+		const existing = byKey.get(key);
+		if (!existing) {
+			byKey.set(key, meso);
+			continue;
+		}
+		const keep = pickPreferredMeso(existing, meso, preferIds);
+		const drop = keep.id === existing.id ? meso : existing;
+		byKey.set(key, keep);
+		idRemap.set(drop.id, keep.id);
+	}
+
+	const result: MesocyclePlan[] = [];
+	const addedKeys = new Set<string>();
+	const addedIds = new Set<string>();
+
+	for (const meso of mesocycles) {
+		const key = mesoRangeKey(meso);
+		if (!key) {
+			if (!addedIds.has(meso.id)) {
+				result.push(meso);
+				addedIds.add(meso.id);
+			}
+			continue;
+		}
+		const canonical = byKey.get(key)!;
+		if (!addedKeys.has(key)) {
+			result.push(canonical);
+			addedKeys.add(key);
+			addedIds.add(canonical.id);
+		}
+	}
+
+	return { mesocycles: result, idRemap };
+}
+
+/** Убирает дубликаты мезо с одинаковым периодом (разные id после импорта и merge). */
+export function dedupeMesocyclesInPlan(
+	plan: CyclePlan,
+	preferMesoIds?: Iterable<string>
+): CyclePlan {
+	const prefer = preferMesoIds ? new Set(preferMesoIds) : undefined;
+	const { mesocycles, idRemap } = dedupeMesocycles(plan.mesocycles, prefer);
+	const sameOrder =
+		idRemap.size === 0 &&
+		mesocycles.length === plan.mesocycles.length &&
+		mesocycles.every((meso, index) => meso.id === plan.mesocycles[index]?.id);
+	if (sameOrder) return plan;
+
+	const mesoIds = new Set(mesocycles.map((meso) => meso.id));
+	const macrocycles = (plan.macrocycles ?? []).map((macro) => {
+		const mesoIdsRemapped = [
+			...new Set(
+				macro.mesoIds
+					.map((id) => idRemap.get(id) ?? id)
+					.filter((id) => mesoIds.has(id))
+			)
+		];
+		return mesoIdsRemapped.length === macro.mesoIds.length &&
+			mesoIdsRemapped.every((id, index) => id === macro.mesoIds[index])
+			? macro
+			: { ...macro, mesoIds: mesoIdsRemapped };
+	});
+
+	return touchPlan({ ...plan, mesocycles, macrocycles });
+}
+
 /** Добавляет в план недостающие протоколы из каталога, сохраняя пользовательские и legacy-шаблоны. */
 export function ensureBundledProtocols(plan: CyclePlan): CyclePlan {
 	const existing = new Map(plan.templates.map((item) => [item.id, item]));
@@ -523,18 +629,26 @@ export function importPlanFromAuto(
 			(item) => item.startDate === meso.startDate && item.endDate === meso.endDate
 		);
 		const exerciseProtocols = existingMeso?.exerciseProtocols ?? {};
+		const hasStoredAnchors = Boolean(
+			existingMeso && Object.keys(existingMeso.anchor1rm).length > 0
+		);
 
 		return {
-			id: newId('meso'),
+			id: existingMeso?.id ?? newId('meso'),
 			label: meso.label,
 			startDate: meso.startDate,
 			endDate: meso.endDate,
-			templateId: defaultTemplateId,
-			anchor1rm,
-			anchor1rmManual: {},
+			templateId: existingMeso?.templateId ?? defaultTemplateId,
+			anchor1rm: hasStoredAnchors ? existingMeso!.anchor1rm : anchor1rm,
+			anchor1rmManual: existingMeso?.anchor1rmManual ?? {},
 			exerciseProtocols,
-			microcycles: meso.microcycles.map((micro) =>
-				microFromOverviewDays(newId('micro'), micro.indexInMeso, micro.days)
+			exerciseSessions: existingMeso?.exerciseSessions,
+			microcycles: meso.microcycles.map((micro, index) =>
+				microFromOverviewDays(
+					existingMeso?.microcycles[index]?.id ?? newId('micro'),
+					micro.indexInMeso,
+					micro.days
+				)
 			)
 		};
 	});
