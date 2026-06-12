@@ -713,6 +713,30 @@
 		return sessionIndex === 0 ? 'A' : 'B';
 	}
 
+	function mesoProgressPct(meso: EnrichedMesocycle): number {
+		if (!meso.microcycles.length) return 0;
+		return Math.round((meso.completeMicrocycles / meso.microcycles.length) * 100);
+	}
+
+	function mesoTimelineStatus(meso: EnrichedMesocycle): 'done' | 'active' | 'upcoming' {
+		if (
+			meso.microcycles.length > 0 &&
+			meso.completeMicrocycles >= meso.microcycles.length
+		) {
+			return 'done';
+		}
+		if (meso.completeMicrocycles > 0) return 'active';
+		return 'upcoming';
+	}
+
+	function macroProgressPct(macro: EnrichedMacrocycle): number {
+		if (!macro.mesocycles.length) return 0;
+		const totalMicros = macro.mesocycles.reduce((sum, meso) => sum + meso.microcycles.length, 0);
+		const completeMicros = macro.mesocycles.reduce((sum, meso) => sum + meso.completeMicrocycles, 0);
+		if (!totalMicros) return 0;
+		return Math.round((completeMicros / totalMicros) * 100);
+	}
+
 	function planMatrixForSession(matrix: ProtocolMatrixRow[], sessionIndex: 0 | 1): ProtocolMatrixRow[] {
 		return matrix
 			.map((row) => ({
@@ -1449,113 +1473,141 @@
 		</div>
 	</section>
 {:else}
-	{#if displayMacros.length > 0}
-		<section class="card macro-picker">
-			<div class="picker-head">
-				<h3>Макроциклы</h3>
-				{#if usingManual}
-					<button type="button" class="btn small primary" onclick={openMacroConstructor}>+ Макро</button>
-				{/if}
+	<section class="card program-history">
+		<div class="picker-head">
+			<div>
+				<h3>История программы</h3>
+				<p class="picker-hint muted">
+					Макро — длинные блоки, мезо — этапы внутри. Выберите карточку, чтобы открыть план.
+				</p>
 			</div>
-			<div class="meso-tabs">
-				{#each displayMacros as macro (macro.plan.id)}
+			{#if usingManual}
+				<div class="picker-head-actions">
+					{#if displayMacros.length > 0}
+						<button type="button" class="btn small primary" onclick={openMacroConstructor}>+ Макро</button>
+					{/if}
 					<button
 						type="button"
-						class="meso-tab macro-tab"
-						class:active={selectedMacro?.plan.id === macro.plan.id}
-						style="--meso-color: {mesocycleColor(macro.index)}"
-						onclick={() => {
-							macroPick = macro.plan.id;
-							mesoPick = macro.mesocycles[macro.mesocycles.length - 1]?.plan.id ?? null;
-						}}
+						class="btn small"
+						onclick={() => openMesoConstructor(selectedMacro?.plan.id ?? null)}
 					>
-						<span class="meso-tab-num">M{macro.index}</span>
-						<span class="meso-tab-label">{macro.plan.label}</span>
-						<span class="meso-tab-dates">
-							{formatDateRu(macro.plan.startDate)} — {formatDateRu(macro.plan.endDate)}
-							· {macro.mesocycles.length} мезо
-						</span>
-					</button>
-				{/each}
-			</div>
-			{#if selectedMacro && usingManual && plan}
-				<div class="macro-inline-edit">
-					<input
-						class="field-input"
-						value={selectedMacro.plan.label}
-						onchange={(e) => handleMacroLabel(selectedMacro, e.currentTarget.value)}
-					/>
-					<button
-						type="button"
-						class="btn small danger"
-						onclick={() => handleRemoveMacro(selectedMacro.plan.id)}
-					>
-						Удалить макро
+						+ Мезо
 					</button>
 				</div>
 			{/if}
-		</section>
-	{/if}
-
-	{#if displayOrphans.length > 0 && displayMacros.length > 0}
-		<section class="card meso-picker orphan-picker">
-			<div class="picker-head">
-				<h3>Мезо вне макро</h3>
-			</div>
-			<div class="meso-tabs">
-				{#each displayOrphans as meso (meso.plan.id)}
-					<button
-						type="button"
-						class="meso-tab"
-						class:active={selectedMacro == null && selectedMeso?.plan.id === meso.plan.id}
-						style="--meso-color: {mesocycleColor(meso.index)}"
-						onclick={() => {
-							macroPick = null;
-							mesoPick = meso.plan.id;
-						}}
-					>
-						<span class="meso-tab-num">#{meso.index}</span>
-						<span class="meso-tab-label">{meso.plan.label}</span>
-					</button>
-				{/each}
-			</div>
-		</section>
-	{/if}
-
-	<section class="card meso-picker">
-		<div class="picker-head">
-			<h3>{selectedMacro ? `Мезо в «${selectedMacro.plan.label}»` : 'Мезоциклы'}</h3>
-			{#if usingManual}
-				<button
-					type="button"
-					class="btn small primary"
-					onclick={() => openMesoConstructor(selectedMacro?.plan.id ?? null)}
-				>
-					+ Мезо
-				</button>
-			{/if}
 		</div>
-		{#if scopedMesos.length === 0}
-			<p class="muted">В этом макро пока нет мезо-блоков.</p>
-		{:else}
-			<div class="meso-tabs">
-				{#each scopedMesos as meso (meso.plan.id)}
-					<button
-						type="button"
-						class="meso-tab"
-						class:active={selectedMeso?.plan.id === meso.plan.id}
-						style="--meso-color: {mesocycleColor(meso.index)}"
-						onclick={() => (mesoPick = meso.plan.id)}
-					>
-						<span class="meso-tab-num">#{meso.index}</span>
-						<span class="meso-tab-label">{meso.plan.label}</span>
-						<span class="meso-tab-dates">
-							{formatDateRu(meso.plan.startDate)} — {formatDateRu(meso.plan.endDate)}
-						</span>
-					</button>
-				{/each}
+
+		{#if displayMacros.length > 0}
+			<div class="timeline-block">
+				<span class="timeline-kicker">Макроциклы</span>
+				<div class="timeline-grid macro-grid">
+					{#each displayMacros as macro (macro.plan.id)}
+						{@const macroProgress = macroProgressPct(macro)}
+						<button
+							type="button"
+							class="timeline-card macro-card"
+							class:active={selectedMacro?.plan.id === macro.plan.id}
+							style="--cycle-color: {mesocycleColor(macro.index)}"
+							onclick={() => {
+								macroPick = macro.plan.id;
+								mesoPick = macro.mesocycles[macro.mesocycles.length - 1]?.plan.id ?? null;
+							}}
+						>
+							<span class="timeline-card-badge">M{macro.index}</span>
+							<span class="timeline-card-title">{macro.plan.label}</span>
+							<span class="timeline-card-dates">
+								{formatDateRu(macro.plan.startDate)} — {formatDateRu(macro.plan.endDate)}
+							</span>
+							<span class="timeline-card-meta">{macro.mesocycles.length} мезо · {macro.durationDays} дн.</span>
+							<span class="timeline-progress" aria-hidden="true">
+								<span class="timeline-progress-fill" style={`width: ${macroProgress}%`}></span>
+							</span>
+						</button>
+					{/each}
+				</div>
+				{#if selectedMacro && usingManual && plan}
+					<div class="macro-inline-edit">
+						<input
+							class="field-input"
+							value={selectedMacro.plan.label}
+							onchange={(e) => handleMacroLabel(selectedMacro, e.currentTarget.value)}
+						/>
+						<button
+							type="button"
+							class="btn small danger"
+							onclick={() => handleRemoveMacro(selectedMacro.plan.id)}
+						>
+							Удалить макро
+						</button>
+					</div>
+				{/if}
 			</div>
 		{/if}
+
+		{#if displayOrphans.length > 0 && displayMacros.length > 0}
+			<div class="timeline-block orphan-block">
+				<span class="timeline-kicker">Мезо вне макро</span>
+				<div class="timeline-grid meso-grid compact">
+					{#each displayOrphans as meso (meso.plan.id)}
+						<button
+							type="button"
+							class="timeline-card meso-card"
+							class:active={selectedMacro == null && selectedMeso?.plan.id === meso.plan.id}
+							style="--cycle-color: {mesocycleColor(meso.index)}"
+							onclick={() => {
+								macroPick = null;
+								mesoPick = meso.plan.id;
+							}}
+						>
+							<span class="timeline-card-badge">#{meso.index}</span>
+							<span class="timeline-card-title">{meso.plan.label}</span>
+						</button>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		<div class="timeline-block">
+			<span class="timeline-kicker">
+				{selectedMacro ? `Мезоциклы · ${selectedMacro.plan.label}` : 'Мезоциклы'}
+			</span>
+			{#if scopedMesos.length === 0}
+				<p class="muted timeline-empty">В этом макро пока нет мезо-блоков.</p>
+			{:else}
+				<div class="timeline-grid meso-grid">
+					{#each scopedMesos as meso (meso.plan.id)}
+						{@const progress = mesoProgressPct(meso)}
+						{@const status = mesoTimelineStatus(meso)}
+						<button
+							type="button"
+							class="timeline-card meso-card"
+							class:active={selectedMeso?.plan.id === meso.plan.id}
+							class:done={status === 'done'}
+							class:in-progress={status === 'active'}
+							style="--cycle-color: {mesocycleColor(meso.index)}"
+							onclick={() => (mesoPick = meso.plan.id)}
+						>
+							<span class="timeline-card-top">
+								<span class="timeline-card-badge">#{meso.index}</span>
+								<span class="timeline-status" data-status={status}>
+									{status === 'done' ? 'готово' : status === 'active' ? 'в работе' : 'впереди'}
+								</span>
+							</span>
+							<span class="timeline-card-title">{meso.plan.label}</span>
+							<span class="timeline-card-dates">
+								{formatDateRu(meso.plan.startDate)} — {formatDateRu(meso.plan.endDate)}
+							</span>
+							<span class="timeline-card-meta">
+								{meso.completeMicrocycles}/{meso.microcycles.length} μ · {meso.durationDays} дн.
+							</span>
+							<span class="timeline-progress" aria-hidden="true">
+								<span class="timeline-progress-fill" style={`width: ${progress}%`}></span>
+							</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	</section>
 
 	{#if selectedMeso}
@@ -2330,9 +2382,6 @@
 		margin-top: 0.75rem;
 	}
 
-	.orphan-picker {
-		border: none;
-	}
 
 	.matrix-wrap.compact .matrix {
 		font-size: 0.82rem;
@@ -2407,68 +2456,181 @@
 	.picker-head {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.75rem;
+		align-items: flex-start;
+		gap: 1rem;
+		margin-bottom: 0.85rem;
 	}
 
-	.meso-picker {
-		min-width: 0;
-		overflow: hidden;
+	.picker-head h3 {
+		margin: 0;
 	}
 
-	.meso-picker,
-	.macro-picker,
-	.orphan-picker,
+	.picker-hint {
+		margin: 0.3rem 0 0;
+		font-size: 0.78rem;
+		line-height: 1.45;
+		max-width: 36rem;
+	}
+
+	.picker-head-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		justify-content: flex-end;
+	}
+
+	.program-history,
 	.meso-detail {
 		border: none;
 		box-shadow: none;
-		background: transparent;
+		background: linear-gradient(160deg, rgb(18 24 36 / 72%), rgb(12 16 24 / 40%));
 	}
 
-	.meso-tabs {
-		display: flex;
-		gap: 0.35rem;
-		overflow-x: auto;
-		padding: 0;
-		max-width: 100%;
-		background: transparent;
-		scrollbar-width: thin;
+	.program-history {
+		padding: 1rem 1.1rem 1.15rem;
 	}
 
-	.meso-tab {
-		flex: 0 0 auto;
-		min-width: 9rem;
-		padding: 0.65rem 0.85rem;
-		border-radius: 0;
-		border: none;
-		background: transparent;
-		text-align: left;
-		color: var(--text);
+	.timeline-block + .timeline-block {
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--line);
 	}
 
-	.meso-tab.active {
-		background: var(--surface-2);
-		color: var(--text);
+	.orphan-block {
+		padding-top: 0.85rem;
+		border-top: 1px dashed var(--line);
 	}
 
-	.meso-tab-num {
+	.timeline-kicker {
 		display: block;
-		font-weight: 800;
-		color: var(--meso-color);
-		font-size: 0.85rem;
-	}
-
-	.meso-tab-label {
-		display: block;
-		font-size: 0.82rem;
-		margin-top: 0.15rem;
-	}
-
-	.meso-tab-dates {
-		display: block;
-		font-size: 0.72rem;
+		margin-bottom: 0.55rem;
 		color: var(--muted);
-		margin-top: 0.15rem;
+		font-size: 0.68rem;
+		font-weight: 750;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.timeline-empty {
+		margin: 0;
+		font-size: 0.82rem;
+	}
+
+	.timeline-grid {
+		display: grid;
+		gap: 0.55rem;
+		min-width: 0;
+	}
+
+	.macro-grid {
+		grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+	}
+
+	.meso-grid {
+		grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+	}
+
+	.meso-grid.compact {
+		grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+	}
+
+	.timeline-card {
+		display: grid;
+		gap: 0.28rem;
+		min-width: 0;
+		padding: 0.7rem 0.75rem 0.62rem;
+		border: 1px solid var(--line);
+		border-top: 3px solid var(--cycle-color);
+		border-radius: 0;
+		background: rgb(10 14 22 / 88%);
+		color: var(--text);
+		text-align: left;
+		cursor: pointer;
+		transition:
+			border-color 0.15s ease,
+			background 0.15s ease,
+			transform 0.15s ease;
+	}
+
+	.timeline-card:hover {
+		background: rgb(14 19 30 / 96%);
+		border-color: color-mix(in srgb, var(--cycle-color) 35%, var(--line));
+	}
+
+	.timeline-card.active {
+		background: color-mix(in srgb, var(--cycle-color) 9%, rgb(14 19 30));
+		border-color: color-mix(in srgb, var(--cycle-color) 48%, var(--line-strong));
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cycle-color) 18%, transparent);
+	}
+
+	.timeline-card-top {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.35rem;
+	}
+
+	.timeline-card-badge {
+		font-size: 0.78rem;
+		font-weight: 850;
+		color: var(--cycle-color);
+		letter-spacing: 0.02em;
+	}
+
+	.timeline-status {
+		font-size: 0.58rem;
+		font-weight: 750;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+
+	.timeline-card.done .timeline-status,
+	.timeline-status[data-status='done'] {
+		color: var(--accent);
+	}
+
+	.timeline-card.in-progress .timeline-status,
+	.timeline-status[data-status='active'] {
+		color: #5b9dff;
+	}
+
+	.timeline-card-title {
+		font-size: 0.8rem;
+		font-weight: 700;
+		line-height: 1.3;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.timeline-card-dates,
+	.timeline-card-meta {
+		font-size: 0.66rem;
+		line-height: 1.35;
+		color: var(--muted);
+	}
+
+	.timeline-progress {
+		display: block;
+		height: 3px;
+		margin-top: 0.2rem;
+		background: rgb(255 255 255 / 6%);
+		overflow: hidden;
+	}
+
+	.timeline-progress-fill {
+		display: block;
+		height: 100%;
+		background: linear-gradient(
+			90deg,
+			color-mix(in srgb, var(--cycle-color) 70%, #fff),
+			var(--cycle-color)
+		);
+	}
+
+	.macro-card .timeline-progress-fill {
+		opacity: 0.85;
 	}
 
 	.meso-detail {
@@ -2912,8 +3074,18 @@
 			grid-template-columns: 1fr;
 		}
 
-		.meso-tab {
-			min-width: 7.5rem;
+		.picker-head {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.picker-head-actions {
+			justify-content: flex-start;
+		}
+
+		.macro-grid,
+		.meso-grid {
+			grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
 		}
 	}
 </style>
