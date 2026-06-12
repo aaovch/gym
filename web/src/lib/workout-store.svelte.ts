@@ -160,9 +160,7 @@ class WorkoutStore {
 		};
 		this.database = next;
 		saveLocalDatabase(next);
-		this.patchSync({
-			source: this.sync.source === 'github' ? 'github' : 'local'
-		});
+		this.patchSync({ source: 'local' });
 		return next;
 	}
 
@@ -173,10 +171,7 @@ class WorkoutStore {
 		);
 		this.cyclePlan = next;
 		saveCyclePlan(next);
-		const token = getGitHubToken();
-		if (token) {
-			void this.persistCyclePlanToGitHub(token, next);
-		}
+		this.patchSync({ source: 'local' });
 	}
 
 	private async persistCyclePlanToGitHub(token: string, plan: CyclePlan) {
@@ -209,17 +204,14 @@ class WorkoutStore {
 		});
 	}
 
-	private async persistDatabase(message: string) {
-		const db = this.persistLocally(this.database);
-		const token = getGitHubToken();
-		if (token) {
-			await this.persistToGitHub(token, db, message);
-		} else {
-			this.patchSync({
-				error: '',
-				message: 'Сохранено локально в браузере.'
-			});
-		}
+	private persistDatabase() {
+		this.persistLocally(this.database);
+		this.patchSync({
+			error: '',
+			message: getGitHubToken()
+				? 'Сохранено локально. Нажмите «Отправить в GitHub», когда закончите правки.'
+				: 'Сохранено локально в браузере.'
+		});
 	}
 
 	async saveLog(
@@ -232,8 +224,7 @@ class WorkoutStore {
 			index === -1 ? [...db.logs, log] : db.logs.map((item) => (item.id === log.id ? log : item));
 
 		this.database = { ...db, logs };
-		const name = db.exercises.find((e) => e.id === log.exerciseId)?.name ?? log.exerciseId;
-		await this.persistDatabase(`Update workout: ${name} (${log.date})`);
+		this.persistDatabase();
 
 		if (!context?.mesoId || !context?.microId) return;
 
@@ -275,10 +266,8 @@ class WorkoutStore {
 
 	async deleteLog(logId: string) {
 		const db = this.database;
-		const target = db.logs.find((item) => item.id === logId);
-		const name = target ? db.exercises.find((e) => e.id === target.exerciseId)?.name : logId;
 		this.database = { ...db, logs: db.logs.filter((item) => item.id !== logId) };
-		await this.persistDatabase(`Delete workout: ${name ?? logId}`);
+		this.persistDatabase();
 	}
 
 	async deleteSession(sessionId: string) {
@@ -359,19 +348,8 @@ class WorkoutStore {
 			result.anchorsRefreshed ? 'якоря пересчитаны' : ''
 		].filter(Boolean);
 
-		const token = getGitHubToken();
-		if (token) {
-			await this.persistToGitHub(token, result.database, 'Repair workout data links');
-			if (result.plan) {
-				await this.persistCyclePlanToGitHub(token, result.plan);
-			}
-		} else {
-			this.patchSync({
-				source: this.sync.source === 'github' ? 'github' : 'local'
-			});
-		}
-
 		this.patchSync({
+			source: 'local',
 			message:
 				parts.length > 0
 					? `Данные восстановлены (${parts.join(', ')}). Логов с microSessionId: ${linkSummary.linked}/${linkSummary.total}.`
@@ -423,7 +401,7 @@ class WorkoutStore {
 				message:
 					best === remote
 						? 'Подключено к GitHub. Загружены данные из репозитория.'
-						: 'Подключено к GitHub. Локальные данные новее — при сохранении отправятся в репозиторий.',
+						: 'Подключено к GitHub. Локальные данные новее — отправьте их кнопкой «Отправить в GitHub».',
 				source: best === remote ? 'github' : 'local'
 			};
 		} catch (error) {
@@ -436,10 +414,21 @@ class WorkoutStore {
 	}
 
 	async pushToGitHub(token: string) {
-		await this.persistToGitHub(token, this.database, 'Sync workouts from app');
-		if (this.cyclePlan) {
-			await this.persistCyclePlanToGitHub(token, this.cyclePlan);
+		this.patchSync({ syncing: true, error: '', message: '' });
+		try {
+			await this.persistToGitHub(token, this.database, 'Sync workouts from app');
+			if (this.cyclePlan) {
+				await this.persistCyclePlanToGitHub(token, this.cyclePlan);
+			}
+		} catch (error) {
+			this.patchSync({
+				syncing: false,
+				error: error instanceof Error ? error.message : 'Ошибка отправки в GitHub',
+				message: ''
+			});
+			throw error;
 		}
+		this.patchSync({ syncing: false });
 	}
 }
 

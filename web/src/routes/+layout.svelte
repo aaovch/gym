@@ -51,9 +51,11 @@
   $: sourceLabel =
     workoutStore.sync.source === 'github'
       ? 'GitHub'
-      : workoutStore.sync.source === 'local'
-        ? 'Локальные данные'
-        : 'Данные сборки';
+      : token.trim() && workoutStore.sync.source === 'local'
+        ? 'Локально · не отправлено'
+        : workoutStore.sync.source === 'local'
+          ? 'Локальные данные'
+          : 'Данные сборки';
 
   onMount(() => {
     workoutStore.bootstrap(data.bundled, data.bundledCyclePlan ?? null);
@@ -197,8 +199,9 @@
       <div class="settings-section">
         <h3>Синхронизация с GitHub</h3>
         <p>
-          Необязательно. Без токена данные продолжают храниться локально в браузере. Для подключения
-          нужен токен с доступом к содержимому репозитория.
+          Необязательно. Без токена данные хранятся только в браузере. С токеном правки сначала
+          сохраняются локально, а в репозиторий уходят одной кнопкой «Отправить в GitHub» — так не
+          будет лишних деплоев на каждое изменение.
         </p>
         <label>
           Токен
@@ -228,7 +231,7 @@
             disabled={workoutStore.sync.syncing}
             on:click={syncNow}
           >
-            Отправить в GitHub
+            {workoutStore.sync.syncing ? 'Отправка...' : 'Отправить в GitHub'}
           </button>
         {/if}
         <button
