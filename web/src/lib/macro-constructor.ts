@@ -1,4 +1,5 @@
 import type { CyclePlan, MacrocyclePlan, MesocyclePlan } from './cycle-plan';
+import type { WorkoutTemplate } from './microcycle';
 import { buildProtocolMatrix, type ExerciseAnchorInfo, type ProtocolMatrixRow } from './cycle-plan';
 import { dateToMs } from './chart-time';
 import { defaultMicroSessions } from './micro-plan';
@@ -76,7 +77,8 @@ function blockAnchorInfo(exercises: MesoExerciseSetup[]): Record<string, Exercis
 export function previewMacroPlan(
 	plan: CyclePlan,
 	input: MacroConstructorInput,
-	keyMaps: ExerciseKeyMaps
+	keyMaps: ExerciseKeyMaps,
+	workoutTemplates: WorkoutTemplate[] = []
 ): MacroBlockPreview[] {
 	if (input.blocks.length === 0) return [];
 
@@ -124,7 +126,8 @@ export function previewMacroPlan(
 				plan,
 				blockAnchorInfo(block.exercises),
 				[],
-				keyMaps
+				keyMaps,
+				{ workoutTemplates }
 			)
 		});
 

@@ -19,17 +19,24 @@
 		type EnrichedMacrocycle,
 		type EnrichedMesocycle,
 		type EnrichedMicrocycle,
+		type CyclePlan,
 		type ExerciseAnchorInfo,
 		type ProtocolMatrixRow
 	} from '$lib/cycle-plan';
 	import { mesoProtocolId } from '$lib/exercise-keys';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { microDates } from '$lib/micro-plan';
-	import { mesocycleColor, sessionIndexColor, sessionIndexLabel } from '$lib/microcycle';
+	import {
+		mesocycleColor,
+		sessionIndexColor,
+		sessionIndexLabel,
+		type WorkoutTemplate
+	} from '$lib/microcycle';
 	import {
 		createMesocycleFromConstructor,
 		defaultMesoStartDate,
 		knownMesoExercises,
+		previewMesoPlan,
 		resolveExerciseAnchor,
 		suggestedMicroCount,
 		type MesoExerciseSetup
@@ -37,6 +44,7 @@
 	import {
 		createMacrocycleFromConstructor,
 		defaultMacroStartDate,
+		previewMacroPlan,
 		type MacroBlockInput
 	} from '$lib/macro-constructor';
 	import RmLabels from '$lib/components/RmLabels.svelte';
@@ -193,6 +201,81 @@
 	const macroBlocksReady = $derived(
 		macroBlockInputs.some((block) => block.exercises.length > 0 && block.microCount >= 1)
 	);
+
+	const constructorPreview = $derived.by(() => {
+		if (!plan || !showMesoConstructor || constructorExercises.length === 0) return [];
+		return previewMesoPlan(
+			plan,
+			{
+				label: constructorLabel,
+				startDate: constructorStart || defaultMesoStartDate(view.entries),
+				microCount: constructorMicroCount,
+				defaultProtocolId: constructorProtocolId,
+				exercises: constructorExercises
+			},
+			keyMaps,
+			workoutTemplates
+		);
+	});
+
+	const macroPreview = $derived.by(() => {
+		if (!plan || !showMacroConstructor || !macroBlocksReady) return [];
+		return previewMacroPlan(
+			plan,
+			{
+				label: macroLabel,
+				startDate: macroStart || defaultMacroStartDate(view.entries),
+				blocks: macroBlockInputs
+			},
+			keyMaps,
+			workoutTemplates
+		);
+	});
+
+	const macroPreviewOverview = $derived.by(() => {
+		if (!plan || !showMacroConstructor) return [];
+		let previewIdx = 0;
+		return macroBlockInputs.map((block, index) => {
+			const active = block.exercises.length > 0 && block.microCount >= 1;
+			const preview = active ? (macroPreview[previewIdx++] ?? null) : null;
+			const maxPhase = maxProtocolMicroTo(
+				plan,
+				block.exercises,
+				block.defaultProtocolId ?? 'submax-effort'
+			);
+			const micro = microCoverageParts(block.microCount, maxPhase);
+			const sessions = sessionCoverageParts(
+				block.exercises.map((row) => row.exercise),
+				workoutTemplates
+			);
+			return {
+				index,
+				block,
+				active,
+				preview,
+				microWorked: micro.worked,
+				microMissed: micro.missed,
+				sessionsWorked: sessions.worked,
+				sessionsMissed: sessions.missed
+			};
+		});
+	});
+
+	const mesoPreviewCoverage = $derived.by(() => {
+		if (!plan || constructorExercises.length === 0) return null;
+		const maxPhase = maxProtocolMicroTo(plan, constructorExercises, constructorProtocolId);
+		const micro = microCoverageParts(constructorMicroCount, maxPhase);
+		const sessions = sessionCoverageParts(
+			constructorExercises.map((row) => row.exercise),
+			workoutTemplates
+		);
+		return {
+			microWorked: micro.worked,
+			microMissed: micro.missed,
+			sessionsWorked: sessions.worked,
+			sessionsMissed: sessions.missed
+		};
+	});
 
 	function makeConstructorRow(
 		exercise: string,
@@ -726,6 +809,94 @@
 			.filter((row) => row.cells.some((cell) => cell.applicable))
 			.sort(compareProtocolMatrixRows);
 	}
+
+	function previewMatrixCell(row: ProtocolMatrixRow, microIndex: number) {
+		return row.cells.find((cell) => cell.microIndex === microIndex);
+	}
+
+	function maxProtocolMicroTo(
+		plan: CyclePlan,
+		exercises: MesoExerciseSetup[],
+		defaultProtocolId: string
+	): number {
+		let max = 0;
+		const consider = (protocolId: string) => {
+			const template = plan.templates.find((item) => item.id === protocolId);
+			if (!template) return;
+			for (const phase of template.phases) max = Math.max(max, phase.microTo);
+		};
+		if (exercises.length === 0) {
+			consider(defaultProtocolId);
+			return max;
+		}
+		for (const row of exercises) consider(row.protocolId);
+		return max;
+	}
+
+	function formatMicroIndices(indices: number[]): string {
+		if (indices.length === 0) return '';
+		const sorted = [...indices].sort((a, b) => a - b);
+		const parts: string[] = [];
+		let start = sorted[0];
+		let prev = sorted[0];
+		for (let i = 1; i <= sorted.length; i++) {
+			if (i < sorted.length && sorted[i] === prev + 1) {
+				prev = sorted[i];
+				continue;
+			}
+			parts.push(start === prev ? `μ${start}` : `μ${start}–μ${prev}`);
+			if (i < sorted.length) {
+				start = sorted[i];
+				prev = sorted[i];
+			}
+		}
+		return parts.join(', ');
+	}
+
+	function microCoverageParts(microCount: number, maxPhase: number) {
+		if (maxPhase < 1) return { worked: '', missed: '' };
+		const workedIndices = Array.from(
+			{ length: Math.min(microCount, maxPhase) },
+			(_, index) => index + 1
+		);
+		const missedIndices = [
+			...Array.from({ length: Math.max(0, maxPhase - microCount) }, (_, index) => microCount + index + 1),
+			...(microCount > maxPhase
+				? Array.from({ length: microCount - maxPhase }, (_, index) => maxPhase + index + 1)
+				: [])
+		];
+		return {
+			worked: formatMicroIndices(workedIndices),
+			missed: formatMicroIndices(missedIndices)
+		};
+	}
+
+	function exerciseInWorkoutSession(
+		exercise: string,
+		sessionIndex: 0 | 1,
+		templates: WorkoutTemplate[]
+	): boolean {
+		const template = templates.find((item) => item.indexInMicro === sessionIndex);
+		if (template && template.exercises.length > 0) {
+			return template.exercises.includes(exercise);
+		}
+		return true;
+	}
+
+	function sessionCoverageParts(exercises: string[], templates: WorkoutTemplate[]) {
+		if (exercises.length === 0) return { worked: '', missed: '' };
+		const worked: string[] = [];
+		const missed: string[] = [];
+		for (const sessionIndex of [0, 1] as const) {
+			const letter = sessionColumnTitle(sessionIndex);
+			const count = exercises.filter((exercise) =>
+				exerciseInWorkoutSession(exercise, sessionIndex, templates)
+			).length;
+			if (count > 0) worked.push(`${letter} (${count})`);
+			else missed.push(letter);
+		}
+		return { worked: worked.join(' · '), missed: missed.join(', ') };
+	}
 </script>
 
 <div class="cycles-page">
@@ -897,6 +1068,145 @@
 			{/each}
 		</div>
 
+		{#if macroPreviewOverview.length > 0}
+			<div class="constructor-preview">
+				<div class="preview-summary-head">
+					<h4>Предпросмотр макро</h4>
+					<ul class="preview-block-status">
+						{#each macroPreviewOverview as item (item.index)}
+							<li class:skipped={!item.active}>
+								<span class="preview-block-name">
+									{item.block.label || `Блок ${item.index + 1}`}
+								</span>
+								{#if item.active}
+									<span class="preview-badge active">проработан</span>
+									{#if item.microWorked}
+										<span class="preview-coverage">{item.microWorked}</span>
+									{/if}
+									{#if item.microMissed}
+										<span class="preview-missed">упущено: {item.microMissed}</span>
+									{/if}
+								{:else}
+									<span class="preview-badge skipped">упущен</span>
+									<span class="muted">нет упражнений</span>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				</div>
+				<div class="macro-preview">
+					{#each macroPreviewOverview as item (item.index)}
+						{#if item.active && item.preview}
+							{@const block = item.preview}
+							<details
+								class="macro-preview-block"
+								open={item.index === macroPreviewOverview.findIndex((row) => row.active)}
+							>
+								<summary>
+									<span class="preview-summary-main">
+										{block.label} · μ{block.microCount} · {formatDateRu(block.startDate)} — {formatDateRu(
+											block.endDate
+										)}
+										<span class="muted">{shortProtocolName(block.protocolName)}</span>
+									</span>
+									<span class="preview-summary-tags">
+										<span class="preview-badge active">проработан</span>
+										{#if item.microWorked}
+											<span class="preview-coverage">{item.microWorked}</span>
+										{/if}
+										{#if item.microMissed}
+											<span class="preview-missed">упущено: {item.microMissed}</span>
+										{/if}
+										{#if item.sessionsWorked}
+											<span class="preview-sessions">дни: {item.sessionsWorked}</span>
+										{/if}
+										{#if item.sessionsMissed}
+											<span class="preview-missed">без нагрузки: {item.sessionsMissed}</span>
+										{/if}
+									</span>
+								</summary>
+							<div class="plan-sessions preview-sessions">
+								{#each [0, 1] as sessionIndex}
+									{@const slot = sessionIndex as 0 | 1}
+									{@const rows = planMatrixForSession(block.matrix, slot)}
+									{#if rows.length > 0}
+										<section
+											class="session-plan-block"
+											class:session-a={slot === 0}
+											class:session-b={slot === 1}
+										>
+											<h3 class="session-plan-title">
+												Тренировка {sessionColumnTitle(slot)}
+											</h3>
+											<div class="matrix-wrap compact">
+												<table class="matrix">
+													<colgroup>
+														<col class="col-ex" />
+														<col class="col-rm" />
+														<col class="col-proto" />
+														{#each Array.from({ length: block.microCount }, (_, i) => i + 1) as _micro}
+															<col class="col-session" />
+														{/each}
+													</colgroup>
+													<thead>
+														<tr>
+															<th>Упражнение</th>
+															<th>Якорь</th>
+															<th>Протокол</th>
+															{#each Array.from({ length: block.microCount }, (_, i) => i + 1) as microIndex}
+																<th
+																	class="session-head"
+																	class:micro-group-start={microIndex > 1}
+																>
+																	<span class="session-mu">μ{microIndex}</span>
+																</th>
+															{/each}
+														</tr>
+													</thead>
+													<tbody>
+														{#each rows as row}
+															<tr>
+																<td class="ex-name">{row.exercise}</td>
+																<td class="rm-cell">{fmtNum(row.anchor)} кг</td>
+																<td class="proto-name" title={row.templateName}>
+																	{shortProtocolName(row.templateName)}
+																</td>
+																{#each Array.from({ length: block.microCount }, (_, i) => i + 1) as microIndex}
+																	{@const cell = previewMatrixCell(row, microIndex)}
+																	<td
+																		class="pct"
+																		class:micro-group-start={microIndex > 1}
+																		class:na={!cell?.applicable}
+																		title={cell?.label ?? ''}
+																	>
+																		{#if !cell?.applicable}
+																			<span class="fact-empty">—</span>
+																		{:else}
+																			<span class="pct-val">
+																				{cell.pct != null ? `${cell.pct}%` : '—'}
+																			</span>
+																			{#if cell.targetWeight != null}
+																				<small>{fmtNum(cell.targetWeight)} кг</small>
+																			{/if}
+																		{/if}
+																	</td>
+																{/each}
+															</tr>
+														{/each}
+													</tbody>
+												</table>
+											</div>
+										</section>
+									{/if}
+								{/each}
+							</div>
+						</details>
+						{/if}
+					{/each}
+				</div>
+			</div>
+		{/if}
+
 		<div class="constructor-actions">
 			<button type="button" class="btn" onclick={closeMacroConstructor}>Отмена</button>
 			<button
@@ -1040,6 +1350,103 @@
 						{/each}
 					</tbody>
 				</table>
+			</div>
+		{/if}
+
+		{#if constructorPreview.length > 0}
+			<div class="constructor-preview">
+				<div class="preview-summary-head">
+					<h4>Предпросмотр плана</h4>
+					{#if mesoPreviewCoverage}
+						<p class="preview-summary-meta">
+							{#if mesoPreviewCoverage.microWorked}
+								<span class="preview-coverage">Проработано: {mesoPreviewCoverage.microWorked}</span>
+							{/if}
+							{#if mesoPreviewCoverage.microMissed}
+								<span class="preview-missed">Упущено: {mesoPreviewCoverage.microMissed}</span>
+							{/if}
+							{#if mesoPreviewCoverage.sessionsWorked}
+								<span class="preview-sessions">Дни: {mesoPreviewCoverage.sessionsWorked}</span>
+							{/if}
+							{#if mesoPreviewCoverage.sessionsMissed}
+								<span class="preview-missed">Без нагрузки: {mesoPreviewCoverage.sessionsMissed}</span>
+							{/if}
+						</p>
+					{/if}
+				</div>
+				<div class="plan-sessions preview-sessions">
+					{#each [0, 1] as sessionIndex}
+						{@const slot = sessionIndex as 0 | 1}
+						{@const rows = planMatrixForSession(constructorPreview, slot)}
+						{#if rows.length > 0}
+							<section
+								class="session-plan-block"
+								class:session-a={slot === 0}
+								class:session-b={slot === 1}
+							>
+								<h3 class="session-plan-title">Тренировка {sessionColumnTitle(slot)}</h3>
+								<div class="matrix-wrap compact">
+									<table class="matrix">
+										<colgroup>
+											<col class="col-ex" />
+											<col class="col-rm" />
+											<col class="col-proto" />
+											{#each Array.from({ length: constructorMicroCount }, (_, i) => i + 1) as _micro}
+												<col class="col-session" />
+											{/each}
+										</colgroup>
+										<thead>
+											<tr>
+												<th>Упражнение</th>
+												<th>Якорь</th>
+												<th>Протокол</th>
+												{#each Array.from({ length: constructorMicroCount }, (_, i) => i + 1) as microIndex}
+													<th
+														class="session-head"
+														class:micro-group-start={microIndex > 1}
+													>
+														<span class="session-mu">μ{microIndex}</span>
+													</th>
+												{/each}
+											</tr>
+										</thead>
+										<tbody>
+											{#each rows as row}
+												<tr>
+													<td class="ex-name">{row.exercise}</td>
+													<td class="rm-cell">{fmtNum(row.anchor)} кг</td>
+													<td class="proto-name" title={row.templateName}>
+														{shortProtocolName(row.templateName)}
+													</td>
+													{#each Array.from({ length: constructorMicroCount }, (_, i) => i + 1) as microIndex}
+														{@const cell = previewMatrixCell(row, microIndex)}
+														<td
+															class="pct"
+															class:micro-group-start={microIndex > 1}
+															class:na={!cell?.applicable}
+															title={cell?.label ?? ''}
+														>
+															{#if !cell?.applicable}
+																<span class="fact-empty">—</span>
+															{:else}
+																<span class="pct-val">
+																	{cell.pct != null ? `${cell.pct}%` : '—'}
+																</span>
+																{#if cell.targetWeight != null}
+																	<small>{fmtNum(cell.targetWeight)} кг</small>
+																{/if}
+															{/if}
+														</td>
+													{/each}
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							</section>
+						{/if}
+					{/each}
+				</div>
 			</div>
 		{/if}
 
@@ -2280,6 +2687,129 @@
 
 	.constructor-empty {
 		margin: 0 0 1rem;
+	}
+
+	.constructor-preview {
+		margin-top: 1rem;
+		padding-top: 0.85rem;
+		border-top: 1px solid var(--line);
+	}
+
+	.preview-summary-head {
+		display: grid;
+		gap: 0.45rem;
+		margin-bottom: 0.65rem;
+	}
+
+	.constructor-preview h4 {
+		margin: 0;
+		font-size: 0.9rem;
+	}
+
+	.preview-summary-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem 0.65rem;
+		margin: 0;
+		font-size: 0.78rem;
+	}
+
+	.preview-block-status {
+		display: grid;
+		gap: 0.35rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: 0.78rem;
+	}
+
+	.preview-block-status li {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.preview-block-status li.skipped {
+		opacity: 0.72;
+	}
+
+	.preview-block-name {
+		font-weight: 600;
+	}
+
+	.preview-badge {
+		display: inline-block;
+		padding: 0.08rem 0.4rem;
+		border-radius: 999px;
+		font-size: 0.68rem;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+	}
+
+	.preview-badge.active {
+		background: rgb(46 160 96 / 18%);
+		color: #6ee7a8;
+	}
+
+	.preview-badge.skipped {
+		background: rgb(220 90 90 / 14%);
+		color: #f0a0a0;
+	}
+
+	.preview-coverage {
+		color: #8ec8ff;
+	}
+
+	.preview-missed {
+		color: #f0a0a0;
+	}
+
+	.preview-summary-meta .preview-sessions,
+	.preview-summary-tags .preview-sessions {
+		color: var(--muted);
+	}
+
+	.plan-sessions.preview-sessions {
+		gap: 0.85rem;
+	}
+
+	.preview-sessions .session-plan-block .matrix {
+		min-width: 28rem;
+		font-size: 0.78rem;
+	}
+
+	.macro-preview {
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.macro-preview-block {
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		padding: 0.45rem 0.65rem 0.65rem;
+	}
+
+	.macro-preview-block summary {
+		cursor: pointer;
+		display: grid;
+		gap: 0.3rem;
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+
+	.preview-summary-main .muted {
+		font-weight: 400;
+		margin-left: 0.35rem;
+	}
+
+	.preview-summary-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem 0.45rem;
+		font-size: 0.72rem;
+		font-weight: 500;
 	}
 
 	.constructor-actions {
