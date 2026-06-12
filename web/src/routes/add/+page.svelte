@@ -2,28 +2,23 @@
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import SetEditor from '$lib/components/SetEditor.svelte';
-	import RmLabels from '$lib/components/RmLabels.svelte';
+	import { resolveMesoMicroSelection, targetPctForExercise } from '$lib/cycle-plan';
 	import {
-		exerciseTargetOnMicro,
-		resolveMesoMicroSelection
-	} from '$lib/cycle-plan';
-	import {
-	createLog,
-	emptyRowInput,
-	logToSession,
-	rowInputToSessionRow,
-	uniqueExercisesFromDb
-} from '$lib/database';
-	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
-	import { isCardioExercise } from '$lib/protocol';
+		createLog,
+		emptyRowInput,
+		logToSession,
+		rowInputToSessionRow,
+		uniqueExercisesFromDb
+	} from '$lib/database';
+	import { mesoProtocolId } from '$lib/exercise-keys';
+	import { fmtNum, todayIso } from '$lib/format';
 	import { thesesStore } from '$lib/training-theses';
 	import {
-		anchor1rmFromSets,
-		evaluateSessionVolume,
-		resolveVolumeAnchor1rm,
-		TRAINING_VOLUME_GUIDE_ID,
-		volumeCheckLabel
-	} from '$lib/volume-guide';
+		protocolGuideWeek,
+		setsToRowInput,
+		suggestPlannedSets
+	} from '$lib/planned-sets';
+	import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
 	import { saveLog, workoutStore } from '$lib/workout-store';
 	import type { ExerciseLog, RowInput, WorkoutSession } from '$lib/types';
 
@@ -32,6 +27,7 @@
 	let mainRow = $state<RowInput>(emptyRowInput());
 	let extraRows = $state<RowInput[]>([]);
 	let editingId = $state<string | null>(null);
+	let prefilledKey = $state<string | null>(null);
 	let status = $state('');
 	let error = $state('');
 	let busy = $state(false);
@@ -46,35 +42,89 @@
 	const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
 	const urlMeso = $derived.by(() => (browser ? page.url.searchParams.get('meso') : null));
 	const urlMicro = $derived.by(() => (browser ? page.url.searchParams.get('micro') : null));
+	const urlSession = $derived.by(() => (browser ? page.url.searchParams.get('session') : null));
 
 	const trainingContext = $derived.by(() =>
-		resolveMesoMicroSelection(
-			view.cyclePlanView.mesocycles,
-			date,
-			urlMeso,
-			urlMicro
-		)
+		resolveMesoMicroSelection(view.cyclePlanView.mesocycles, date, urlMeso, urlMicro)
 	);
 
-	const protocolHint = $derived.by(() => {
+	const volumeGuideRows = $derived(
+		thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
+	);
+
+	const planSummary = $derived.by(() => {
 		const name = exercise.trim();
 		if (!name || !trainingContext) return null;
 		const anchor = trainingContext.meso.anchorInfo[name]?.anchor;
 		if (!anchor) return null;
-		return exerciseTargetOnMicro(
+		const protocolId =
+			mesoProtocolId(trainingContext.meso.plan, name, view.keyMaps) ??
+			trainingContext.meso.plan.templateId;
+		const guide = thesesStore.protocolGuideFor(protocolId);
+		const sets = suggestPlannedSets({
+			exercise: name,
+			kind: exerciseKind,
+			date,
+			entries: view.entries,
+			anchor1rm: anchor,
+			cyclePlan: view.cyclePlanForCalc,
+			meso: trainingContext.meso.plan,
+			micro: trainingContext.micro.plan,
+			keyMaps: view.keyMaps,
+			protocolGuideWeek: protocolGuideWeek(guide?.weeks, trainingContext.micro.plan.indexInMeso),
+			volumeGuideRows
+		});
+		const weight = sets[0]?.[0];
+		const { pct } = targetPctForExercise(
 			view.cyclePlanForCalc,
 			trainingContext.meso.plan,
 			trainingContext.micro.plan,
 			name,
-			anchor,
 			view.keyMaps
 		);
+		return weight && pct ? `${fmtNum(weight)} кг · ${pct}%` : null;
 	});
 
 	$effect(() => {
 		if (editId) return;
 		if (urlExercise && !exercise) exercise = urlExercise;
 		if (urlDate && date === todayIso()) date = urlDate;
+	});
+
+	$effect(() => {
+		if (editId) return;
+		const name = urlExercise?.trim() ?? exercise.trim();
+		if (!name || !trainingContext) return;
+		const key = `${name}|${date}|${urlMeso ?? ''}|${urlMicro ?? ''}`;
+		if (prefilledKey === key) return;
+
+		const anchor = trainingContext.meso.anchorInfo[name]?.anchor;
+		if (!anchor) return;
+
+		const protocolId =
+			mesoProtocolId(trainingContext.meso.plan, name, view.keyMaps) ??
+			trainingContext.meso.plan.templateId;
+		const guide = thesesStore.protocolGuideFor(protocolId);
+		const kind =
+			workoutStore.database.exercises.find((item) => item.name === name)?.kind ?? 'strength';
+		const sets = suggestPlannedSets({
+			exercise: name,
+			kind,
+			date,
+			entries: view.entries,
+			anchor1rm: anchor,
+			cyclePlan: view.cyclePlanForCalc,
+			meso: trainingContext.meso.plan,
+			micro: trainingContext.micro.plan,
+			keyMaps: view.keyMaps,
+			protocolGuideWeek: protocolGuideWeek(guide?.weeks, trainingContext.micro.plan.indexInMeso),
+			volumeGuideRows
+		});
+
+		exercise = name;
+		mainRow = setsToRowInput(sets);
+		extraRows = [];
+		prefilledKey = key;
 	});
 
 	$effect(() => {
@@ -85,6 +135,7 @@
 
 	function loadSession(session: WorkoutSession) {
 		editingId = session.id;
+		prefilledKey = null;
 		exercise = session.exercise;
 		date = session.date;
 		mainRow = sessionRowToInput(session.rows[0] ?? { kind: 'strength', sets: [], comment: null });
@@ -111,13 +162,12 @@
 
 	function resetForm() {
 		editingId = null;
+		prefilledKey = null;
 		exercise = '';
 		date = todayIso();
 		mainRow = emptyRowInput();
 		extraRows = [];
 	}
-
-	const urlSession = $derived.by(() => (browser ? page.url.searchParams.get('session') : null));
 
 	const previewLog = $derived.by((): ExerciseLog | null => {
 		const name = exercise.trim();
@@ -129,36 +179,6 @@
 			.filter((row): row is NonNullable<typeof row> => row !== null);
 		if (rows.length === 0) return null;
 		return createLog(workoutStore.database, name, date, rows, editingId ?? crypto.randomUUID()).log;
-	});
-
-	const previewSession = $derived.by((): WorkoutSession | null => {
-		if (!previewLog) return null;
-		return logToSession(workoutStore.database, previewLog);
-	});
-
-	const volumeGuideRows = $derived(
-		thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
-	);
-
-	const volumePreview = $derived.by(() => {
-		if (!previewSession || isCardioExercise(previewSession.exercise) || volumeGuideRows.length === 0) {
-			return null;
-		}
-		const sets = previewSession.rows.flatMap((row) => row.sets);
-		if (sets.length === 0) return null;
-
-		const mesoAnchor = trainingContext?.meso.anchorInfo[previewSession.exercise]?.anchor;
-		let anchor = resolveVolumeAnchor1rm(
-			view.entries,
-			previewSession.exercise,
-			date,
-			mesoAnchor,
-			editingId
-		);
-		if (!anchor) anchor = anchor1rmFromSets(sets);
-		if (!anchor) return null;
-
-		return evaluateSessionVolume(sets, anchor, volumeGuideRows);
 	});
 
 	async function submit() {
@@ -199,8 +219,16 @@
 <section class="card">
 	<div class="toolbar">
 		<div>
-			<h2>{editingId ? 'Редактировать тренировку' : 'Новая тренировка'}</h2>
-			<p class="muted">Подходы вводятся кнопками, данные сохраняются в JSON локально.</p>
+			<h2>{editingId ? 'Редактировать' : 'Запись'}</h2>
+			<p class="muted">
+				{#if editingId}
+					Подправьте подходы и сохраните.
+				{:else if planSummary}
+					По плану: {planSummary}. Можно сразу сохранить или изменить.
+				{:else}
+					Подходы подставятся из плана или прошлой тренировки.
+				{/if}
+			</p>
 		</div>
 		{#if editingId}
 			<button type="button" class="ghost" onclick={resetForm}>Новая запись</button>
@@ -223,22 +251,7 @@
 			<input type="date" bind:value={date} />
 		</label>
 
-		{#if protocolHint || trainingContext?.meso.anchorInfo[exercise.trim()]}
-			{@const rm = trainingContext?.meso.anchorInfo[exercise.trim()]}
-			<div class="protocol-hint">
-				{#if rm}
-					<RmLabels anchor={rm.anchor} current={rm.current1rm} currentDate={rm.current1rmDate} />
-				{/if}
-				{#if protocolHint}
-					<p>
-						μ{trainingContext!.micro.plan.indexInMeso} · {protocolHint.protocolLabel}: цель ~{fmtNum(protocolHint.targetWeight)} кг
-						({protocolHint.targetPct}% от якоря)
-					</p>
-				{/if}
-			</div>
-		{/if}
-
-		<SetEditor bind:row={mainRow} label="Основной блок" kind={exerciseKind} />
+		<SetEditor bind:row={mainRow} label="Подходы" kind={exerciseKind} />
 
 		{#each extraRows as _, index (index)}
 			<SetEditor
@@ -250,41 +263,13 @@
 		{/each}
 
 		<div class="form-actions">
-			<button type="button" class="ghost" onclick={addExtraRow}>+ дополнительный блок</button>
-			<button type="submit" class="primary" disabled={!previewSession || busy || workoutStore.sync.syncing}>
+			<button type="button" class="ghost" onclick={addExtraRow}>+ блок</button>
+			<button type="submit" class="primary" disabled={!previewLog || busy || workoutStore.sync.syncing}>
 				{busy ? 'Сохраняем...' : editingId ? 'Обновить' : 'Сохранить'}
 			</button>
 		</div>
-
-		{#if volumePreview}
-			<p
-				class="volume-hint"
-				class:ok={volumePreview.status === 'ok'}
-				class:low={volumePreview.status === 'low'}
-				class:high={volumePreview.status === 'high'}
-			>
-				{volumeCheckLabel(volumePreview)}
-			</p>
-		{/if}
 	</form>
 </section>
-
-{#if previewSession}
-	<section class="card">
-		<h3>Предпросмотр</h3>
-		<p><strong>{previewSession.exercise}</strong> · {formatDateRu(previewSession.date)}</p>
-		<ul>
-			{#each previewSession.rows as row}
-				<li>
-					{row.sets.map(([w, r]) => `${w}×${r}`).join(', ')}
-					{#if row.comment}
-						<span class="muted">({row.comment})</span>
-					{/if}
-				</li>
-			{/each}
-		</ul>
-	</section>
-{/if}
 
 {#if status}
 	<section class="card success">{status}</section>
@@ -304,8 +289,7 @@
 		flex-wrap: wrap;
 	}
 
-	h2,
-	h3 {
+	h2 {
 		margin: 0 0 0.35rem;
 	}
 
@@ -358,57 +342,11 @@
 		opacity: 0.55;
 	}
 
-	ul {
-		margin: 0.5rem 0 0;
-		padding-left: 1.1rem;
-	}
-
 	.success {
 		color: var(--accent);
 	}
 
 	.error {
 		color: var(--danger);
-	}
-
-	.volume-hint {
-		margin: 0;
-		padding: 0.65rem 0.75rem;
-		border-radius: 10px;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-		font-size: 0.85rem;
-		color: var(--accent-2);
-	}
-
-	.volume-hint.ok {
-		border-color: rgba(110, 231, 168, 0.35);
-		color: var(--accent);
-	}
-
-	.volume-hint.low {
-		border-color: rgba(251, 191, 36, 0.35);
-		color: #fbbf24;
-	}
-
-	.volume-hint.high {
-		border-color: rgba(255, 143, 143, 0.35);
-		color: var(--danger);
-	}
-
-	.protocol-hint {
-		display: grid;
-		gap: 0.4rem;
-		margin: 0;
-		padding: 0.65rem 0.75rem;
-		border-radius: 10px;
-		border: 1px solid rgba(110, 231, 168, 0.25);
-		background: rgba(110, 231, 168, 0.08);
-		font-size: 0.85rem;
-		color: var(--accent-2);
-	}
-
-	.protocol-hint p {
-		margin: 0;
 	}
 </style>

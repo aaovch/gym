@@ -9,6 +9,8 @@
     resolveMesoMicroSelection,
     suggestSessionIndex
   } from '$lib/cycle-plan';
+  import { createLog } from '$lib/database';
+  import { mesoProtocolId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, todayIso } from '$lib/format';
   import { microHasDate } from '$lib/micro-plan';
   import {
@@ -19,16 +21,16 @@
     slotToIndex,
     type WorkoutSlot
   } from '$lib/microcycle';
-  import RmLabels from '$lib/components/RmLabels.svelte';
+  import {
+    formatPlannedSets,
+    protocolGuideWeek,
+    suggestPlannedSets,
+    type PlannedSetsInput
+  } from '$lib/planned-sets';
   import { thesesStore } from '$lib/training-theses';
   import type { ExerciseKind, ExerciseSet } from '$lib/types';
-  import {
-    evaluateEntryVolume,
-    resolveVolumeAnchor1rm,
-    TRAINING_VOLUME_GUIDE_ID,
-    volumeCheckLabel
-  } from '$lib/volume-guide';
-  import { deleteSession, workoutStore } from '$lib/workout-store';
+  import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
+  import { deleteSession, saveLog, workoutStore } from '$lib/workout-store';
 
   let datePick = $state(todayIso());
   let mesoPick = $state<string | null>(null);
@@ -106,22 +108,39 @@
   const volumeGuideRows = $derived(
     thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
   );
-  const volumeHints = $derived.by(() => {
-    const hints = new Map<string, NonNullable<ReturnType<typeof evaluateEntryVolume>>>();
-    if (volumeGuideRows.length === 0) return hints;
-    for (const entry of entriesForDate) {
-      const anchor = resolveVolumeAnchor1rm(
-        view.entries,
-        entry.exercise,
-        entry.date,
-        mesocycle?.anchorInfo[entry.exercise]?.anchor,
-        entry.id
-      );
-      const check = evaluateEntryVolume(entry, anchor, volumeGuideRows);
-      if (check) hints.set(entry.exercise, check);
-    }
-    return hints;
-  });
+  const outOfPlanEntries = $derived(
+    entriesForDate.filter((entry) => !slotExercises.includes(entry.exercise))
+  );
+
+  function exerciseKind(name: string): ExerciseKind {
+    return workoutStore.database.exercises.find((item) => item.name === name)?.kind ?? 'strength';
+  }
+
+  function plannedInput(exerciseName: string): PlannedSetsInput | null {
+    if (!mesocycle || !microcycle) return null;
+    const protocolId =
+      mesoProtocolId(mesocycle.plan, exerciseName, view.keyMaps) ?? mesocycle.plan.templateId;
+    const guide = thesesStore.protocolGuideFor(protocolId);
+    return {
+      exercise: exerciseName,
+      kind: exerciseKind(exerciseName),
+      date: selectedDate,
+      entries: view.entries,
+      anchor1rm: mesocycle.anchorInfo[exerciseName]?.anchor ?? null,
+      cyclePlan: view.cyclePlanForCalc,
+      meso: mesocycle.plan,
+      micro: microcycle.plan,
+      keyMaps: view.keyMaps,
+      protocolGuideWeek: protocolGuideWeek(guide?.weeks, microcycle.plan.indexInMeso),
+      volumeGuideRows
+    };
+  }
+
+  function plannedPreview(exerciseName: string): string | null {
+    const input = plannedInput(exerciseName);
+    if (!input) return null;
+    return formatPlannedSets(suggestPlannedSets(input), input.kind);
+  }
 
   function addUrl(exercise: string, entryId?: string): string {
     const params = new URLSearchParams();
@@ -139,6 +158,33 @@
     if (kind === 'run') return `${first} мин · ${second} км/ч`;
     if (kind === 'jumps') return `${first} подх. × ${second}`;
     return `${first} кг × ${second}`;
+  }
+
+  async function confirmPlanned(exerciseName: string) {
+    const input = plannedInput(exerciseName);
+    if (!input || !mesocycle || !microcycle) return;
+    busyId = exerciseName;
+    error = '';
+    try {
+      const sets = suggestPlannedSets(input);
+      const { db, log } = createLog(
+        workoutStore.database,
+        exerciseName,
+        selectedDate,
+        [{ kind: input.kind, sets, comment: null }],
+        crypto.randomUUID()
+      );
+      workoutStore.database = db;
+      await saveLog(log, {
+        mesoId: mesocycle.plan.id,
+        microId: microcycle.plan.id,
+        indexInMicro: activeIndex
+      });
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Не удалось сохранить';
+    } finally {
+      busyId = null;
+    }
   }
 
   async function removeEntry(id: string | undefined) {
@@ -306,7 +352,7 @@
     <div class="section-heading">
       <div>
         <h2>План сессии {activeSlot}</h2>
-        <p>Цели протокола и уже выполненные подходы</p>
+        <p>Готово — по плану. Изменить — если нужно подправить.</p>
       </div>
       <a class="button button-secondary" href="{base}/add?date={selectedDate}&session={activeIndex}">
         Добавить вне плана
@@ -318,57 +364,56 @@
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
           {@const hint = protocolHints.get(exercise)}
-          {@const rm = mesocycle.anchorInfo[exercise]}
-          {@const volume = volumeHints.get(exercise)}
+          {@const preview = entry ? null : plannedPreview(exercise)}
           <article class="exercise-item" class:complete={Boolean(entry)}>
             <div class="exercise-index">{entry ? '✓' : index + 1}</div>
             <div class="exercise-content">
               <div class="exercise-heading">
                 <div>
                   <h3>{exercise}</h3>
-                  {#if hint}
-                    <p>
-                      {hint.protocolLabel} · цель {fmtNum(hint.targetWeight)} кг · {hint.targetPct}%
+                  {#if entry}
+                    <div class="set-list compact">
+                      {#each entry.sets as set}
+                        <span>{setLabel(entry.kind, set)}</span>
+                      {/each}
+                    </div>
+                  {:else if hint || preview}
+                    <p class="plan-line">
+                      {#if hint}
+                        {fmtNum(hint.targetWeight)} кг · {hint.targetPct}%
+                      {/if}
+                      {#if preview}
+                        {#if hint} · {/if}{preview}
+                      {/if}
                     </p>
+                  {/if}
+                </div>
+                <div class="exercise-actions">
+                  {#if entry}
+                    <a class="button button-secondary" href={addUrl(exercise, entry?.id)}>Изменить</a>
+                    {#if entry.id}
+                      <button
+                        type="button"
+                        class="text-button danger"
+                        disabled={busyId === entry.id}
+                        onclick={() => removeEntry(entry.id)}
+                      >
+                        {busyId === entry.id ? '…' : 'Удалить'}
+                      </button>
+                    {/if}
                   {:else}
-                    <p>{entry?.kind === 'run' ? 'Кардио' : entry?.kind === 'jumps' ? 'Прыжковая работа' : 'Силовая работа'}</p>
+                    <button
+                      type="button"
+                      class="button button-primary"
+                      disabled={busyId === exercise}
+                      onclick={() => confirmPlanned(exercise)}
+                    >
+                      {busyId === exercise ? 'Сохраняем…' : 'Готово'}
+                    </button>
+                    <a class="button button-secondary" href={addUrl(exercise)}>Изменить</a>
                   {/if}
                 </div>
-                <a class="button {entry ? 'button-secondary' : 'button-primary'}" href={addUrl(exercise, entry?.id)}>
-                  {entry ? 'Изменить' : 'Записать'}
-                </a>
               </div>
-
-              {#if rm}
-                <div class="rm-row">
-                  <RmLabels anchor={rm.anchor} current={rm.current1rm} currentDate={rm.current1rmDate} />
-                </div>
-              {/if}
-
-              {#if entry}
-                <div class="set-list">
-                  {#each entry.sets as set}
-                    <span>{setLabel(entry.kind, set)}</span>
-                  {/each}
-                </div>
-                <div class="feedback-row">
-                  {#if hint && !hint.plannedOnly}
-                    <span class:good={Math.abs(hint.maxPct - hint.targetPct) <= 3}>
-                      Пик {fmtNum(hint.maxPct)}% · {fmtNum(hint.maxWeight)} кг
-                    </span>
-                  {/if}
-                  {#if volume}
-                    <span class:good={volume.status === 'ok'} class:warning={volume.status !== 'ok'}>
-                      {volumeCheckLabel(volume)}
-                    </span>
-                  {/if}
-                </div>
-              {:else}
-                <div class="pending-line">
-                  <span></span>
-                  Подходы ещё не записаны
-                </div>
-              {/if}
             </div>
           </article>
         {/each}
@@ -382,15 +427,15 @@
     {/if}
   {/if}
 
-  {#if entriesForDate.length > 0}
+  {#if outOfPlanEntries.length > 0}
     <div class="section-heading">
       <div>
-        <h2>Журнал за день</h2>
-        <p>Все записи, включая упражнения вне текущего плана</p>
+        <h2>Вне плана</h2>
+        <p>Записи, не входящие в текущую сессию</p>
       </div>
     </div>
     <section class="day-log card">
-      {#each entriesForDate as entry (entry.id ?? `${entry.exercise}-${entry.date}`)}
+      {#each outOfPlanEntries as entry (entry.id ?? `${entry.exercise}-${entry.date}`)}
         <article>
           <div>
             <strong>{entry.exercise}</strong>
@@ -650,8 +695,36 @@
     font-size: 11px;
   }
 
-  .rm-row {
-    margin-top: 10px;
+  .plan-line {
+    margin-top: 6px !important;
+    color: var(--muted-strong) !important;
+    font-size: 12px !important;
+  }
+
+  .exercise-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .text-button {
+    padding: 0;
+    color: var(--danger);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-size: 10px;
+  }
+
+  .set-list.compact {
+    margin-top: 8px;
+  }
+
+  .set-list.compact span {
+    padding: 4px 7px;
+    font-size: 10px;
   }
 
   .set-list,
@@ -674,38 +747,6 @@
     border-radius: 9px;
     font-size: 11px;
     font-weight: 700;
-  }
-
-  .feedback-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-top: 10px;
-    color: var(--blue);
-    font-size: 10px;
-  }
-
-  .feedback-row .good {
-    color: var(--accent);
-  }
-
-  .feedback-row .warning {
-    color: var(--orange);
-  }
-
-  .pending-line {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin-top: 15px;
-    color: var(--muted);
-    font-size: 10px;
-  }
-
-  .pending-line span {
-    width: 18px;
-    height: 1px;
-    background: var(--line-strong);
   }
 
   .day-log {
