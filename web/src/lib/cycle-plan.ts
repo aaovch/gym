@@ -254,6 +254,12 @@ function mesoExercisesFromPlan(
 	const names = new Set(
 		Object.keys(meso.anchor1rm).map((key) => keyMaps.nameById.get(key) ?? key)
 	);
+	for (const id of Object.keys(meso.exerciseSessions ?? {})) {
+		names.add(keyMaps.nameById.get(id) ?? id);
+	}
+	for (const id of Object.keys(meso.exerciseProtocols ?? {})) {
+		names.add(keyMaps.nameById.get(id) ?? id);
+	}
 	const dates = new Set(meso.microcycles.flatMap((micro) => microDates(micro)));
 	for (const entry of entries) {
 		if (dates.has(entry.date)) names.add(entry.exercise);

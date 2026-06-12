@@ -314,6 +314,12 @@ class WorkoutStore {
 
 	saveCyclePlanState(plan: CyclePlan) {
 		this.persistCyclePlan(plan);
+		this.patchSync({
+			error: '',
+			message: getGitHubToken()
+				? 'План сохранён локально. Нажмите «Отправить в GitHub», чтобы записать data/cycle-plan.json.'
+				: 'План сохранён локально в браузере.'
+		});
 	}
 
 	refreshMesoAnchorsFromData(keepManual = true) {

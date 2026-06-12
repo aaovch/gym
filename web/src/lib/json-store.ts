@@ -435,10 +435,27 @@ function mesoDateRange(microcycles: MicrocyclePlan[], fallbackStart = '', fallba
 function compactMesocycle(meso: MesocyclePlan): StoredMesocyclePlan {
 	const manual = meso.anchor1rmManual ?? {};
 	const anchor1rm: Record<string, number> = {};
-	for (const [exerciseId, isManual] of Object.entries(manual)) {
-		if (isManual && meso.anchor1rm[exerciseId] != null) anchor1rm[exerciseId] = meso.anchor1rm[exerciseId];
-	}
 	const hasDates = meso.microcycles.some((micro) => microDates(micro).length > 0);
+
+	if (!hasDates) {
+		for (const [exerciseId, value] of Object.entries(meso.anchor1rm)) {
+			if (value != null && value > 0) anchor1rm[exerciseId] = value;
+		}
+	} else {
+		for (const [exerciseId, isManual] of Object.entries(manual)) {
+			if (isManual && meso.anchor1rm[exerciseId] != null) {
+				anchor1rm[exerciseId] = meso.anchor1rm[exerciseId];
+			}
+		}
+	}
+
+	for (const exerciseId of new Set([
+		...Object.keys(meso.exerciseProtocols ?? {}),
+		...Object.keys(meso.exerciseSessions ?? {})
+	])) {
+		const value = meso.anchor1rm[exerciseId];
+		if (value != null && value > 0) anchor1rm[exerciseId] = value;
+	}
 	const stored: StoredMesocyclePlan = {
 		id: meso.id,
 		label: meso.label,
@@ -449,7 +466,12 @@ function compactMesocycle(meso: MesocyclePlan): StoredMesocyclePlan {
 	if (!hasDates && meso.endDate) stored.plannedEndDate = meso.endDate;
 	if (Object.keys(anchor1rm).length) {
 		stored.anchor1rm = anchor1rm;
-		stored.anchor1rmManual = Object.fromEntries(Object.keys(anchor1rm).map((key) => [key, true]));
+		const manualFlags = Object.fromEntries(
+			Object.keys(anchor1rm)
+				.filter((key) => manual[key])
+				.map((key) => [key, true])
+		);
+		if (Object.keys(manualFlags).length) stored.anchor1rmManual = manualFlags;
 	}
 	if (meso.exerciseProtocols && Object.keys(meso.exerciseProtocols).length) {
 		stored.exerciseProtocols = meso.exerciseProtocols;
