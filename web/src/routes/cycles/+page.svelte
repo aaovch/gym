@@ -17,6 +17,7 @@
 		updateMesocycle,
 		type EnrichedMacrocycle,
 		type EnrichedMesocycle,
+		type EnrichedMicrocycle,
 		type ExerciseAnchorInfo
 	} from '$lib/cycle-plan';
 	import { mesoProtocolId } from '$lib/exercise-keys';
@@ -678,6 +679,23 @@
 
 	function shortProtocolName(name: string): string {
 		return name.replace('4×микро', '4μ').replace('~80%', '80%');
+	}
+
+	function microSessionsDone(micro: EnrichedMicrocycle): number {
+		return Number(Boolean(micro.dayA)) + Number(Boolean(micro.dayB));
+	}
+
+	function microStatusLabel(micro: EnrichedMicrocycle): string {
+		const done = microSessionsDone(micro);
+		if (done === 0) return 'нет дней';
+		if (done === 2) return '2/2 дня';
+		return `${done}/2 дня`;
+	}
+
+	function microStatusTitle(micro: EnrichedMicrocycle): string {
+		const a = micro.dayA ? `A (${formatDateRu(micro.dayA.date)})` : 'A — нет';
+		const b = micro.dayB ? `B (${formatDateRu(micro.dayB.date)})` : 'B — нет';
+		return `В μ две тренировки по шаблону программы: ${a}; ${b}`;
 	}
 </script>
 
@@ -1560,7 +1578,8 @@
 				<div class="tab-panel">
 					<p class="panel-hint muted">
 						План (% и кг) по якорному 1ПМ · факт — пик % от якоря за микроцикл (лучший подход).
-						Даты A/B — фактические тренировочные дни в каждом μ.
+						В каждом μ две тренировки: <strong>A</strong> — первая, <strong>B</strong> — вторая (шаблоны
+						дней программы).
 					</p>
 					<div class="matrix-wrap">
 						<table class="matrix">
@@ -1582,27 +1601,40 @@
 									{/each}
 								</tr>
 								<tr class="micro-dates-row">
-									<th colspan="3" class="micro-dates-label">Дни</th>
+									<th colspan="3" class="micro-dates-label">Тренировки A / B</th>
 									{#each selectedMeso.microcycles as micro (micro.plan.id)}
 										<th class="micro-dates-cell">
 											<div class="micro-days">
 												{#if micro.dayA}
-													<a class="day-link a" href="{base}/?date={micro.dayA.date}">
+													<a
+														class="day-link a"
+														href="{base}/?date={micro.dayA.date}"
+														title={sessionIndexLabel(0)}
+													>
 														A · {formatDateRu(micro.dayA.date)}
 													</a>
+												{:else}
+													<span class="day-missing a" title={sessionIndexLabel(0)}>A · —</span>
 												{/if}
 												{#if micro.dayB}
-													<a class="day-link b" href="{base}/?date={micro.dayB.date}">
+													<a
+														class="day-link b"
+														href="{base}/?date={micro.dayB.date}"
+														title={sessionIndexLabel(1)}
+													>
 														B · {formatDateRu(micro.dayB.date)}
 													</a>
-												{/if}
-												{#if !micro.dayA && !micro.dayB}
-													<span class="muted micro-empty">—</span>
+												{:else}
+													<span class="day-missing b" title={sessionIndexLabel(1)}>B · —</span>
 												{/if}
 											</div>
 											<div class="micro-dates-meta">
-												<span class="micro-badge" class:ok={micro.complete}>
-													{micro.complete ? 'A+B' : 'неполный'}
+												<span
+													class="micro-badge"
+													class:ok={micro.complete}
+													title={microStatusTitle(micro)}
+												>
+													{microStatusLabel(micro)}
 												</span>
 												<a
 													class="micro-log-link"
@@ -2615,8 +2647,21 @@
 		color: var(--text);
 	}
 
-	.micro-empty {
-		font-size: 0.72rem;
+	.day-missing {
+		display: block;
+		padding: 0.2rem 0.35rem;
+		font-size: 0.68rem;
+		line-height: 1.2;
+		color: var(--muted);
+		border: 1px dashed var(--line);
+	}
+
+	.day-missing.a {
+		background: rgba(91, 157, 255, 0.04);
+	}
+
+	.day-missing.b {
+		background: rgba(110, 231, 168, 0.04);
 	}
 
 	.micro-dates-meta {
