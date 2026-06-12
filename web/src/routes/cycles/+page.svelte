@@ -3,25 +3,18 @@
 	import {
 		addExerciseToMeso,
 		addMicrocycle,
-		addProtocolPhase,
 		assignDate,
-		createProtocolTemplate,
-		duplicateProtocolTemplate,
 		emptyCyclePlan,
 		markAnchorManual,
 		removeMacrocycle,
 		removeMesocycle,
 		removeMicrocycle,
 		removeExerciseFromMeso,
-		removeProtocolPhase,
-		removeProtocolTemplate,
-		resetProtocolTemplate,
 		syncMesoExercises,
 		unassignDate,
 		updateExerciseProtocol,
 		updateMacrocycle,
 		updateMesocycle,
-		updateTemplate,
 		type EnrichedMacrocycle,
 		type EnrichedMesocycle,
 		type ExerciseAnchorInfo
@@ -46,7 +39,6 @@
 		previewMacroPlan,
 		type MacroBlockInput
 	} from '$lib/macro-constructor';
-	import { DEFAULT_PROTOCOL_TEMPLATE, isBundledProtocolId, isCustomProtocolId } from '$lib/protocol';
 	import RmLabels from '$lib/components/RmLabels.svelte';
 	import {
 		clearCyclePlanState,
@@ -79,7 +71,6 @@
 	let editMode = $state(false);
 	let showHelp = $state(false);
 	let showMoreActions = $state(false);
-	let showProtocolEditor = $state(false);
 	let showMacroConstructor = $state(false);
 	let showMesoConstructor = $state(false);
 	let mesoTab = $state<MesoTab>('plan');
@@ -87,8 +78,6 @@
 	let mesoPick = $state<string | null>(null);
 	let microPick = $state<string | null>(null);
 	let mesoConstructorMacroId = $state<string | null>(null);
-	let selectedTemplateId = $state(DEFAULT_PROTOCOL_TEMPLATE.id);
-
 	let macroLabel = $state('Макро 1');
 	let macroStart = $state('');
 	let macroBlocks = $state<MacroBlockDraft[]>([]);
@@ -107,7 +96,6 @@
 	const workoutTemplates = $derived(view.workoutTemplates);
 	const cyclePlanView = $derived(view.cyclePlanView);
 	const plan = $derived(cyclePlanView.plan);
-	const editorPlan = $derived(plan ?? view.cyclePlanForCalc);
 	const displayMacros = $derived(cyclePlanView.macrocycles ?? []);
 	const displayOrphans = $derived(cyclePlanView.orphanMesocycles ?? []);
 	const displayMesos = $derived(cyclePlanView.mesocycles);
@@ -159,17 +147,6 @@
 		});
 		return `${base}/?${params.toString()}`;
 	}
-
-	const activeTemplate = $derived(
-		editorPlan.templates.find((item) => item.id === selectedTemplateId) ??
-			editorPlan.templates[0] ??
-			DEFAULT_PROTOCOL_TEMPLATE
-	);
-
-	const activeTemplateIsBundled = $derived(isBundledProtocolId(activeTemplate.id));
-	const activeTemplateIsCustom = $derived(isCustomProtocolId(activeTemplate.id));
-
-	const activeProtocolGuide = $derived(thesesStore.protocolGuideFor(activeTemplate.id));
 
 	const knownExercises = $derived(knownMesoExercises(view.entries, workoutTemplates, view.exercises));
 
@@ -430,68 +407,6 @@
 		constructorSelection = next;
 		constructorQuery = '';
 		constructorAddPick = '';
-	}
-
-	function ensurePlanForEditor(): boolean {
-		if (workoutStore.cyclePlan) return true;
-		saveCyclePlanState(emptyCyclePlan());
-		return Boolean(workoutStore.cyclePlan);
-	}
-
-	function toggleProtocolEditor() {
-		if (showProtocolEditor) {
-			showProtocolEditor = false;
-			return;
-		}
-		if (!ensurePlanForEditor()) return;
-		showProtocolEditor = true;
-	}
-
-	function handleCreateProtocolTemplate() {
-		if (!ensurePlanForEditor()) return;
-		const current = workoutStore.cyclePlan!;
-		const next = createProtocolTemplate(current);
-		save(next);
-		const created = next.templates[next.templates.length - 1];
-		if (created) selectedTemplateId = created.id;
-	}
-
-	function handleDuplicateProtocolTemplate() {
-		if (!ensurePlanForEditor()) return;
-		const current = workoutStore.cyclePlan!;
-		const next = duplicateProtocolTemplate(current, activeTemplate.id);
-		save(next);
-		const created = next.templates[next.templates.length - 1];
-		if (created) selectedTemplateId = created.id;
-	}
-
-	function handleResetProtocolTemplate() {
-		if (!ensurePlanForEditor() || !activeTemplateIsBundled) return;
-		if (!confirm('Сбросить шаблон к значениям по умолчанию?')) return;
-		save(resetProtocolTemplate(workoutStore.cyclePlan!, activeTemplate.id));
-	}
-
-	function handleRemoveProtocolTemplate() {
-		if (!ensurePlanForEditor() || !activeTemplateIsCustom) return;
-		if (!confirm('Удалить этот шаблон?')) return;
-		const next = removeProtocolTemplate(workoutStore.cyclePlan!, activeTemplate.id);
-		save(next);
-		selectedTemplateId = next.templates[0]?.id ?? DEFAULT_PROTOCOL_TEMPLATE.id;
-	}
-
-	function handleAddProtocolPhase() {
-		if (!ensurePlanForEditor()) return;
-		save(addProtocolPhase(workoutStore.cyclePlan!, activeTemplate.id));
-	}
-
-	function handleRemoveProtocolPhase(index: number) {
-		if (!ensurePlanForEditor()) return;
-		save(removeProtocolPhase(workoutStore.cyclePlan!, activeTemplate.id, index));
-	}
-
-	function handleTemplateMeta(field: 'name' | 'description', value: string) {
-		if (!ensurePlanForEditor()) return;
-		save(updateTemplate(workoutStore.cyclePlan!, { ...activeTemplate, [field]: value }));
 	}
 
 	function ensurePlanForConstructor(): boolean {
@@ -769,23 +684,6 @@
 	function mesoExercisesAvailableToAdd(meso: EnrichedMesocycle): string[] {
 		const inMeso = new Set(Object.keys(meso.anchorInfo));
 		return catalogStrengthExercises.filter((name) => !inMeso.has(name));
-	}
-
-	function handlePhaseChange(
-		index: number,
-		field: 'label' | 'intensityPct' | 'microFrom' | 'microTo',
-		value: string
-	) {
-		if (!ensurePlanForEditor()) return;
-		const current = workoutStore.cyclePlan!;
-		const phases = activeTemplate.phases.map((phase, i) => {
-			if (i !== index) return phase;
-			if (field === 'label') return { ...phase, label: value };
-			const num = Number(value.replace(',', '.'));
-			if (!Number.isFinite(num)) return phase;
-			return { ...phase, [field]: num };
-		});
-		save(updateTemplate(current, { ...activeTemplate, phases }));
 	}
 
 	function shortProtocolName(name: string): string {
@@ -1240,21 +1138,14 @@
 		<div class="eyebrow">Архитектура программы</div>
 		<h1>Планирование</h1>
 		<p>
-			Собирайте макроциклы из последовательных блоков, назначайте протоколы и контролируйте
-			прогресс каждого микроцикла.
+			Собирайте макроциклы из последовательных блоков, назначайте методы упражнениям и контролируйте
+			прогресс каждого микроцикла. Шаблоны методов — в разделе
+			<a href="{base}/protocols">Протоколы</a>.
 		</p>
 	</div>
 	<div class="head-actions">
 		<button type="button" class="btn primary" onclick={openMacroConstructor}>Создать макроцикл</button>
 		<button type="button" class="btn" onclick={() => openMesoConstructor()}>Добавить мезоцикл</button>
-		<button
-			type="button"
-			class="btn"
-			class:active={showProtocolEditor}
-			onclick={toggleProtocolEditor}
-		>
-			Протоколы
-		</button>
 		{#if !usingManual}
 			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
 		{:else}
@@ -1300,19 +1191,9 @@
 			<div class="protocol-catalog">
 				<h3>Методы силовой подготовки (протоколы)</h3>
 				<p class="muted theses-note">
-					Назначаются каждому упражнению во вкладке «Настройки» мезоцикла. Стартовые %1ПМ и описания
-					можно править в «Шаблоны протокола».
+					Назначаются каждому упражнению во вкладке «Настройки» мезоцикла. Шаблоны %1ПМ редактируются
+					в разделе <a href="{base}/protocols">Протоколы</a>.
 				</p>
-				<ul class="protocol-catalog-list">
-					{#each protocolTemplates as template (template.id)}
-						<li>
-							<strong>{template.name}</strong>
-							{#if template.description}
-								<span class="muted"> — {template.description}</span>
-							{/if}
-						</li>
-					{/each}
-				</ul>
 			</div>
 		{/if}
 
@@ -1506,172 +1387,6 @@
 				{/each}
 			</div>
 		{/if}
-	</section>
-{/if}
-
-{#if showProtocolEditor}
-	<section class="card protocol-editor">
-		<div class="protocol-editor-head">
-			<div>
-				<h3>Шаблоны протокола (% от 1ПМ)</h3>
-				<p class="muted">
-					Методы силовой подготовки — назначаются каждому упражнению отдельно во вкладке «Настройки».
-				</p>
-			</div>
-			<button type="button" class="btn ghost-link" onclick={() => (showProtocolEditor = false)}>
-				Закрыть
-			</button>
-		</div>
-
-		<div class="protocol-editor-toolbar">
-			<label>
-				<span>Редактировать</span>
-				<select bind:value={selectedTemplateId} class="field-select">
-					{#each editorPlan.templates as tpl (tpl.id)}
-						<option value={tpl.id}>{tpl.name}</option>
-					{/each}
-				</select>
-			</label>
-			<button type="button" class="btn small" onclick={handleCreateProtocolTemplate}>+ Новый</button>
-			<button type="button" class="btn small" onclick={handleDuplicateProtocolTemplate}>Дублировать</button>
-			{#if activeTemplateIsBundled}
-				<button type="button" class="btn small" onclick={handleResetProtocolTemplate}>Сбросить</button>
-			{/if}
-			{#if activeTemplateIsCustom}
-				<button type="button" class="btn small danger" onclick={handleRemoveProtocolTemplate}>
-					Удалить
-				</button>
-			{/if}
-		</div>
-
-		<div class="protocol-meta">
-			<label>
-				<span>Название</span>
-				<input
-					class="field-input"
-					value={activeTemplate.name}
-					disabled={activeTemplateIsBundled}
-					onchange={(e) => handleTemplateMeta('name', e.currentTarget.value)}
-				/>
-			</label>
-			<label class="protocol-description-field">
-				<span>Описание</span>
-				<textarea
-					class="field-input"
-					rows="2"
-					value={activeTemplate.description ?? ''}
-					onchange={(e) => handleTemplateMeta('description', e.currentTarget.value)}
-				></textarea>
-			</label>
-		</div>
-		{#if activeProtocolGuide}
-			<div class="protocol-guide-inline">
-				{#if activeProtocolGuide.example}
-					<p><strong>Пример:</strong> {activeProtocolGuide.example}</p>
-				{/if}
-				{#if activeProtocolGuide.recommendations?.length}
-					<ul class="protocol-guide-inline-list">
-						{#each activeProtocolGuide.recommendations as item}
-							<li>{item}</li>
-						{/each}
-					</ul>
-				{/if}
-				{#if activeProtocolGuide.weeks?.length}
-					<div class="intensity-matrix-wrap">
-						<table class="intensity-matrix protocol-week-table">
-							<thead>
-								<tr>
-									<th></th>
-									{#each activeProtocolGuide.weeks as week (week.id)}
-										<th>{week.weekLabel}</th>
-									{/each}
-								</tr>
-							</thead>
-							<tbody>
-								{#if activeProtocolGuide.weeks.some((week) => week.loadLabel)}
-									<tr>
-										<th scope="row">Нагрузка</th>
-										{#each activeProtocolGuide.weeks as week (week.id)}
-											<td>{week.loadLabel}</td>
-										{/each}
-									</tr>
-								{/if}
-								<tr>
-									<th scope="row">{activeProtocolGuide.primaryRowLabel ?? 'Основное упражнение'}</th>
-									{#each activeProtocolGuide.weeks as week (week.id)}
-										<td>{week.prescription}</td>
-									{/each}
-								</tr>
-								{#if activeProtocolGuide.weeks.some((week) => week.accessoryPrescription != null)}
-									<tr>
-										<th scope="row">{activeProtocolGuide.accessoryRowLabel ?? 'Дополнительное упражнение'}</th>
-										{#each activeProtocolGuide.weeks as week (week.id)}
-											<td>{week.accessoryPrescription ?? '—'}</td>
-										{/each}
-									</tr>
-								{/if}
-								{#if activeProtocolGuide.weeks.some((week) => week.goal)}
-									<tr>
-										<th scope="row">Цель</th>
-										{#each activeProtocolGuide.weeks as week (week.id)}
-											<td>{week.goal ?? '—'}</td>
-										{/each}
-									</tr>
-								{/if}
-							</tbody>
-						</table>
-					</div>
-				{/if}
-			</div>
-		{/if}
-		<div class="phase-grid">
-			{#each activeTemplate.phases as phase, index}
-				<div class="phase-card">
-					<input
-						class="field-input"
-						type="text"
-						value={phase.label}
-						onchange={(e) => handlePhaseChange(index, 'label', e.currentTarget.value)}
-					/>
-					<label>
-						<span>%1ПМ</span>
-						<input
-							class="field-input"
-							type="number"
-							step="2.5"
-							value={phase.intensityPct}
-							onchange={(e) => handlePhaseChange(index, 'intensityPct', e.currentTarget.value)}
-						/>
-					</label>
-					<label>
-						<span>μ</span>
-						<input
-							class="field-input narrow"
-							type="number"
-							value={phase.microFrom}
-							onchange={(e) => handlePhaseChange(index, 'microFrom', e.currentTarget.value)}
-						/>
-						<span>—</span>
-						<input
-							class="field-input narrow"
-							type="number"
-							value={phase.microTo}
-							onchange={(e) => handlePhaseChange(index, 'microTo', e.currentTarget.value)}
-						/>
-					</label>
-					{#if activeTemplate.phases.length > 1}
-						<button
-							type="button"
-							class="btn small danger phase-remove"
-							onclick={() => handleRemoveProtocolPhase(index)}
-						>
-							×
-						</button>
-					{/if}
-				</div>
-			{/each}
-		</div>
-		<button type="button" class="btn small" onclick={handleAddProtocolPhase}>+ Фаза (μ)</button>
 	</section>
 {/if}
 
@@ -2298,38 +2013,6 @@
 
 	.protocol-catalog h3 {
 		margin: 0 0 0.35rem;
-	}
-
-	.protocol-catalog-list {
-		margin: 0.75rem 0 0;
-		padding-left: 1.2rem;
-		display: grid;
-		gap: 0.45rem;
-	}
-
-	.protocol-catalog-list li {
-		line-height: 1.35;
-	}
-
-	.protocol-guide-inline {
-		margin-top: 0.85rem;
-		padding: 0.85rem 0;
-		border-radius: 0;
-		border: none;
-		background: transparent;
-		font-size: 0.86rem;
-		line-height: 1.4;
-	}
-
-	.protocol-guide-inline p {
-		margin: 0 0 0.65rem;
-	}
-
-	.protocol-guide-inline-list {
-		margin: 0 0 0.75rem;
-		padding-left: 1.15rem;
-		display: grid;
-		gap: 0.3rem;
 	}
 
 	.protocol-guide-example {
@@ -3259,85 +2942,6 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-	}
-
-	.protocol-editor-head {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 1rem;
-		margin-bottom: 0.75rem;
-	}
-
-	.protocol-editor-head h3 {
-		margin: 0 0 0.25rem;
-	}
-
-	.protocol-editor-toolbar {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		align-items: flex-end;
-		margin-bottom: 0.75rem;
-	}
-
-	.protocol-editor-toolbar label {
-		display: grid;
-		gap: 0.2rem;
-		font-size: 0.78rem;
-		color: var(--muted);
-		min-width: 220px;
-	}
-
-	.protocol-meta {
-		display: grid;
-		gap: 0.65rem;
-		margin-bottom: 0.75rem;
-	}
-
-	.protocol-meta label {
-		display: grid;
-		gap: 0.25rem;
-		font-size: 0.78rem;
-		color: var(--muted);
-	}
-
-	.protocol-description-field textarea {
-		resize: vertical;
-		min-height: 3rem;
-	}
-
-	.phase-card {
-		position: relative;
-		padding: 0.65rem 0;
-		border-radius: 0;
-		border: none;
-		border-bottom: 1px solid var(--line);
-		background: transparent;
-		display: grid;
-		gap: 0.45rem;
-	}
-
-	.phase-remove {
-		justify-self: end;
-		min-width: 2rem;
-		padding-inline: 0.5rem;
-	}
-
-	.phase-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-		gap: 0.5rem;
-		margin-top: 0.75rem;
-	}
-
-	.phase-card label {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.35rem;
-		font-size: 0.72rem;
-		color: var(--muted);
 	}
 
 	@media (max-width: 720px) {
