@@ -99,6 +99,7 @@
 	let constructorSessionB = $state<string[]>([]);
 	let constructorData = $state<Map<string, ConstructorRow>>(new Map());
 	let mesoAddExercisePick = $state('');
+	let constructorError = $state('');
 
 	const view = $derived(workoutStore.view);
 	const keyMaps = $derived(view.keyMaps);
@@ -182,10 +183,12 @@
 		macroBlockInputs.some((block) => block.exercises.length > 0 && block.microCount >= 1)
 	);
 
+	const constructorPlan = $derived(workoutStore.cyclePlan ?? view.cyclePlanForCalc);
+
 	const constructorPreview = $derived.by(() => {
-		if (!plan || !showMesoConstructor || constructorExercises.length === 0) return [];
+		if (!showMesoConstructor || constructorExercises.length === 0) return [];
 		return previewMesoPlan(
-			plan,
+			constructorPlan,
 			{
 				label: constructorLabel,
 				startDate: constructorStart || defaultMesoStartDate(view.entries),
@@ -239,8 +242,8 @@
 	});
 
 	const mesoPreviewCoverage = $derived.by(() => {
-		if (!plan || constructorExercises.length === 0) return null;
-		const maxPhase = maxProtocolMicroTo(plan, constructorExercises, constructorProtocolId);
+		if (constructorExercises.length === 0) return null;
+		const maxPhase = maxProtocolMicroTo(constructorPlan, constructorExercises, constructorProtocolId);
 		const micro = microCoverageParts(constructorMicroCount, maxPhase);
 		const sessions = sessionCoverageFromExercises(constructorExercises);
 		return {
@@ -515,10 +518,18 @@
 
 	function ensurePlanForConstructor(): boolean {
 		if (workoutStore.cyclePlan) return true;
-		importCyclePlanFromAuto();
-		if (workoutStore.cyclePlan) return true;
-		saveCyclePlanState(emptyCyclePlan());
-		return Boolean(workoutStore.cyclePlan);
+		try {
+			importCyclePlanFromAuto();
+			if (workoutStore.cyclePlan) return true;
+			saveCyclePlanState(emptyCyclePlan());
+			return Boolean(workoutStore.cyclePlan);
+		} catch (error) {
+			constructorError =
+				error instanceof Error
+					? error.message
+					: 'Не удалось подготовить план для конструктора.';
+			return false;
+		}
 	}
 
 	function initMacroBlocks() {
@@ -633,7 +644,11 @@
 	}
 
 	function openMesoConstructor(macroId: string | null = null) {
-		if (!ensurePlanForConstructor()) return;
+		constructorError = '';
+		if (!ensurePlanForConstructor()) {
+			workoutStore.patchSync({ error: constructorError });
+			return;
+		}
 		mesoConstructorMacroId = macroId;
 		const scopeMesos = macroId
 			? (plan?.macrocycles.find((macro) => macro.id === macroId)?.mesoIds.length ?? 0)
@@ -651,8 +666,17 @@
 	}
 
 	function confirmMesoConstructor() {
+		constructorError = '';
 		const currentPlan = workoutStore.cyclePlan;
-		if (!currentPlan || constructorExercises.length === 0) return;
+		if (!currentPlan) {
+			constructorError = 'План не загружен. Обновите страницу или нажмите «Импорт из авто».';
+			return;
+		}
+		if (constructorExercises.length === 0) {
+			constructorError =
+				'Укажите якорь 1ПМ (больше 0) хотя бы для одного упражнения в тренировке A или B.';
+			return;
+		}
 		const next = createMesocycleFromConstructor(
 			currentPlan,
 			{
@@ -1289,7 +1313,7 @@
 	</section>
 {/if}
 
-{#if showMesoConstructor && plan}
+{#if showMesoConstructor}
 	<div class="constructor-backdrop" role="presentation" onclick={closeMesoConstructor}></div>
 	<section class="card meso-constructor" aria-labelledby="meso-constructor-title">
 		<div class="constructor-head">
@@ -1407,7 +1431,7 @@
 														onchange={(e) =>
 															patchConstructorRow(exercise, { protocolId: e.currentTarget.value })}
 													>
-														{#each plan.templates as tpl (tpl.id)}
+														{#each protocolTemplates as tpl (tpl.id)}
 															<option value={tpl.id}>{shortProtocolName(tpl.name)}</option>
 														{/each}
 													</select>
@@ -1442,7 +1466,13 @@
 			{/each}
 		</div>
 		{#if constructorExercises.length === 0}
-			<p class="muted constructor-empty">Добавьте упражнения в тренировку A и/или B.</p>
+			<p class="constructor-empty warn">
+				Добавьте упражнения в тренировку A и/или B и укажите якорь 1ПМ (кг) — без него кнопка
+				создания не сработает.
+			</p>
+		{/if}
+		{#if constructorError}
+			<p class="constructor-empty warn" role="alert">{constructorError}</p>
 		{/if}
 
 		{#if constructorPreview.length > 0}
@@ -1544,12 +1574,7 @@
 
 		<div class="constructor-actions">
 			<button type="button" class="btn" onclick={closeMesoConstructor}>Отмена</button>
-			<button
-				type="button"
-				class="btn primary"
-				disabled={constructorExercises.length === 0}
-				onclick={confirmMesoConstructor}
-			>
+			<button type="button" class="btn primary" onclick={confirmMesoConstructor}>
 				Создать мезоцикл
 			</button>
 		</div>
@@ -2760,6 +2785,11 @@
 
 	.constructor-empty {
 		margin: 0 0 1rem;
+	}
+
+	.constructor-empty.warn {
+		color: var(--danger, #c0392b);
+		font-size: 0.85rem;
 	}
 
 	.constructor-hint {

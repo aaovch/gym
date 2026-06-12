@@ -7,6 +7,7 @@ import { toExerciseId, type ExerciseKeyMaps } from './exercise-keys';
 import { defaultMicroSessions } from './micro-plan';
 import type { WorkoutTemplate } from './microcycle';
 import {
+	best1rmAllTime,
 	DEFAULT_PROTOCOL_TEMPLATE,
 	pickMesoExercises,
 	resolveMesoAnchor1rm,
@@ -120,6 +121,10 @@ export function resolveExerciseAnchor(
 					? 'из истории'
 					: 'расчёт';
 		return { value: anchor.value, source };
+	}
+	const allTime = best1rmAllTime(entries, exercise);
+	if (allTime) {
+		return { value: allTime.value, source: 'лучший результат' };
 	}
 	return { value: null, source: 'нет данных' };
 }
