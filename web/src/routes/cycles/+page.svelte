@@ -66,16 +66,18 @@
 		anchor1rm: number;
 		manual: boolean;
 		anchorSource: string;
-		sessionA: boolean;
-		sessionB: boolean;
 	};
+
+	type SessionSlot = 0 | 1;
 
 	type MacroBlockDraft = {
 		id: string;
 		label: string;
 		microCount: number;
 		defaultProtocolId: string;
-		selection: Map<string, ConstructorRow>;
+		sessionA: string[];
+		sessionB: string[];
+		data: Map<string, ConstructorRow>;
 	};
 
 	let planningTab = $state<PlanningTab>('program');
@@ -93,9 +95,9 @@
 	let constructorStart = $state('');
 	let constructorMicroCount = $state(4);
 	let constructorProtocolId = $state('submax-effort');
-	let constructorSelection = $state<Map<string, ConstructorRow>>(new Map());
-	let constructorQuery = $state('');
-	let constructorAddPick = $state('');
+	let constructorSessionA = $state<string[]>([]);
+	let constructorSessionB = $state<string[]>([]);
+	let constructorData = $state<Map<string, ConstructorRow>>(new Map());
 	let mesoAddExercisePick = $state('');
 
 	const view = $derived(workoutStore.view);
@@ -168,30 +170,8 @@
 			.sort((a, b) => a.localeCompare(b, 'ru'))
 	);
 
-	const constructorExerciseList = $derived(enabledExerciseList(constructorSelection));
-
-	const filteredConstructorExercises = $derived(
-		constructorExerciseList.filter((exercise) => {
-			const q = constructorQuery.trim().toLowerCase();
-			if (!q) return true;
-			return exercise.toLowerCase().includes(q);
-		})
-	);
-
-	const constructorAddOptions = $derived(
-		catalogStrengthExercises.filter((name) => !constructorSelection.has(name))
-	);
-
 	const constructorExercises = $derived.by((): MesoExerciseSetup[] =>
-		[...constructorSelection.entries()]
-			.filter(([, row]) => row.enabled && row.anchor1rm > 0)
-			.map(([exercise, row]) => ({
-				exercise,
-				protocolId: row.protocolId,
-				anchor1rm: row.anchor1rm,
-				manual: row.manual,
-				sessions: sessionsFromFlags(row.sessionA, row.sessionB)
-			}))
+		exercisesFromSplit(constructorSessionA, constructorSessionB, constructorData)
 	);
 
 	const macroBlockInputs = $derived.by((): MacroBlockInput[] =>
@@ -199,7 +179,7 @@
 			label: block.label,
 			microCount: block.microCount,
 			defaultProtocolId: block.defaultProtocolId,
-			exercises: exercisesFromSelection(block.selection)
+			exercises: exercisesFromSplit(block.sessionA, block.sessionB, block.data)
 		}))
 	);
 
@@ -249,10 +229,7 @@
 				block.defaultProtocolId ?? 'submax-effort'
 			);
 			const micro = microCoverageParts(block.microCount, maxPhase);
-			const sessions = sessionCoverageParts(
-				block.exercises.map((row) => row.exercise),
-				workoutTemplates
-			);
+			const sessions = sessionCoverageFromExercises(block.exercises);
 			return {
 				index,
 				block,
@@ -285,7 +262,6 @@
 		seed?: Partial<ConstructorRow> & { defaultProtocolId?: string; defaultEnabled?: boolean }
 	): ConstructorRow {
 		const resolved = resolveExerciseAnchor(view.entries, exercise, start);
-		const sessionDefaults = defaultExerciseSessions(exercise, workoutTemplates);
 		return {
 			enabled: seed?.enabled ?? seed?.defaultEnabled ?? false,
 			protocolId: seed?.protocolId ?? seed?.defaultProtocolId ?? 'submax-effort',
@@ -293,43 +269,69 @@
 				? (seed.anchor1rm ?? 0)
 				: (resolved.value ?? seed?.anchor1rm ?? 0),
 			manual: seed?.manual ?? false,
-			anchorSource: seed?.manual ? 'вручную' : resolved.source,
-			sessionA: seed?.sessionA ?? sessionDefaults.sessionA,
-			sessionB: seed?.sessionB ?? sessionDefaults.sessionB
+			anchorSource: seed?.manual ? 'вручную' : resolved.source
 		};
 	}
 
-	function exercisesFromSelection(selection: Map<string, ConstructorRow>): MesoExerciseSetup[] {
-		return [...selection.entries()]
-			.filter(([, row]) => row.enabled && row.anchor1rm > 0)
-			.map(([exercise, row]) => ({
-				exercise,
-				protocolId: row.protocolId,
-				anchor1rm: row.anchor1rm,
-				manual: row.manual,
-				sessions: sessionsFromFlags(row.sessionA, row.sessionB)
-			}));
+	function exercisesFromSplit(
+		sessionA: string[],
+		sessionB: string[],
+		data: Map<string, ConstructorRow>
+	): MesoExerciseSetup[] {
+		const names = new Set([...sessionA, ...sessionB]);
+		return [...names]
+			.filter((exercise) => {
+				const row = data.get(exercise);
+				return row?.enabled && row.anchor1rm > 0;
+			})
+			.map((exercise) => {
+				const row = data.get(exercise)!;
+				return {
+					exercise,
+					protocolId: row.protocolId,
+					anchor1rm: row.anchor1rm,
+					manual: row.manual,
+					sessions: sessionsFromFlags(
+						sessionA.includes(exercise),
+						sessionB.includes(exercise)
+					)
+				};
+			});
 	}
 
-	function createBlockSelection(
+	function sessionExerciseList(
+		sessionList: string[],
+		data: Map<string, ConstructorRow>
+	): string[] {
+		return sessionList
+			.filter((exercise) => data.get(exercise)?.enabled)
+			.sort((a, b) => a.localeCompare(b, 'ru'));
+	}
+
+	function createBlockSessionSplit(
 		defaultProtocolId: string,
-		seed?: Map<string, ConstructorRow>
-	): Map<string, ConstructorRow> {
-		const start = macroStart || defaultMacroStartDate(view.entries);
+		seed?: Pick<MacroBlockDraft, 'sessionA' | 'sessionB' | 'data'>,
+		startDate?: string
+	): Pick<MacroBlockDraft, 'sessionA' | 'sessionB' | 'data'> {
+		const start = startDate ?? (macroStart || defaultMacroStartDate(view.entries));
 		const templateExercises = new Set(workoutTemplates.flatMap((item) => item.exercises));
-		const next = new Map<string, ConstructorRow>();
+		const sessionA: string[] = [];
+		const sessionB: string[] = [];
+		const data = new Map<string, ConstructorRow>();
 		const exerciseNames = new Set<string>();
 
 		if (seed) {
-			for (const [exercise, row] of seed) {
+			for (const exercise of seed.sessionA) exerciseNames.add(exercise);
+			for (const exercise of seed.sessionB) exerciseNames.add(exercise);
+			for (const [exercise, row] of seed.data) {
 				if (row.enabled) exerciseNames.add(exercise);
 			}
 		}
 		for (const exercise of templateExercises) exerciseNames.add(exercise);
 
 		for (const exercise of exerciseNames) {
-			const seedRow = seed?.get(exercise);
-			next.set(
+			const seedRow = seed?.data.get(exercise);
+			data.set(
 				exercise,
 				makeConstructorRow(exercise, start, {
 					...seedRow,
@@ -338,123 +340,88 @@
 					defaultEnabled: true
 				})
 			);
+			if (seed) {
+				if (seed.sessionA.includes(exercise)) sessionA.push(exercise);
+				if (seed.sessionB.includes(exercise)) sessionB.push(exercise);
+			} else {
+				const defaults = defaultExerciseSessions(exercise, workoutTemplates);
+				if (defaults.sessionA) sessionA.push(exercise);
+				if (defaults.sessionB) sessionB.push(exercise);
+			}
 		}
+
+		const sortRu = (a: string, b: string) => a.localeCompare(b, 'ru');
+		return {
+			sessionA: sessionA.sort(sortRu),
+			sessionB: sessionB.sort(sortRu),
+			data
+		};
+	}
+
+	function ensureExerciseData(
+		data: Map<string, ConstructorRow>,
+		exercise: string,
+		start: string,
+		defaultProtocolId: string
+	): Map<string, ConstructorRow> {
+		const next = new Map(data);
+		if (!next.has(exercise)) {
+			next.set(
+				exercise,
+				makeConstructorRow(exercise, start, {
+					enabled: true,
+					defaultProtocolId
+				})
+			);
+			return next;
+		}
+		const row = next.get(exercise)!;
+		next.set(exercise, { ...row, enabled: true });
 		return next;
 	}
 
-	function enabledExerciseList(selection: Map<string, ConstructorRow>): string[] {
-		return [...selection.entries()]
-			.filter(([, row]) => row.enabled)
-			.map(([exercise]) => exercise)
-			.sort((a, b) => a.localeCompare(b, 'ru'));
-	}
-
-	function blockAddOptions(selection: Map<string, ConstructorRow>): string[] {
-		return catalogStrengthExercises.filter((name) => !selection.has(name));
-	}
-
-	function addExerciseToConstructor(exerciseName: string) {
-		const name = exerciseName.trim();
-		if (!name || constructorSelection.has(name)) return;
-		const start = constructorStart || defaultMesoStartDate(view.entries);
-		const next = new Map(constructorSelection);
-		next.set(
-			name,
-			makeConstructorRow(name, start, {
-				enabled: true,
-				defaultProtocolId: constructorProtocolId
-			})
-		);
-		constructorSelection = next;
-		constructorAddPick = '';
-	}
-
-	function removeExerciseFromConstructor(exercise: string) {
-		const next = new Map(constructorSelection);
-		next.delete(exercise);
-		constructorSelection = next;
-	}
-
-	function removeExerciseFromMacroBlock(blockId: string, exercise: string) {
-		macroBlocks = macroBlocks.map((block) => {
-			if (block.id !== blockId) return block;
-			const next = new Map(block.selection);
-			next.delete(exercise);
-			return { ...block, selection: next };
-		});
-	}
-
-	function addExerciseToMacroBlock(blockId: string, exerciseName: string) {
+	function addExerciseToMesoSession(session: SessionSlot, exerciseName: string) {
 		const name = exerciseName.trim();
 		if (!name) return;
-		const start = macroStart || defaultMacroStartDate(view.entries);
-		macroBlocks = macroBlocks.map((block) => {
-			if (block.id !== blockId || block.selection.has(name)) return block;
-			const next = new Map(block.selection);
-			next.set(
-				name,
-				makeConstructorRow(name, start, {
-					enabled: true,
-					defaultProtocolId: block.defaultProtocolId
-				})
-			);
-			return { ...block, selection: next };
-		});
+		const list = session === 0 ? constructorSessionA : constructorSessionB;
+		if (list.includes(name)) return;
+		const start = constructorStart || defaultMesoStartDate(view.entries);
+		constructorData = ensureExerciseData(constructorData, name, start, constructorProtocolId);
+		if (session === 0) {
+			constructorSessionA = [...list, name].sort((a, b) => a.localeCompare(b, 'ru'));
+		} else {
+			constructorSessionB = [...list, name].sort((a, b) => a.localeCompare(b, 'ru'));
+		}
 	}
 
-	function patchMacroBlockRow(
-		blockId: string,
-		exercise: string,
-		patch: Partial<ConstructorRow>
-	) {
-		macroBlocks = macroBlocks.map((block) => {
-			if (block.id !== blockId) return block;
-			const next = new Map(block.selection);
-			const current = next.get(exercise);
-			if (!current) return block;
-			next.set(exercise, { ...current, ...patch });
-			return { ...block, selection: next };
-		});
+	function removeExerciseFromMesoSession(session: SessionSlot, exercise: string) {
+		if (session === 0) {
+			constructorSessionA = constructorSessionA.filter((item) => item !== exercise);
+		} else {
+			constructorSessionB = constructorSessionB.filter((item) => item !== exercise);
+		}
+		if (!constructorSessionA.includes(exercise) && !constructorSessionB.includes(exercise)) {
+			const next = new Map(constructorData);
+			next.delete(exercise);
+			constructorData = next;
+		}
 	}
 
-	function refreshMacroAnchors(keepManual = true) {
-		const start = macroStart || defaultMacroStartDate(view.entries);
-		macroBlocks = macroBlocks.map((block) => {
-			const next = new Map(block.selection);
-			for (const [exercise, row] of next) {
-				if (keepManual && row.manual) continue;
-				const resolved = resolveExerciseAnchor(view.entries, exercise, start);
-				next.set(exercise, {
-					...row,
-					anchor1rm: resolved.value ?? row.anchor1rm,
-					anchorSource: resolved.source,
-					manual: false
-				});
-			}
-			return { ...block, selection: next };
-		});
-	}
-
-	function toggleConstructorSession(exercise: string, session: 'a' | 'b') {
-		const row = constructorSelection.get(exercise);
-		if (!row) return;
-		const sessionA = session === 'a' ? !row.sessionA : row.sessionA;
-		const sessionB = session === 'b' ? !row.sessionB : row.sessionB;
-		if (!sessionA && !sessionB) return;
-		patchConstructorRow(exercise, { sessionA, sessionB });
+	function copyMesoExerciseToOtherSession(from: SessionSlot, exercise: string) {
+		addExerciseToMesoSession(from === 0 ? 1 : 0, exercise);
 	}
 
 	function patchConstructorRow(exercise: string, patch: Partial<ConstructorRow>) {
-		const next = new Map(constructorSelection);
+		const next = new Map(constructorData);
 		const current = next.get(exercise);
 		if (!current) return;
 		next.set(exercise, { ...current, ...patch });
-		constructorSelection = next;
+		constructorData = next;
 	}
 
 	function refreshConstructorAnchors(keepManual = true) {
 		const start = constructorStart || defaultMesoStartDate(view.entries);
-		const next = new Map(constructorSelection);
+		const next = new Map(constructorData);
 		for (const [exercise, row] of next) {
 			if (keepManual && row.manual) continue;
 			const resolved = resolveExerciseAnchor(view.entries, exercise, start);
@@ -465,26 +432,90 @@
 				manual: false
 			});
 		}
-		constructorSelection = next;
+		constructorData = next;
 	}
 
-	function initConstructorSelection() {
+	function initConstructorSessions() {
 		const start = constructorStart || defaultMesoStartDate(view.entries);
-		const templateExercises = new Set(workoutTemplates.flatMap((item) => item.exercises));
-		const next = new Map<string, ConstructorRow>();
+		const split = createBlockSessionSplit(constructorProtocolId, undefined, start);
+		constructorSessionA = split.sessionA;
+		constructorSessionB = split.sessionB;
+		constructorData = split.data;
+	}
 
-		for (const exercise of templateExercises) {
-			next.set(
-				exercise,
-				makeConstructorRow(exercise, start, {
-					enabled: true,
-					defaultProtocolId: constructorProtocolId
-				})
-			);
-		}
-		constructorSelection = next;
-		constructorQuery = '';
-		constructorAddPick = '';
+	function addExerciseToMacroSession(blockId: string, session: SessionSlot, exerciseName: string) {
+		const name = exerciseName.trim();
+		if (!name) return;
+		const start = macroStart || defaultMacroStartDate(view.entries);
+		macroBlocks = macroBlocks.map((block) => {
+			if (block.id !== blockId) return block;
+			const list = session === 0 ? block.sessionA : block.sessionB;
+			if (list.includes(name)) return block;
+			return {
+				...block,
+				data: ensureExerciseData(block.data, name, start, block.defaultProtocolId),
+				sessionA:
+					session === 0
+						? [...block.sessionA, name].sort((a, b) => a.localeCompare(b, 'ru'))
+						: block.sessionA,
+				sessionB:
+					session === 1
+						? [...block.sessionB, name].sort((a, b) => a.localeCompare(b, 'ru'))
+						: block.sessionB
+			};
+		});
+	}
+
+	function removeExerciseFromMacroSession(blockId: string, session: SessionSlot, exercise: string) {
+		macroBlocks = macroBlocks.map((block) => {
+			if (block.id !== blockId) return block;
+			const sessionA = session === 0 ? block.sessionA.filter((item) => item !== exercise) : block.sessionA;
+			const sessionB = session === 1 ? block.sessionB.filter((item) => item !== exercise) : block.sessionB;
+			let data = block.data;
+			if (!sessionA.includes(exercise) && !sessionB.includes(exercise)) {
+				const next = new Map(block.data);
+				next.delete(exercise);
+				data = next;
+			}
+			return { ...block, sessionA, sessionB, data };
+		});
+	}
+
+	function copyMacroExerciseToOtherSession(blockId: string, from: SessionSlot, exercise: string) {
+		addExerciseToMacroSession(blockId, from === 0 ? 1 : 0, exercise);
+	}
+
+	function patchMacroBlockRow(
+		blockId: string,
+		exercise: string,
+		patch: Partial<ConstructorRow>
+	) {
+		macroBlocks = macroBlocks.map((block) => {
+			if (block.id !== blockId) return block;
+			const next = new Map(block.data);
+			const current = next.get(exercise);
+			if (!current) return block;
+			next.set(exercise, { ...current, ...patch });
+			return { ...block, data: next };
+		});
+	}
+
+	function refreshMacroAnchors(keepManual = true) {
+		const start = macroStart || defaultMacroStartDate(view.entries);
+		macroBlocks = macroBlocks.map((block) => {
+			const next = new Map(block.data);
+			for (const [exercise, row] of next) {
+				if (keepManual && row.manual) continue;
+				const resolved = resolveExerciseAnchor(view.entries, exercise, start);
+				next.set(exercise, {
+					...row,
+					anchor1rm: resolved.value ?? row.anchor1rm,
+					anchorSource: resolved.source,
+					manual: false
+				});
+			}
+			return { ...block, data: next };
+		});
 	}
 
 	function ensurePlanForConstructor(): boolean {
@@ -497,21 +528,21 @@
 
 	function initMacroBlocks() {
 		const block1Id = crypto.randomUUID();
-		const block1Selection = createBlockSelection('submax-effort');
+		const block1Split = createBlockSessionSplit('submax-effort');
 		macroBlocks = [
 			{
 				id: block1Id,
 				label: 'Блок 1 — накопление',
 				microCount: 4,
 				defaultProtocolId: 'submax-effort',
-				selection: block1Selection
+				...block1Split
 			},
 			{
 				id: crypto.randomUUID(),
 				label: 'Блок 2 — интенсификация',
 				microCount: 4,
 				defaultProtocolId: 'max-effort',
-				selection: createBlockSelection('max-effort', block1Selection)
+				...createBlockSessionSplit('max-effort', block1Split)
 			}
 		];
 	}
@@ -527,7 +558,7 @@
 				label: `Блок ${num}`,
 				microCount: last?.microCount ?? 4,
 				defaultProtocolId,
-				selection: createBlockSelection(defaultProtocolId, last?.selection)
+				...createBlockSessionSplit(defaultProtocolId, last)
 			}
 		];
 	}
@@ -545,16 +576,16 @@
 				patch.defaultProtocolId &&
 				patch.defaultProtocolId !== block.defaultProtocolId
 			) {
-				const next = new Map(block.selection);
+				const next = new Map(block.data);
 				for (const [exercise, row] of next) {
 					if (row.protocolId === block.defaultProtocolId) {
 						next.set(exercise, { ...row, protocolId: patch.defaultProtocolId });
 					}
 				}
-				updated.selection = next;
+				updated.data = next;
 			}
 			if (patch.defaultProtocolId && plan) {
-				const exercises = exercisesFromSelection(updated.selection);
+				const exercises = exercisesFromSplit(updated.sessionA, updated.sessionB, updated.data);
 				if (exercises.length > 0) {
 					updated.microCount = suggestedMicroCount(plan.templates, exercises);
 				}
@@ -615,7 +646,7 @@
 		constructorLabel = `Блок ${scopeMesos + 1}`;
 		constructorStart = defaultMesoStartDate(view.entries);
 		constructorMicroCount = 4;
-		initConstructorSelection();
+		initConstructorSessions();
 		showMesoConstructor = true;
 	}
 
@@ -886,33 +917,6 @@
 		};
 	}
 
-	function exerciseInWorkoutSession(
-		exercise: string,
-		sessionIndex: 0 | 1,
-		templates: WorkoutTemplate[]
-	): boolean {
-		const template = templates.find((item) => item.indexInMicro === sessionIndex);
-		if (template && template.exercises.length > 0) {
-			return template.exercises.includes(exercise);
-		}
-		return true;
-	}
-
-	function sessionCoverageParts(exercises: string[], templates: WorkoutTemplate[]) {
-		if (exercises.length === 0) return { worked: '', missed: '' };
-		const worked: string[] = [];
-		const missed: string[] = [];
-		for (const sessionIndex of [0, 1] as const) {
-			const letter = sessionColumnTitle(sessionIndex);
-			const count = exercises.filter((exercise) =>
-				exerciseInWorkoutSession(exercise, sessionIndex, templates)
-			).length;
-			if (count > 0) worked.push(`${letter} (${count})`);
-			else missed.push(letter);
-		}
-		return { worked: worked.join(' · '), missed: missed.join(', ') };
-	}
-
 	function sessionCoverageFromExercises(exercises: MesoExerciseSetup[]) {
 		if (exercises.length === 0) return { worked: '', missed: '' };
 		const worked: string[] = [];
@@ -1008,89 +1012,118 @@
 						{/if}
 					</div>
 
-					<div class="constructor-add-row compact">
-						<select
-							class="field-select"
-							onchange={(e) => {
-								addExerciseToMacroBlock(block.id, e.currentTarget.value);
-								e.currentTarget.value = '';
-							}}
-						>
-							<option value="">+ упражнение</option>
-							{#each blockAddOptions(block.selection) as name (name)}
-								<option value={name}>{name}</option>
-							{/each}
-						</select>
-						<span class="muted block-exercise-count">
-							{exercisesFromSelection(block.selection).length} упр.
-						</span>
+					<div class="constructor-session-panels">
+						{#each [0, 1] as sessionIndex}
+							{@const slot = sessionIndex as SessionSlot}
+							{@const sessionList = slot === 0 ? block.sessionA : block.sessionB}
+							<section
+								class="constructor-session-block"
+								class:session-a={slot === 0}
+								class:session-b={slot === 1}
+							>
+								<div class="constructor-session-head">
+									<h5 class="constructor-session-title">
+										Тренировка {sessionColumnTitle(slot)}
+									</h5>
+									<select
+										class="field-select"
+										onchange={(e) => {
+											addExerciseToMacroSession(block.id, slot, e.currentTarget.value);
+											e.currentTarget.value = '';
+										}}
+									>
+										<option value="">+ упражнение</option>
+										{#each catalogStrengthExercises as name (name)}
+											<option value={name} disabled={sessionList.includes(name)}>{name}</option>
+										{/each}
+									</select>
+								</div>
+								{#if sessionExerciseList(sessionList, block.data).length === 0}
+									<p class="muted constructor-session-empty">Пока пусто</p>
+								{:else}
+									<div class="constructor-table-wrap">
+										<table class="constructor-table slim">
+											<thead>
+												<tr>
+													<th>Упражнение</th>
+													<th>Якорь, кг</th>
+													<th>Метод</th>
+													<th></th>
+												</tr>
+											</thead>
+											<tbody>
+												{#each sessionExerciseList(sessionList, block.data) as exercise (exercise)}
+													{@const row = block.data.get(exercise)}
+													{#if row}
+														<tr>
+															<td>{exercise}</td>
+															<td>
+																<input
+																	class="field-input"
+																	type="number"
+																	step="0.5"
+																	value={row.anchor1rm || ''}
+																	title={row.anchorSource}
+																	onchange={(e) => {
+																		const parsed = Number(
+																			e.currentTarget.value.replace(',', '.')
+																		);
+																		if (!Number.isFinite(parsed) || parsed <= 0) return;
+																		patchMacroBlockRow(block.id, exercise, {
+																			anchor1rm: parsed,
+																			manual: true,
+																			anchorSource: 'вручную'
+																		});
+																	}}
+																/>
+															</td>
+															<td>
+																<select
+																	class="field-select protocol-select"
+																	value={row.protocolId}
+																	onchange={(e) =>
+																		patchMacroBlockRow(block.id, exercise, {
+																			protocolId: e.currentTarget.value
+																		})}
+																>
+																	{#each plan.templates as tpl (tpl.id)}
+																		<option value={tpl.id}>{shortProtocolName(tpl.name)}</option>
+																	{/each}
+																</select>
+															</td>
+															<td class="row-actions">
+																{#if !(slot === 0 ? block.sessionB : block.sessionA).includes(exercise)}
+																	<button
+																		type="button"
+																		class="btn small ghost-link"
+																		title="Добавить в день {sessionColumnTitle(slot === 0 ? 1 : 0)}"
+																		onclick={() =>
+																			copyMacroExerciseToOtherSession(block.id, slot, exercise)}
+																	>
+																		→ {sessionColumnTitle(slot === 0 ? 1 : 0)}
+																	</button>
+																{/if}
+																<button
+																	type="button"
+																	class="btn small danger"
+																	onclick={() =>
+																		removeExerciseFromMacroSession(block.id, slot, exercise)}
+																>
+																	×
+																</button>
+															</td>
+														</tr>
+													{/if}
+												{/each}
+											</tbody>
+										</table>
+									</div>
+								{/if}
+							</section>
+						{/each}
 					</div>
-					{#if enabledExerciseList(block.selection).length === 0}
-						<p class="muted constructor-empty">Добавьте упражнения из каталога или шаблона A/B.</p>
-					{:else}
-						<div class="constructor-table-wrap">
-							<table class="constructor-table slim">
-								<thead>
-									<tr>
-										<th>Упражнение</th>
-										<th>Якорь, кг</th>
-										<th>Метод</th>
-										<th></th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each enabledExerciseList(block.selection) as exercise (exercise)}
-										{@const row = block.selection.get(exercise)}
-										{#if row}
-											<tr>
-												<td>{exercise}</td>
-												<td>
-													<input
-														class="field-input"
-														type="number"
-														step="0.5"
-														value={row.anchor1rm || ''}
-														title={row.anchorSource}
-														onchange={(e) => {
-															const parsed = Number(e.currentTarget.value.replace(',', '.'));
-															if (!Number.isFinite(parsed) || parsed <= 0) return;
-															patchMacroBlockRow(block.id, exercise, {
-																anchor1rm: parsed,
-																manual: true,
-																anchorSource: 'вручную'
-															});
-														}}
-													/>
-												</td>
-												<td>
-													<select
-														class="field-select protocol-select"
-														value={row.protocolId}
-														onchange={(e) =>
-															patchMacroBlockRow(block.id, exercise, {
-																protocolId: e.currentTarget.value
-															})}
-													>
-														{#each plan.templates as tpl (tpl.id)}
-															<option value={tpl.id}>{shortProtocolName(tpl.name)}</option>
-														{/each}
-													</select>
-												</td>
-												<td class="row-actions">
-													<button
-														type="button"
-														class="btn small danger"
-														onclick={() => removeExerciseFromMacroBlock(block.id, exercise)}
-													>
-														×
-													</button>
-												</td>
-											</tr>
-										{/if}
-									{/each}
-								</tbody>
-							</table>
-						</div>
+					{#if exercisesFromSplit(block.sessionA, block.sessionB, block.data).length === 0}
+						<p class="muted constructor-empty">Добавьте упражнения в тренировку A и/или B.</p>
 					{/if}
 				</article>
 			{/each}
@@ -1258,8 +1291,8 @@
 					{mesoConstructorMacroId ? 'Добавить мезо в макро' : 'Конструктор мезоцикла'}
 				</h3>
 				<p class="muted constructor-hint">
-					Для каждого упражнения выберите день <strong>A</strong> и/или <strong>B</strong> — от этого
-					зависит, в каком блоке предпросмотра и плана оно появится.
+					Добавляйте упражнения прямо в блок <strong>A</strong> или <strong>B</strong>. Кнопка
+					<strong>→ B / → A</strong> копирует упражнение в другой день с тем же якорем и методом.
 				</p>
 			</div>
 			<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
@@ -1299,113 +1332,110 @@
 			</label>
 		</div>
 
-		<div class="constructor-add-row compact">
-			<select
-				class="field-select"
-				bind:value={constructorAddPick}
-				onchange={(e) => addExerciseToConstructor(e.currentTarget.value)}
-			>
-				<option value="">+ упражнение</option>
-				{#each constructorAddOptions as name (name)}
-					<option value={name}>{name}</option>
-				{/each}
-			</select>
-			{#if constructorExerciseList.length > 6}
-				<input
-					class="field-input"
-					bind:value={constructorQuery}
-					placeholder="Поиск"
-				/>
-			{/if}
+		<div class="constructor-session-panels">
+			{#each [0, 1] as sessionIndex}
+				{@const slot = sessionIndex as SessionSlot}
+				{@const sessionList = slot === 0 ? constructorSessionA : constructorSessionB}
+				<section
+					class="constructor-session-block"
+					class:session-a={slot === 0}
+					class:session-b={slot === 1}
+				>
+					<div class="constructor-session-head">
+						<h4 class="constructor-session-title">Тренировка {sessionColumnTitle(slot)}</h4>
+						<select
+							class="field-select"
+							onchange={(e) => {
+								addExerciseToMesoSession(slot, e.currentTarget.value);
+								e.currentTarget.value = '';
+							}}
+						>
+							<option value="">+ упражнение</option>
+							{#each catalogStrengthExercises as name (name)}
+								<option value={name} disabled={sessionList.includes(name)}>{name}</option>
+							{/each}
+						</select>
+					</div>
+					{#if sessionExerciseList(sessionList, constructorData).length === 0}
+						<p class="muted constructor-session-empty">Пока пусто</p>
+					{:else}
+						<div class="constructor-table-wrap">
+							<table class="constructor-table slim">
+								<thead>
+									<tr>
+										<th>Упражнение</th>
+										<th>Якорь, кг</th>
+										<th>Метод</th>
+										<th></th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each sessionExerciseList(sessionList, constructorData) as exercise (exercise)}
+										{@const row = constructorData.get(exercise)}
+										{#if row}
+											<tr>
+												<td>{exercise}</td>
+												<td>
+													<input
+														class="field-input"
+														type="number"
+														step="0.5"
+														value={row.anchor1rm || ''}
+														title={row.anchorSource}
+														onchange={(e) => {
+															const parsed = Number(e.currentTarget.value.replace(',', '.'));
+															if (!Number.isFinite(parsed) || parsed <= 0) return;
+															patchConstructorRow(exercise, {
+																anchor1rm: parsed,
+																manual: true,
+																anchorSource: 'вручную'
+															});
+														}}
+													/>
+												</td>
+												<td>
+													<select
+														class="field-select protocol-select"
+														value={row.protocolId}
+														onchange={(e) =>
+															patchConstructorRow(exercise, { protocolId: e.currentTarget.value })}
+													>
+														{#each plan.templates as tpl (tpl.id)}
+															<option value={tpl.id}>{shortProtocolName(tpl.name)}</option>
+														{/each}
+													</select>
+												</td>
+												<td class="row-actions">
+													{#if !(slot === 0 ? constructorSessionB : constructorSessionA).includes(exercise)}
+														<button
+															type="button"
+															class="btn small ghost-link"
+															title="Добавить в день {sessionColumnTitle(slot === 0 ? 1 : 0)}"
+															onclick={() => copyMesoExerciseToOtherSession(slot, exercise)}
+														>
+															→ {sessionColumnTitle(slot === 0 ? 1 : 0)}
+														</button>
+													{/if}
+													<button
+														type="button"
+														class="btn small danger"
+														onclick={() => removeExerciseFromMesoSession(slot, exercise)}
+													>
+														×
+													</button>
+												</td>
+											</tr>
+										{/if}
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+				</section>
+			{/each}
 		</div>
-
-		{#if filteredConstructorExercises.length === 0}
-			<p class="muted constructor-empty">Добавьте упражнения — план появится после создания блока.</p>
-		{:else}
-			<div class="constructor-table-wrap">
-				<table class="constructor-table slim">
-					<thead>
-						<tr>
-							<th>Упражнение</th>
-							<th>День</th>
-							<th>Якорь, кг</th>
-							<th>Метод</th>
-							<th></th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each filteredConstructorExercises as exercise (exercise)}
-							{@const row = constructorSelection.get(exercise)}
-							{#if row}
-								<tr>
-									<td>{exercise}</td>
-									<td class="session-picks">
-										<div class="session-pick-group" role="group" aria-label="День для {exercise}">
-											<button
-												type="button"
-												class="session-pick session-a"
-												class:active={row.sessionA}
-												aria-pressed={row.sessionA}
-												onclick={() => toggleConstructorSession(exercise, 'a')}
-											>
-												A
-											</button>
-											<button
-												type="button"
-												class="session-pick session-b"
-												class:active={row.sessionB}
-												aria-pressed={row.sessionB}
-												onclick={() => toggleConstructorSession(exercise, 'b')}
-											>
-												B
-											</button>
-										</div>
-									</td>
-									<td>
-										<input
-											class="field-input"
-											type="number"
-											step="0.5"
-											value={row.anchor1rm || ''}
-											title={row.anchorSource}
-											onchange={(e) => {
-												const parsed = Number(e.currentTarget.value.replace(',', '.'));
-												if (!Number.isFinite(parsed) || parsed <= 0) return;
-												patchConstructorRow(exercise, {
-													anchor1rm: parsed,
-													manual: true,
-													anchorSource: 'вручную'
-												});
-											}}
-										/>
-									</td>
-									<td>
-										<select
-											class="field-select protocol-select"
-											value={row.protocolId}
-											onchange={(e) =>
-												patchConstructorRow(exercise, { protocolId: e.currentTarget.value })}
-										>
-											{#each plan.templates as tpl (tpl.id)}
-												<option value={tpl.id}>{shortProtocolName(tpl.name)}</option>
-											{/each}
-										</select>
-									</td>
-									<td class="row-actions">
-										<button
-											type="button"
-											class="btn small danger"
-											onclick={() => removeExerciseFromConstructor(exercise)}
-										>
-											×
-										</button>
-									</td>
-								</tr>
-							{/if}
-						{/each}
-					</tbody>
-				</table>
-			</div>
+		{#if constructorExercises.length === 0}
+			<p class="muted constructor-empty">Добавьте упражнения в тренировку A и/или B.</p>
 		{/if}
 
 		{#if constructorPreview.length > 0}
@@ -2601,31 +2631,6 @@
 		gap: 0.45rem;
 	}
 
-	.constructor-add-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-		align-items: flex-end;
-		margin-bottom: 0.75rem;
-	}
-
-	.constructor-add-row.compact {
-		align-items: center;
-		gap: 0.5rem;
-		margin-top: 0.65rem;
-		margin-bottom: 0.45rem;
-	}
-
-	.constructor-add-row.compact .field-select,
-	.constructor-add-row.compact .field-input {
-		min-width: min(220px, 100%);
-	}
-
-	.block-exercise-count {
-		font-size: 0.75rem;
-		white-space: nowrap;
-	}
-
 	.constructor-meta {
 		display: flex;
 		flex-wrap: wrap;
@@ -2751,37 +2756,62 @@
 		max-width: 36rem;
 	}
 
-	.session-picks {
-		width: 5.5rem;
+	.constructor-session-panels {
+		display: grid;
+		gap: 1rem;
+		margin-bottom: 1rem;
 	}
 
-	.session-pick-group {
-		display: inline-flex;
-		gap: 0.25rem;
-	}
-
-	.session-pick {
-		min-width: 1.85rem;
-		padding: 0.18rem 0.4rem;
+	.constructor-session-block {
+		padding: 0.75rem 0.85rem;
 		border: 1px solid var(--line);
-		border-radius: 0.35rem;
-		background: transparent;
-		color: var(--muted);
-		font-size: 0.72rem;
-		font-weight: 700;
-		cursor: pointer;
+		border-radius: 0.55rem;
+		background: rgb(12 16 24 / 28%);
 	}
 
-	.session-pick.session-a.active {
-		border-color: #5b9dff;
-		background: rgb(91 157 255 / 16%);
+	.constructor-session-block.session-a {
+		border-color: rgb(91 157 255 / 35%);
+	}
+
+	.constructor-session-block.session-b {
+		border-color: rgb(110 231 168 / 30%);
+	}
+
+	.constructor-session-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-bottom: 0.55rem;
+	}
+
+	.constructor-session-head .field-select {
+		min-width: min(220px, 100%);
+	}
+
+	.constructor-session-title {
+		margin: 0;
+		font-size: 0.82rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+	}
+
+	.constructor-session-block.session-a .constructor-session-title {
 		color: #5b9dff;
 	}
 
-	.session-pick.session-b.active {
-		border-color: #6ee7a8;
-		background: rgb(110 231 168 / 14%);
+	.constructor-session-block.session-b .constructor-session-title {
 		color: #6ee7a8;
+	}
+
+	.constructor-session-empty {
+		margin: 0;
+		font-size: 0.78rem;
+	}
+
+	.constructor-table .row-actions {
+		white-space: nowrap;
 	}
 
 	.constructor-preview {
