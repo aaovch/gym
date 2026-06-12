@@ -514,8 +514,13 @@ function validateCyclePlan(plan: CyclePlan): CyclePlan {
 			break;
 		}
 		for (const phase of template.phases) {
-			if (!isPositiveNumber(phase.intensityPct) || phase.intensityPct > 150) {
-				issues.push(`${template.id}/${phase.id}: intensityPct должен быть в диапазоне (0, 150]`);
+			if (
+				typeof phase.intensityPct !== 'number' ||
+				!Number.isFinite(phase.intensityPct) ||
+				phase.intensityPct < 0 ||
+				phase.intensityPct > 150
+			) {
+				issues.push(`${template.id}/${phase.id}: intensityPct должен быть в диапазоне [0, 150]`);
 			}
 			if (
 				!Number.isInteger(phase.microFrom) ||
@@ -560,9 +565,12 @@ function validateCyclePlan(plan: CyclePlan): CyclePlan {
 			}
 			if (
 				micro.intensityPct != null &&
-				(!isPositiveNumber(micro.intensityPct) || micro.intensityPct > 150)
+				(typeof micro.intensityPct !== 'number' ||
+					!Number.isFinite(micro.intensityPct) ||
+					micro.intensityPct < 0 ||
+					micro.intensityPct > 150)
 			) {
-				issues.push(`${micro.id}: intensityPct должен быть в диапазоне (0, 150]`);
+				issues.push(`${micro.id}: intensityPct должен быть в диапазоне [0, 150]`);
 			}
 			if (micro.sessions.length !== 2) issues.push(`${micro.id}: должно быть ровно две сессии`);
 			if (micro.sessions[0]?.indexInMicro !== 0 || micro.sessions[1]?.indexInMicro !== 1) {

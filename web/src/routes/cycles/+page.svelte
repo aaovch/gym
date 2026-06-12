@@ -192,7 +192,7 @@
 			{
 				label: constructorLabel,
 				startDate: constructorStart || defaultMesoStartDate(view.entries),
-				microCount: constructorMicroCount,
+				microCount: Math.max(1, Math.min(12, Number(constructorMicroCount) || 4)),
 				defaultProtocolId: constructorProtocolId,
 				exercises: constructorExercises
 			},
@@ -280,7 +280,7 @@
 		return [...names]
 			.filter((exercise) => {
 				const row = data.get(exercise);
-				return row?.enabled && row.anchor1rm > 0;
+				return row != null && row.anchor1rm > 0;
 			})
 			.map((exercise) => {
 				const row = data.get(exercise)!;
@@ -417,6 +417,16 @@
 		constructorData = next;
 	}
 
+	function patchConstructorAnchor(exercise: string, raw: string) {
+		const parsed = Number(raw.replace(',', '.'));
+		if (!Number.isFinite(parsed) || parsed <= 0) return;
+		patchConstructorRow(exercise, {
+			anchor1rm: parsed,
+			manual: true,
+			anchorSource: 'вручную'
+		});
+	}
+
 	function refreshConstructorAnchors(keepManual = true) {
 		const start = constructorStart || defaultMesoStartDate(view.entries);
 		const next = new Map(constructorData);
@@ -439,6 +449,7 @@
 		constructorSessionA = split.sessionA;
 		constructorSessionB = split.sessionB;
 		constructorData = split.data;
+		refreshConstructorAnchors(false);
 	}
 
 	function addExerciseToMacroSession(blockId: string, session: SessionSlot, exerciseName: string) {
@@ -682,18 +693,22 @@
 			{
 				label: constructorLabel,
 				startDate: constructorStart || defaultMesoStartDate(view.entries),
-				microCount: constructorMicroCount,
+				microCount: Math.max(1, Math.min(12, Number(constructorMicroCount) || 4)),
 				defaultProtocolId: constructorProtocolId,
 				exercises: constructorExercises,
 				macroId: mesoConstructorMacroId ?? undefined
 			},
 			keyMaps
 		);
-		if (!save(next)) return;
+		if (!save(next)) {
+			constructorError = workoutStore.sync.error || 'Не удалось сохранить план.';
+			return;
+		}
 		const meso = next.mesocycles[next.mesocycles.length - 1];
 		macroPick = mesoConstructorMacroId;
 		mesoPick = meso?.id ?? null;
 		mesoTab = 'plan';
+		planningTab = 'program';
 		showMesoConstructor = false;
 		mesoConstructorMacroId = null;
 	}
@@ -1093,9 +1108,10 @@
 																	class="field-input"
 																	type="number"
 																	step="0.5"
+																	min="1"
 																	value={row.anchor1rm || ''}
 																	title={row.anchorSource}
-																	onchange={(e) => {
+																	oninput={(e) => {
 																		const parsed = Number(
 																			e.currentTarget.value.replace(',', '.')
 																		);
@@ -1411,17 +1427,10 @@
 														class="field-input"
 														type="number"
 														step="0.5"
+														min="1"
 														value={row.anchor1rm || ''}
 														title={row.anchorSource}
-														onchange={(e) => {
-															const parsed = Number(e.currentTarget.value.replace(',', '.'));
-															if (!Number.isFinite(parsed) || parsed <= 0) return;
-															patchConstructorRow(exercise, {
-																anchor1rm: parsed,
-																manual: true,
-																anchorSource: 'вручную'
-															});
-														}}
+														oninput={(e) => patchConstructorAnchor(exercise, e.currentTarget.value)}
 													/>
 												</td>
 												<td>

@@ -660,7 +660,8 @@ function enrichSingleMesocycle(
 	);
 	const allMicroDates = normalized.microcycles.flatMap((m) => microDates(m)).sort();
 	const startDate = allMicroDates[0] ?? normalized.startDate;
-	const endDate = allMicroDates[allMicroDates.length - 1] ?? normalized.endDate;
+	const endDate =
+		allMicroDates[allMicroDates.length - 1] ?? (normalized.endDate || startDate);
 
 	return {
 		plan: { ...effectiveMeso, startDate, endDate },
