@@ -189,7 +189,7 @@
 			radial-gradient(circle at 50% 20%, rgba(110, 231, 168, 0.06), transparent 45%),
 			var(--surface-2);
 		border: 1px solid var(--border);
-		border-radius: 16px;
+		border-radius: 0;
 		padding: 0.5rem;
 	}
 
@@ -244,7 +244,7 @@
 		width: 100%;
 		text-align: left;
 		padding: 0.4rem 0.55rem;
-		border-radius: 10px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		color: var(--muted);
@@ -264,7 +264,7 @@
 	.swatch {
 		width: 10px;
 		height: 10px;
-		border-radius: 999px;
+		border-radius: 0;
 		background: var(--block-color);
 		flex-shrink: 0;
 	}
@@ -273,7 +273,7 @@
 		margin-left: auto;
 		width: 6px;
 		height: 6px;
-		border-radius: 999px;
+		border-radius: 0;
 		background: var(--block-color);
 	}
 </style>

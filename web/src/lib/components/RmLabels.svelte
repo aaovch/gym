@@ -49,7 +49,7 @@
 		align-items: baseline;
 		gap: 0.25rem;
 		padding: 0.12rem 0.4rem;
-		border-radius: 999px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		font-size: 0.72rem;
 		line-height: 1.2;

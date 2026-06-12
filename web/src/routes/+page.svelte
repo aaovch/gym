@@ -555,7 +555,7 @@
     color: var(--muted-strong);
     background: #0d121b;
     border: 1px solid var(--line);
-    border-radius: 11px;
+    border-radius: 0;
     cursor: pointer;
   }
 
@@ -631,7 +631,7 @@
     place-items: center;
     color: #0b1016;
     background: var(--choice-color);
-    border-radius: 8px;
+    border-radius: 0;
   }
 
   .slot-choice span {
@@ -666,7 +666,7 @@
     color: var(--muted);
     background: #0a0e16;
     border: 1px solid var(--line);
-    border-radius: 11px;
+    border-radius: 0;
     font-size: 12px;
     font-weight: 850;
   }
@@ -744,7 +744,7 @@
     color: var(--muted-strong);
     background: #0a0f17;
     border: 1px solid var(--line);
-    border-radius: 9px;
+    border-radius: 0;
     font-size: 11px;
     font-weight: 700;
   }
@@ -801,7 +801,7 @@
     color: #ffd3d3;
     background: rgb(255 114 114 / 10%);
     border: 1px solid rgb(255 114 114 / 24%);
-    border-radius: 12px;
+    border-radius: 0;
   }
 
   @media (max-width: 1050px) {

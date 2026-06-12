@@ -168,7 +168,7 @@
 	.chart-card {
 		padding: 0.85rem;
 		border: 1px solid var(--border);
-		border-radius: 12px;
+		border-radius: 0;
 		background: var(--surface-2);
 	}
 
@@ -217,7 +217,7 @@
 		display: grid;
 		gap: 0.1rem;
 		padding: 0.35rem 0.55rem;
-		border-radius: 8px;
+		border-radius: 0;
 		border: 1px solid rgba(255, 143, 143, 0.45);
 		background: rgba(255, 143, 143, 0.14);
 		font-size: 0.75rem;
@@ -255,7 +255,7 @@
 		margin-bottom: 0.65rem;
 		background: var(--surface);
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		border-radius: 0;
 	}
 
 	.grid-line {
@@ -319,7 +319,7 @@
 		font-size: 0.8rem;
 		padding: 0.35rem 0.5rem;
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: 0;
 		background: var(--surface);
 	}
 

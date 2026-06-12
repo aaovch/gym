@@ -269,7 +269,7 @@
 	}
 
 	button.primary {
-		border-radius: 10px;
+		border-radius: 0;
 		padding: 0.55rem 0.9rem;
 		border: 1px solid rgba(110, 231, 168, 0.45);
 		background: rgba(110, 231, 168, 0.16);
@@ -296,7 +296,7 @@
 		padding: 1rem 1.1rem;
 		background: var(--surface-2);
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		border-radius: 0;
 		font-family: 'JetBrains Mono', ui-monospace, monospace;
 		font-size: 0.78rem;
 		line-height: 1.45;
@@ -336,7 +336,7 @@
 	.groups button {
 		text-align: left;
 		padding: 0.5rem 0.65rem;
-		border-radius: 8px;
+		border-radius: 0;
 		border: 1px solid transparent;
 		background: transparent;
 		color: var(--text);
@@ -378,7 +378,7 @@
 		width: 100%;
 		text-align: left;
 		padding: 0.4rem 0.55rem;
-		border-radius: 6px;
+		border-radius: 0;
 		border: none;
 		background: transparent;
 		color: var(--muted);
@@ -444,7 +444,7 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		padding: 0.2rem 0.45rem;
-		border-radius: 999px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 	}
 
@@ -463,7 +463,7 @@
 	.mini {
 		font-size: 0.65rem;
 		padding: 0.1rem 0.3rem;
-		border-radius: 4px;
+		border-radius: 0;
 	}
 
 	.mini.derived {
@@ -528,7 +528,7 @@
 	.rel-link {
 		font-size: 0.82rem;
 		padding: 0.15rem 0.5rem;
-		border-radius: 999px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		color: var(--accent-2);
@@ -551,7 +551,7 @@
 		padding: 0.85rem 1rem;
 		background: var(--surface-2);
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: 0;
 		font-size: 0.78rem;
 		overflow-x: auto;
 		line-height: 1.45;

@@ -2,6 +2,7 @@ export {
 	bootstrapWorkoutStore,
 	clearCyclePlanState,
 	connectGitHub,
+	deleteExercise,
 	deleteSession,
 	importCyclePlanFromAuto,
 	pushToGitHub,
@@ -11,6 +12,7 @@ export {
 	repairWorkoutLinksFromData,
 	resetToBundled,
 	saveCyclePlanState,
+	saveExercise,
 	saveLog,
 	saveSession,
 	workoutStore

@@ -308,7 +308,7 @@
 	label input {
 		background: var(--surface-2);
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		border-radius: 0;
 		color: var(--text);
 		padding: 0.55rem 0.75rem;
 	}
@@ -321,7 +321,7 @@
 	}
 
 	button {
-		border-radius: 10px;
+		border-radius: 0;
 		padding: 0.55rem 0.9rem;
 		border: 1px solid var(--border);
 		background: var(--surface-2);

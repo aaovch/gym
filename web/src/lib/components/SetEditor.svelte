@@ -70,7 +70,7 @@
 		gap: 0.75rem;
 		padding: 1rem;
 		border: 1px solid var(--border);
-		border-radius: 12px;
+		border-radius: 0;
 		background: var(--surface-2);
 	}
 
@@ -110,7 +110,7 @@
 	input {
 		background: var(--surface);
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		border-radius: 0;
 		color: var(--text);
 		padding: 0.55rem 0.75rem;
 	}
@@ -118,7 +118,7 @@
 	button.ghost {
 		background: transparent;
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		border-radius: 0;
 		color: var(--text);
 		padding: 0.45rem 0.65rem;
 	}

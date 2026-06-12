@@ -22,9 +22,9 @@
   --accent-2: #6da7ff;
   --orange: #ffb35c;
   --danger: #ff7272;
-  --radius-sm: 10px;
-  --radius: 16px;
-  --radius-lg: 24px;
+  --radius-sm: 0px;
+  --radius: 0px;
+  --radius-lg: 0px;
   --shadow: 0 24px 70px rgb(0 0 0 / 28%);
 }
 
@@ -41,7 +41,7 @@
 
 *::-webkit-scrollbar-thumb {
   background: var(--line-strong);
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 *::-webkit-scrollbar-track {
@@ -110,7 +110,7 @@ textarea {
   color: var(--text);
   background: #0b1019;
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: 0;
   padding: 11px 12px;
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease;
@@ -162,7 +162,7 @@ label {
   place-items: center;
   color: var(--accent-ink);
   background: var(--accent);
-  border-radius: 13px;
+  border-radius: 0;
   font-size: 13px;
   font-weight: 900;
   letter-spacing: -0.03em;
@@ -195,7 +195,7 @@ label {
   gap: 12px;
   padding: 11px 13px;
   color: var(--muted-strong);
-  border-radius: 12px;
+  border-radius: 0;
   font-size: 14px;
   font-weight: 700;
   transition: color 150ms ease, background 150ms ease;
@@ -228,7 +228,7 @@ label {
   padding: 12px 14px;
   color: var(--accent-ink);
   background: var(--accent);
-  border-radius: 12px;
+  border-radius: 0;
   font-size: 13px;
   font-weight: 850;
 }
@@ -278,7 +278,7 @@ label {
   margin-top: 16px;
   overflow: hidden;
   background: #272e3c;
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 .progress-track span {
@@ -321,7 +321,7 @@ label {
   color: var(--muted-strong);
   background: transparent;
   border: 0;
-  border-radius: 11px;
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -391,7 +391,7 @@ label {
   gap: 8px;
   padding: 9px 14px;
   border: 1px solid transparent;
-  border-radius: 11px;
+  border-radius: 0;
   cursor: pointer;
   font-size: 13px;
   font-weight: 780;
@@ -437,7 +437,7 @@ label {
   color: var(--muted-strong);
   background: var(--surface-raised);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 0;
   cursor: pointer;
   font-size: 20px;
 }
@@ -452,7 +452,7 @@ label {
   padding: 18px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
 }
 
 .metric-card span {
@@ -558,7 +558,7 @@ label {
   padding: 18px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
 }
 
 .settings-section h3,
@@ -591,7 +591,7 @@ label {
   margin-top: 14px;
   padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -744,7 +744,7 @@ td {
     color: var(--muted-strong);
     background: var(--surface-raised);
     border: 1px solid var(--line);
-    border-radius: 9px;
+    border-radius: 0;
     font-size: 10px;
     font-weight: 750;
   }
@@ -769,7 +769,7 @@ td {
   .mobile-nav a {
     padding: 9px 2px;
     color: var(--muted);
-    border-radius: 9px;
+    border-radius: 0;
     text-align: center;
     font-size: 10px;
     font-weight: 750;

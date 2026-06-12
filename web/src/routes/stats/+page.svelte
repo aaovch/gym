@@ -258,7 +258,7 @@
     place-items: center;
     color: var(--muted);
     background: var(--surface-soft);
-    border-radius: 8px;
+    border-radius: 0;
     font-size: 9px;
   }
 
@@ -295,7 +295,7 @@
     padding: 12px;
     background: var(--surface-soft);
     border: 1px solid var(--line);
-    border-radius: 11px;
+    border-radius: 0;
   }
 
   .selected-summary span,

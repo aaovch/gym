@@ -214,7 +214,7 @@
 		gap: 0.65rem;
 		padding: 0.85rem;
 		border: 1px solid var(--border);
-		border-radius: 12px;
+		border-radius: 0;
 		background: var(--surface-2);
 	}
 
@@ -239,7 +239,7 @@
 	button.ghost {
 		background: transparent;
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		border-radius: 0;
 		color: var(--text);
 		padding: 0.45rem 0.75rem;
 	}
@@ -261,7 +261,7 @@
 		gap: 0.65rem;
 		text-align: left;
 		padding: 0.75rem;
-		border-radius: 12px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		color: var(--text);
@@ -274,7 +274,7 @@
 	.swatch {
 		width: 12px;
 		height: 12px;
-		border-radius: 999px;
+		border-radius: 0;
 		background: var(--block-color);
 		flex-shrink: 0;
 	}

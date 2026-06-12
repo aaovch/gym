@@ -2064,7 +2064,7 @@
 	}
 
 	.btn {
-		border-radius: 10px;
+		border-radius: 0;
 		padding: 0.5rem 0.85rem;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
@@ -2111,7 +2111,7 @@
 		display: grid;
 		min-width: 11rem;
 		padding: 0.35rem;
-		border-radius: 10px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface);
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -2121,7 +2121,7 @@
 		text-align: left;
 		padding: 0.45rem 0.55rem;
 		border: none;
-		border-radius: 6px;
+		border-radius: 0;
 		background: transparent;
 		color: var(--text);
 	}
@@ -2165,7 +2165,7 @@
 	.protocol-guide-inline {
 		margin-top: 0.85rem;
 		padding: 0.85rem 0.95rem;
-		border-radius: 10px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		font-size: 0.86rem;
@@ -2309,7 +2309,7 @@
 
 	.ab-card {
 		padding: 0.85rem;
-		border-radius: 12px;
+		border-radius: 0;
 		border: 1px solid color-mix(in srgb, var(--slot-color) 35%, var(--border));
 		background: color-mix(in srgb, var(--slot-color) 8%, var(--surface-2));
 	}
@@ -2320,7 +2320,7 @@
 		width: 1.5rem;
 		height: 1.5rem;
 		margin-right: 0.35rem;
-		border-radius: 999px;
+		border-radius: 0;
 		background: var(--slot-color);
 		color: #0f1115;
 		font-size: 0.8rem;
@@ -2415,7 +2415,7 @@
 
 	.macro-block-card {
 		padding: 0.75rem;
-		border-radius: 10px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 	}
@@ -2493,7 +2493,7 @@
 	.constructor-table-wrap {
 		overflow: auto;
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		border-radius: 0;
 		margin-bottom: 1rem;
 	}
 
@@ -2573,7 +2573,7 @@
 		flex: 0 0 auto;
 		min-width: 9rem;
 		padding: 0.65rem 0.85rem;
-		border-radius: 12px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		text-align: left;
@@ -2635,7 +2635,7 @@
 		font-weight: 700;
 		background: var(--surface-2);
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: 0;
 		color: var(--text);
 		padding: 0.35rem 0.5rem;
 		margin-bottom: 0.25rem;
@@ -2653,13 +2653,13 @@
 		flex-wrap: wrap;
 		margin-bottom: 1rem;
 		padding: 0.25rem;
-		border-radius: 12px;
+		border-radius: 0;
 		background: var(--surface-2);
 	}
 
 	.sub-tab {
 		padding: 0.45rem 0.85rem;
-		border-radius: 8px;
+		border-radius: 0;
 		border: none;
 		background: transparent;
 		color: var(--muted);
@@ -2829,7 +2829,7 @@
 	.micro-pick-btn {
 		min-width: 2.5rem;
 		padding: 0.35rem 0.6rem;
-		border-radius: 8px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		color: var(--text);
@@ -2854,7 +2854,7 @@
 
 	.micro-block {
 		padding: 0.85rem;
-		border-radius: 12px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 	}
@@ -2887,7 +2887,7 @@
 
 	.day-link {
 		padding: 0.25rem 0.55rem;
-		border-radius: 999px;
+		border-radius: 0;
 		text-decoration: none;
 		font-size: 0.8rem;
 		border: 1px solid var(--border);
@@ -2959,7 +2959,7 @@
 
 	.settings-block {
 		padding: 0.85rem;
-		border-radius: 12px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		margin-bottom: 0.75rem;
@@ -2993,7 +2993,7 @@
 		align-items: center;
 		gap: 0.25rem;
 		padding: 0.2rem 0.45rem;
-		border-radius: 999px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface);
 		font-size: 0.78rem;
@@ -3018,7 +3018,7 @@
 		gap: 0.5rem;
 		align-items: end;
 		padding: 0.5rem;
-		border-radius: 8px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface);
 	}
@@ -3039,7 +3039,7 @@
 	.field-select {
 		background: var(--surface-2);
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: 0;
 		color: var(--text);
 		padding: 0.35rem 0.5rem;
 		min-width: 0;
@@ -3057,7 +3057,7 @@
 
 	.assign-card {
 		padding: 0.65rem;
-		border-radius: 10px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface);
 		display: grid;
@@ -3135,7 +3135,7 @@
 
 	.phase-card {
 		padding: 0.65rem;
-		border-radius: 10px;
+		border-radius: 0;
 		border: 1px solid var(--border);
 		background: var(--surface-2);
 		display: grid;

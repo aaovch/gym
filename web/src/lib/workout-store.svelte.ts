@@ -6,12 +6,14 @@ import {
 	bundledProtocolTemplates,
 	normalizeCyclePlan,
 	importPlanFromAuto,
+	purgeExerciseFromPlan,
 	refreshAllMesoAnchors,
 	repairMicroDatesFromAuto,
 	suggestSessionIndex,
 	type CyclePlan
 } from './cycle-plan';
 import { repairWorkoutLinks, summarizeLogMicroLinks } from './data-repair';
+import { removeExerciseFromCatalog, upsertExercise } from './exercises';
 import { buildWorkoutKeyMaps } from './exercise-keys';
 import { sessionsToEntries } from './database';
 import { fetchCyclePlan, fetchWorkoutDatabase, saveCyclePlanRemote, saveWorkoutDatabase, verifyGitHubToken } from './github';
@@ -28,7 +30,7 @@ import {
 } from './storage';
 import { buildWorkoutData } from './stats';
 import { buildMicrocycleOverview } from './microcycle';
-import type { ExerciseLog, WorkoutDatabase, WorkoutEntry, WorkoutSession } from './types';
+import type { Exercise, ExerciseLog, WorkoutDatabase, WorkoutEntry, WorkoutSession } from './types';
 
 type SyncState = {
 	workoutsSha: string | null;
@@ -256,6 +258,36 @@ class WorkoutStore {
 		await this.deleteLog(sessionId);
 	}
 
+	saveExercise(exercise: Exercise) {
+		const db = this.database;
+		this.database = {
+			...db,
+			exercises: upsertExercise(db.exercises, exercise)
+		};
+		this.persistDatabase();
+	}
+
+	deleteExercise(exerciseId: string) {
+		const db = this.database;
+		const logCount = db.logs.filter((log) => log.exerciseId === exerciseId).length;
+		if (logCount > 0) {
+			throw new Error(
+				`Нельзя удалить: в журнале ${logCount} ${logCount === 1 ? 'запись' : logCount < 5 ? 'записи' : 'записей'}`
+			);
+		}
+
+		this.database = {
+			...db,
+			exercises: removeExerciseFromCatalog(db.exercises, exerciseId)
+		};
+		this.persistDatabase();
+
+		const plan = this.cyclePlan;
+		if (plan) {
+			this.persistCyclePlan(purgeExerciseFromPlan(plan, exerciseId));
+		}
+	}
+
 	resetToBundled(bundled: WorkoutDatabase) {
 		clearLocalDatabase();
 		clearCyclePlan();
@@ -458,6 +490,14 @@ export async function saveSession(
 
 export async function deleteSession(sessionId: string) {
 	await workoutStore.deleteSession(sessionId);
+}
+
+export function saveExercise(exercise: Exercise) {
+	workoutStore.saveExercise(exercise);
+}
+
+export function deleteExercise(exerciseId: string) {
+	workoutStore.deleteExercise(exerciseId);
 }
 
 export function resetToBundled(bundled: WorkoutDatabase) {

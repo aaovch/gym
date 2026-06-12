@@ -20,6 +20,7 @@
   const navigation = [
     { href: `${base}/`, route: '/', label: 'Обзор', short: 'Обзор' },
     { href: `${base}/cycles`, route: '/cycles', label: 'План', short: 'План' },
+    { href: `${base}/exercises`, route: '/exercises', label: 'Упражнения', short: 'Упр.' },
     { href: `${base}/history`, route: '/history', label: 'Журнал', short: 'Журнал' },
     { href: `${base}/stats`, route: '/stats', label: 'Аналитика', short: 'Аналитика' }
   ];

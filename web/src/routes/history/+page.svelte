@@ -278,7 +278,7 @@
     color: var(--muted-strong);
     background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: 0;
     cursor: pointer;
     font-size: 11px;
   }
@@ -374,7 +374,7 @@
     color: var(--muted-strong);
     background: #0a0f17;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: 0;
     font-size: 10px;
   }
 

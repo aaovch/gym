@@ -1152,6 +1152,22 @@ export function removeExerciseFromMeso(
 	});
 }
 
+/** Убрать упражнение из всех мезоциклов плана (якоря и протоколы). */
+export function purgeExerciseFromPlan(plan: CyclePlan, exerciseId: string): CyclePlan {
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			const anchor1rm = { ...meso.anchor1rm };
+			delete anchor1rm[exerciseId];
+			const anchor1rmManual = { ...(meso.anchor1rmManual ?? {}) };
+			delete anchor1rmManual[exerciseId];
+			const exerciseProtocols = { ...(meso.exerciseProtocols ?? {}) };
+			delete exerciseProtocols[exerciseId];
+			return { ...meso, anchor1rm, anchor1rmManual, exerciseProtocols };
+		})
+	});
+}
+
 export function updateTemplate(plan: CyclePlan, template: ProtocolTemplate): CyclePlan {
 	const templates = plan.templates.some((item) => item.id === template.id)
 		? plan.templates.map((item) => (item.id === template.id ? template : item))
