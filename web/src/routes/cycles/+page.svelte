@@ -701,7 +701,16 @@
 	}
 
 	function save(next: NonNullable<typeof plan>) {
-		saveCyclePlanState(next);
+		try {
+			saveCyclePlanState(next);
+		} catch (error) {
+			workoutStore.patchSync({
+				error:
+					error instanceof Error
+						? error.message
+						: 'Не удалось сохранить план. Проверьте якоря и протоколы упражнений.'
+			});
+		}
 	}
 
 	function handleImport() {

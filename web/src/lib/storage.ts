@@ -45,8 +45,6 @@ export function loadCyclePlan(): CyclePlan | null {
 		return normalizeCyclePlan(plan);
 	} catch (error) {
 		console.error('Не удалось загрузить локальный план циклов:', error);
-		// Устаревший или битый формат — не блокируем работу, подтянем план из сборки/GitHub.
-		localStorage.removeItem(CYCLE_PLAN_KEY);
 		return null;
 	}
 }
@@ -66,8 +64,78 @@ export function pickNewerCyclePlan(a: CyclePlan, b: CyclePlan | null): CyclePlan
 	if (!b) return a;
 	const aTime = Date.parse(a.updatedAt || '0');
 	const bTime = Date.parse(b.updatedAt || '0');
-	if (bTime === aTime && b.revision !== a.revision) return b.revision > a.revision ? b : a;
-	return bTime > aTime ? b : a;
+	if (bTime !== aTime) return bTime > aTime ? b : a;
+	if (b.revision !== a.revision) return b.revision > a.revision ? b : a;
+	if (b.mesocycles.length !== a.mesocycles.length) {
+		return b.mesocycles.length > a.mesocycles.length ? b : a;
+	}
+	return a;
+}
+
+/** Объединяет мезо/макро из всех копий плана — не теряет блоки при гонке с GitHub. */
+export function mergeCyclePlans(...plans: Array<CyclePlan | null | undefined>): CyclePlan {
+	const candidates = plans.filter((plan): plan is CyclePlan => plan != null);
+	if (candidates.length === 0) return emptyCyclePlan();
+
+	const base = candidates.reduce((winner, item) => pickNewerCyclePlan(winner, item));
+	const mesoById = new Map(base.mesocycles.map((meso) => [meso.id, meso]));
+	let changed = false;
+
+	for (const plan of candidates) {
+		for (const meso of plan.mesocycles) {
+			if (!mesoById.has(meso.id)) {
+				mesoById.set(meso.id, meso);
+				changed = true;
+			}
+		}
+	}
+
+	const macroById = new Map(
+		base.macrocycles.map((macro) => [macro.id, { ...macro, mesoIds: [...macro.mesoIds] }])
+	);
+	for (const plan of candidates) {
+		for (const macro of plan.macrocycles) {
+			const existing = macroById.get(macro.id);
+			if (existing) {
+				for (const mesoId of macro.mesoIds) {
+					if (!existing.mesoIds.includes(mesoId) && mesoById.has(mesoId)) {
+						existing.mesoIds.push(mesoId);
+						changed = true;
+					}
+				}
+			} else {
+				const mesoIds = macro.mesoIds.filter((id) => mesoById.has(id));
+				if (mesoIds.length) {
+					macroById.set(macro.id, { ...macro, mesoIds });
+					changed = true;
+				}
+			}
+		}
+	}
+
+	const templateById = new Map(base.templates.map((template) => [template.id, template]));
+	for (const plan of candidates) {
+		for (const template of plan.templates) {
+			if (!templateById.has(template.id)) {
+				templateById.set(template.id, template);
+				changed = true;
+			}
+		}
+	}
+
+	const merged = normalizeCyclePlan({
+		...base,
+		templates: [...templateById.values()],
+		mesocycles: [...mesoById.values()],
+		macrocycles: [...macroById.values()]
+	});
+
+	if (!changed) return merged;
+	return {
+		...merged,
+		revision: Math.max(...candidates.map((plan) => plan.revision)) + 1,
+		updatedAt: new Date().toISOString()
+	};
 }
 
 export function ensureCyclePlan(plan: CyclePlan | null): CyclePlan {

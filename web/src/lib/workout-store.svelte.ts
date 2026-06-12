@@ -23,7 +23,7 @@ import {
 	clearLocalDatabase,
 	loadCyclePlan,
 	loadLocalDatabase,
-	pickNewerCyclePlan,
+	mergeCyclePlans,
 	pickNewerDatabase,
 	saveCyclePlan,
 	saveLocalDatabase
@@ -116,6 +116,7 @@ class WorkoutStore {
 	view = $derived.by(() => buildView(this.database, this.cyclePlan));
 
 	private githubInitStarted = false;
+	private githubConnectGeneration = 0;
 
 	patchSync(patch: Partial<SyncState>) {
 		this.sync = { ...this.sync, ...patch };
@@ -129,12 +130,9 @@ class WorkoutStore {
 		this.applyDatabase(initial, source);
 
 		const localPlan = loadCyclePlan();
-		const planCandidates = [localPlan, bundledCyclePlan].filter(
-			(item): item is CyclePlan => item != null
-		);
-		if (planCandidates.length > 0) {
-			const bestPlan = planCandidates.reduce((winner, item) => pickNewerCyclePlan(winner, item));
-			this.cyclePlan = normalizeLoadedCyclePlan(bestPlan, this.view.microcycles.byDate);
+		const mergedPlan = mergeCyclePlans(localPlan, bundledCyclePlan);
+		if (mergedPlan.mesocycles.length > 0 || localPlan || bundledCyclePlan) {
+			this.cyclePlan = normalizeLoadedCyclePlan(mergedPlan, this.view.microcycles.byDate);
 		}
 	}
 
@@ -171,8 +169,8 @@ class WorkoutStore {
 			{ ...plan, updatedAt: new Date().toISOString() },
 			this.view.microcycles.byDate
 		);
-		this.cyclePlan = next;
 		saveCyclePlan(next);
+		this.cyclePlan = next;
 		this.patchSync({ source: 'local' });
 	}
 
@@ -388,11 +386,14 @@ class WorkoutStore {
 	}
 
 	async connectGitHub(token: string) {
+		const generation = ++this.githubConnectGeneration;
 		this.patchSync({ syncing: true, error: '', message: '' });
 		try {
 			const login = await verifyGitHubToken(token);
 			const [{ db: remote, sha: workoutsSha }, { plan: remotePlan, sha: cyclePlanSha }] =
 				await Promise.all([fetchWorkoutDatabase(token), fetchCyclePlan(token)]);
+			if (generation !== this.githubConnectGeneration) return;
+
 			const local = loadLocalDatabase();
 			const localPlan = loadCyclePlan();
 			const current = this.database;
@@ -403,14 +404,21 @@ class WorkoutStore {
 			this.applyDatabase(best, best === remote ? 'github' : this.sync.source);
 			saveLocalDatabase(best);
 
-			const planCandidates = [this.cyclePlan, localPlan, remotePlan].filter(
-				(item): item is CyclePlan => item != null
-			);
-			if (planCandidates.length > 0) {
-				const bestPlan = planCandidates.reduce((winner, item) => pickNewerCyclePlan(winner, item));
-				this.cyclePlan = normalizeLoadedCyclePlan(bestPlan, this.view.microcycles.byDate);
-				if (bestPlan === remotePlan && remotePlan) saveCyclePlan(remotePlan);
+			const mergedPlan = mergeCyclePlans(this.cyclePlan, localPlan, remotePlan);
+			if (mergedPlan.mesocycles.length > 0 || this.cyclePlan || localPlan || remotePlan) {
+				const normalized = normalizeLoadedCyclePlan(mergedPlan, this.view.microcycles.byDate);
+				this.cyclePlan = normalized;
+				if (normalized) saveCyclePlan(normalized);
 			}
+
+			if (generation !== this.githubConnectGeneration) return;
+
+			const planAheadOfRemote =
+				Boolean(remotePlan) &&
+				Boolean(this.cyclePlan) &&
+				(this.cyclePlan!.mesocycles.length > remotePlan!.mesocycles.length ||
+					Date.parse(this.cyclePlan!.updatedAt || '0') > Date.parse(remotePlan!.updatedAt || '0') ||
+					this.cyclePlan!.revision > remotePlan!.revision);
 
 			this.sync = {
 				workoutsSha,
@@ -419,12 +427,13 @@ class WorkoutStore {
 				syncing: false,
 				error: '',
 				message:
-					best === remote
+					best === remote && !planAheadOfRemote
 						? 'Подключено к GitHub. Загружены данные из репозитория.'
 						: 'Подключено к GitHub. Локальные данные новее — отправьте их кнопкой «Отправить в GitHub».',
-				source: best === remote ? 'github' : 'local'
+				source: best === remote && !planAheadOfRemote ? 'github' : 'local'
 			};
 		} catch (error) {
+			if (generation !== this.githubConnectGeneration) return;
 			this.patchSync({
 				syncing: false,
 				error: error instanceof Error ? error.message : 'Ошибка подключения к GitHub'
@@ -442,6 +451,7 @@ class WorkoutStore {
 			if (this.cyclePlan) {
 				this.patchSync({ message: 'Отправка плана циклов…' });
 				await this.persistCyclePlanToGitHub(token, this.cyclePlan);
+				saveCyclePlan(this.cyclePlan);
 			}
 			this.patchSync({
 				syncing: false,
