@@ -1605,14 +1605,9 @@
 							</colgroup>
 							<thead>
 								<tr>
-									<th rowspan="2">Упражнение</th>
-									<th rowspan="2">Якорь / текущ.</th>
-									<th rowspan="2">Протокол</th>
-									{#each selectedMeso.microcycles as micro (micro.plan.id)}
-										<th colspan="2">μ{micro.plan.indexInMeso}</th>
-									{/each}
-								</tr>
-								<tr class="session-head-row">
+									<th>Упражнение</th>
+									<th>Якорь / текущ.</th>
+									<th>Протокол</th>
 									{#each selectedMeso.microcycles as micro (micro.plan.id)}
 										{#each [0, 1] as sessionIndex}
 											{@const slot = sessionIndex as 0 | 1}
@@ -1621,35 +1616,46 @@
 												class="session-head"
 												class:session-a={slot === 0}
 												class:session-b={slot === 1}
+												class:micro-group-start={slot === 0 && micro.plan.indexInMeso > 1}
 												title={sessionIndexLabel(slot)}
 											>
-												<span class="session-slot">{sessionColumnTitle(slot)}</span>
-												{#if date}
-													<a class="day-link" class:a={slot === 0} class:b={slot === 1} href="{base}/?date={date}">
-														{formatDateRu(date)}
+												<div class="session-head-inner">
+													<span class="session-mu">
+														{slot === 0 ? `μ${micro.plan.indexInMeso}` : '·'}
+													</span>
+													<span class="session-slot">{sessionColumnTitle(slot)}</span>
+													{#if date}
+														<a
+															class="day-link"
+															class:a={slot === 0}
+															class:b={slot === 1}
+															href="{base}/?date={date}"
+														>
+															{formatDateRu(date)}
+														</a>
+													{:else}
+														<span class="day-missing">—</span>
+													{/if}
+													<a
+														class="micro-log-link"
+														href={sessionAddUrl(
+															selectedMeso.plan.id,
+															micro.plan.id,
+															date,
+															slot
+														)}
+														title="Записать тренировку"
+													>
+														+
 													</a>
-												{:else}
-													<span class="day-missing">—</span>
-												{/if}
-												<a
-													class="micro-log-link"
-													href={sessionAddUrl(
-														selectedMeso.plan.id,
-														micro.plan.id,
-														date,
-														slot
-													)}
-													title="Записать тренировку"
-												>
-													+
-												</a>
+												</div>
 											</th>
 										{/each}
 									{/each}
 								</tr>
 							</thead>
 							<tbody>
-								{#each selectedMeso.protocolMatrix as row}
+								{#each selectedMeso.protocolMatrix.filter((row) => row.cells.some((cell) => cell.applicable)) as row}
 									{@const rm = selectedMeso.anchorInfo[row.exercise]}
 									<tr>
 										<td class="ex-name">{row.exercise}</td>
@@ -1667,6 +1673,9 @@
 										{#each row.cells as cell}
 											<td
 												class="pct"
+												class:session-a-col={cell.sessionIndex === 0}
+												class:session-b-col={cell.sessionIndex === 1}
+												class:micro-group-start={cell.sessionIndex === 0 && cell.microIndex > 1}
 												class:na={!cell.applicable}
 												class:match={cell.applicable &&
 													!cell.plannedOnly &&
@@ -2498,7 +2507,7 @@
 	}
 
 	.matrix :global(col.col-session) {
-		width: 4.75rem;
+		width: 5.5rem;
 	}
 
 	.matrix th,
@@ -2608,23 +2617,31 @@
 		color: var(--accent);
 	}
 
-	.matrix .session-head-row th {
-		top: 1.55rem;
-		padding: 0.25rem 0.2rem 0.4rem;
-		vertical-align: top;
+	.matrix .session-head {
+		padding: 0.35rem 0.25rem;
+		vertical-align: bottom;
 		font-weight: 500;
 	}
 
-	.matrix .session-head {
-		display: grid;
-		gap: 0.2rem;
-		justify-items: center;
+	.matrix .session-head-inner {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.18rem;
+		min-width: 0;
+	}
+
+	.matrix .session-mu {
+		font-size: 0.58rem;
+		font-weight: 600;
+		color: var(--muted);
+		letter-spacing: 0.02em;
 	}
 
 	.matrix .session-slot {
-		font-size: 0.68rem;
+		font-size: 0.72rem;
 		font-weight: 800;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.06em;
 	}
 
 	.matrix .session-head.session-a .session-slot {
@@ -2676,8 +2693,20 @@
 		line-height: 1;
 	}
 
+	.matrix .micro-group-start {
+		border-left: 2px solid var(--line-strong);
+	}
+
+	.matrix .session-a-col {
+		background: rgb(91 157 255 / 3%);
+	}
+
+	.matrix .session-b-col {
+		background: rgb(110 231 168 / 3%);
+	}
+
 	.matrix .pct.na {
-		opacity: 0.35;
+		opacity: 0.28;
 	}
 
 	.gap-note {
