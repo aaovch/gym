@@ -121,17 +121,12 @@
 	);
 
 	const selectedMacro = $derived.by((): EnrichedMacrocycle | null => {
-		if (displayMacros.length === 0) return null;
-		const pick =
-			macroPick && displayMacros.some((macro) => macro.plan.id === macroPick)
-				? macroPick
-				: displayMacros[displayMacros.length - 1].plan.id;
-		return displayMacros.find((macro) => macro.plan.id === pick) ?? null;
+		if (displayMacros.length === 0 || !macroPick) return null;
+		return displayMacros.find((macro) => macro.plan.id === macroPick) ?? null;
 	});
 
 	const scopedMesos = $derived.by((): EnrichedMesocycle[] => {
 		if (selectedMacro) return selectedMacro.mesocycles;
-		if (displayMacros.length > 0) return displayOrphans;
 		return displayMesos;
 	});
 
@@ -519,7 +514,7 @@
 	}
 
 	function ensurePlanForConstructor(): boolean {
-		if (plan) return true;
+		if (workoutStore.cyclePlan) return true;
 		importCyclePlanFromAuto();
 		if (workoutStore.cyclePlan) return true;
 		saveCyclePlanState(emptyCyclePlan());
@@ -656,9 +651,10 @@
 	}
 
 	function confirmMesoConstructor() {
-		if (!plan || constructorExercises.length === 0) return;
+		const currentPlan = workoutStore.cyclePlan;
+		if (!currentPlan || constructorExercises.length === 0) return;
 		const next = createMesocycleFromConstructor(
-			plan,
+			currentPlan,
 			{
 				label: constructorLabel,
 				startDate: constructorStart || defaultMesoStartDate(view.entries),
@@ -669,9 +665,9 @@
 			},
 			keyMaps
 		);
-		save(next);
+		if (!save(next)) return;
 		const meso = next.mesocycles[next.mesocycles.length - 1];
-		if (mesoConstructorMacroId) macroPick = mesoConstructorMacroId;
+		macroPick = mesoConstructorMacroId;
 		mesoPick = meso?.id ?? null;
 		mesoTab = 'plan';
 		showMesoConstructor = false;
@@ -700,9 +696,10 @@
 		return '';
 	}
 
-	function save(next: NonNullable<typeof plan>) {
+	function save(next: CyclePlan): boolean {
 		try {
 			saveCyclePlanState(next);
+			return true;
 		} catch (error) {
 			workoutStore.patchSync({
 				error:
@@ -710,6 +707,7 @@
 						? error.message
 						: 'Не удалось сохранить план. Проверьте якоря и протоколы упражнений.'
 			});
+			return false;
 		}
 	}
 
@@ -1571,7 +1569,13 @@
 	</div>
 	<div class="head-actions">
 		<button type="button" class="btn primary" onclick={openMacroConstructor}>Создать макроцикл</button>
-		<button type="button" class="btn" onclick={() => openMesoConstructor()}>Добавить мезоцикл</button>
+		<button
+			type="button"
+			class="btn"
+			onclick={() => openMesoConstructor(selectedMacro?.plan.id ?? null)}
+		>
+			Добавить мезоцикл
+		</button>
 		{#if !usingManual}
 			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
 		{/if}
@@ -1909,7 +1913,7 @@
 			</div>
 		{/if}
 
-		{#if displayOrphans.length > 0 && displayMacros.length > 0}
+		{#if displayOrphans.length > 0 && displayMacros.length > 0 && selectedMacro}
 			<div class="timeline-block orphan-block">
 				<span class="timeline-kicker">Мезо вне макро</span>
 				<div class="timeline-grid meso-grid compact">
