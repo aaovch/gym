@@ -791,11 +791,20 @@ export function microcyclePlanForDate(
 export function exercisesForMicroSession(
 	meso: EnrichedMesocycle,
 	templates: WorkoutTemplate[],
-	indexInMicro: number
+	indexInMicro: 0 | 1,
+	keyMaps?: ExerciseKeyMaps
 ): string[] {
+	const inMeso = new Set(Object.keys(meso.anchorInfo));
+	const sessions = meso.plan.exerciseSessions;
+	if (sessions && keyMaps) {
+		const fromPlan = Object.entries(sessions)
+			.filter(([, slots]) => slots.includes(indexInMicro))
+			.map(([exerciseId]) => keyMaps.nameById.get(exerciseId) ?? exerciseId)
+			.filter((exercise) => inMeso.has(exercise));
+		if (fromPlan.length) return pickMesoExercises(fromPlan);
+	}
 	const template = templates.find((item) => item.indexInMicro === indexInMicro);
 	if (!template) return [];
-	const inMeso = new Set(Object.keys(meso.anchorInfo));
 	return template.exercises.filter((exercise) => inMeso.has(exercise));
 }
 

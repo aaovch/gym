@@ -8,6 +8,7 @@
     sortExercisesByAnchorDesc,
     type EnrichedMicrocycle
   } from '$lib/cycle-plan';
+  import { sessionPlanByIndex } from '$lib/micro-plan';
   import { createLog } from '$lib/database';
   import { mesoProtocolId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, todayIso } from '$lib/format';
@@ -76,16 +77,32 @@
   const slotExercises = $derived.by(() => {
     if (!mesocycle || activeIndex == null) return [];
     return sortExercisesByAnchorDesc(
-      exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex),
+      exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex, view.keyMaps),
       mesocycle.anchorInfo
     );
   });
-  const entriesForDate = $derived(
-    view.entries
-      .filter((entry) => entry.date === workoutDate)
-      .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
-  );
-  const entryByExercise = $derived(new Map(entriesForDate.map((entry) => [entry.exercise, entry])));
+  const activeMicroSessionId = $derived.by(() => {
+    if (!microcycle || activeIndex == null) return null;
+    return sessionPlanByIndex(microcycle.plan, activeIndex)?.id ?? null;
+  });
+  const entriesForSession = $derived.by(() => {
+    if (!sessionReady || !microcycle || activeIndex == null) return [];
+    const msId = activeMicroSessionId;
+    if (msId) {
+      const linked = view.entries.filter((entry) => entry.microSessionId === msId);
+      if (linked.length) {
+        return linked.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
+      }
+    }
+    const sessionDate = sessionDateForIndex(microcycle, activeIndex);
+    if (!sessionDate) return [];
+    return view.entries
+      .filter(
+        (entry) => entry.date === sessionDate && slotExercises.includes(entry.exercise)
+      )
+      .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
+  });
+  const entryByExercise = $derived(new Map(entriesForSession.map((entry) => [entry.exercise, entry])));
   const loggedPlanned = $derived(slotExercises.filter((exercise) => entryByExercise.has(exercise)).length);
   const sessionProgress = $derived(
     slotExercises.length ? Math.round((loggedPlanned / slotExercises.length) * 100) : 0
@@ -119,9 +136,18 @@
   const volumeGuideRows = $derived(
     thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
   );
-  const outOfPlanEntries = $derived(
-    entriesForDate.filter((entry) => !slotExercises.includes(entry.exercise))
-  );
+  const outOfPlanEntries = $derived.by(() => {
+    if (!sessionReady) return [];
+    const sessionDate = plannedSessionDate ?? workoutDate;
+    return view.entries
+      .filter(
+        (entry) =>
+          entry.date === sessionDate &&
+          !slotExercises.includes(entry.exercise) &&
+          !entriesForSession.some((linked) => linked.id === entry.id)
+      )
+      .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
+  });
 
   function sessionDateForIndex(micro: EnrichedMicrocycle, index: 0 | 1): string | null {
     return index === 0 ? (micro.dayA?.date ?? null) : (micro.dayB?.date ?? null);
@@ -129,7 +155,7 @@
 
   function sessionProgressFor(micro: EnrichedMicrocycle, index: 0 | 1): number {
     if (!mesocycle) return 0;
-    const exercises = exercisesForMicroSession(mesocycle, view.workoutTemplates, index);
+    const exercises = exercisesForMicroSession(mesocycle, view.workoutTemplates, index, view.keyMaps);
     if (!exercises.length) return 0;
     const date = sessionDateForIndex(micro, index);
     if (!date) return 0;
@@ -155,6 +181,7 @@
     const protocolId =
       mesoProtocolId(mesocycle.plan, exerciseName, view.keyMaps) ?? mesocycle.plan.templateId;
     const guide = thesesStore.protocolGuideFor(protocolId);
+    const sessionDate = sessionPlanByIndex(microcycle.plan, activeIndex ?? 0)?.date;
     return {
       exercise: exerciseName,
       kind: exerciseKind(exerciseName),
@@ -166,7 +193,8 @@
       micro: microcycle.plan,
       keyMaps: view.keyMaps,
       protocolGuideWeek: protocolGuideWeek(guide?.weeks, microcycle.plan.indexInMeso),
-      volumeGuideRows
+      volumeGuideRows,
+      allowLastWorkoutFallback: Boolean(sessionDate)
     };
   }
 

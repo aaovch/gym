@@ -53,6 +53,8 @@ export type PlannedSetsInput = {
 	keyMaps: ExerciseKeyMaps;
 	protocolGuideWeek?: ProtocolGuideWeek | null;
 	volumeGuideRows: VolumeGuideRow[];
+	/** false для нового μ без назначенной даты — не копировать прошлую тренировку. */
+	allowLastWorkoutFallback?: boolean;
 };
 
 export function suggestPlannedSets(input: PlannedSetsInput): ExerciseSet[] {
@@ -65,13 +67,6 @@ export function suggestPlannedSets(input: PlannedSetsInput): ExerciseSet[] {
 	);
 	const plannedWeight =
 		input.anchor1rm && pct ? targetWeight(input.anchor1rm, pct) : null;
-
-	const last = lastEntryBefore(input.entries, input.exercise, input.date);
-	if (last?.sets.length) {
-		if (input.kind !== 'strength') return last.sets.map((set) => [...set] as ExerciseSet);
-		const weight = plannedWeight ?? last.sets[0]![0];
-		return last.sets.map(([, reps]) => [weight, reps] as ExerciseSet);
-	}
 
 	if (plannedWeight && input.protocolGuideWeek?.prescription) {
 		const parsed = parsePrescription(input.protocolGuideWeek.prescription, plannedWeight);
@@ -87,6 +82,15 @@ export function suggestPlannedSets(input: PlannedSetsInput): ExerciseSet[] {
 				: 5;
 			const setCount = Math.max(1, Math.round(row.optimalTotalReps / reps));
 			return Array.from({ length: setCount }, () => [plannedWeight, reps] as ExerciseSet);
+		}
+	}
+
+	if (input.allowLastWorkoutFallback !== false) {
+		const last = lastEntryBefore(input.entries, input.exercise, input.date);
+		if (last?.sets.length) {
+			if (input.kind !== 'strength') return last.sets.map((set) => [...set] as ExerciseSet);
+			const weight = plannedWeight ?? last.sets[0]![0];
+			return last.sets.map(([, reps]) => [weight, reps] as ExerciseSet);
 		}
 	}
 
