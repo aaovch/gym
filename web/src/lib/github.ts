@@ -23,7 +23,13 @@ function authHeaders(token: string): HeadersInit {
 }
 
 function utf8ToBase64(text: string): string {
-	return btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+	const bytes = new TextEncoder().encode(text);
+	const chunkSize = 0x8000;
+	let binary = '';
+	for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+		binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+	}
+	return btoa(binary);
 }
 
 function base64ToUtf8(base64: string): string {

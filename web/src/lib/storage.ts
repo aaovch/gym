@@ -45,6 +45,8 @@ export function loadCyclePlan(): CyclePlan | null {
 		return normalizeCyclePlan(plan);
 	} catch (error) {
 		console.error('Не удалось загрузить локальный план циклов:', error);
+		// Устаревший или битый формат — не блокируем работу, подтянем план из сборки/GitHub.
+		localStorage.removeItem(CYCLE_PLAN_KEY);
 		return null;
 	}
 }
