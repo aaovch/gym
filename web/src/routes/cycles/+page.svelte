@@ -41,16 +41,13 @@
 	} from '$lib/macro-constructor';
 	import RmLabels from '$lib/components/RmLabels.svelte';
 	import {
-		clearCyclePlanState,
 		importCyclePlanFromAuto,
-		refreshMesoAnchorsFromData,
-		repairPlanMicroDatesFromAuto,
 		saveCyclePlanState,
 		workoutStore
 	} from '$lib/workout-store';
 	import { thesesStore, formatAdaptationStars } from '$lib/training-theses';
 
-	type MesoTab = 'plan' | 'workouts' | 'settings';
+	type MesoTab = 'plan' | 'settings';
 
 	type ConstructorRow = {
 		enabled: boolean;
@@ -70,13 +67,11 @@
 
 	let editMode = $state(false);
 	let showHelp = $state(false);
-	let showMoreActions = $state(false);
 	let showMacroConstructor = $state(false);
 	let showMesoConstructor = $state(false);
 	let mesoTab = $state<MesoTab>('plan');
 	let macroPick = $state<string | null>(null);
 	let mesoPick = $state<string | null>(null);
-	let microPick = $state<string | null>(null);
 	let mesoConstructorMacroId = $state<string | null>(null);
 	let macroLabel = $state('Макро 1');
 	let macroStart = $state('');
@@ -127,16 +122,11 @@
 		return mesos.find((meso) => meso.plan.id === pick) ?? null;
 	});
 
-	const selectedMicro = $derived.by(() => {
+	const nextMicroToLog = $derived.by(() => {
 		if (!selectedMeso) return null;
 		const micros = selectedMeso.microcycles;
 		if (micros.length === 0) return null;
-		const pick =
-			microPick && micros.some((micro) => micro.plan.id === microPick)
-				? microPick
-				: micros.find((micro) => !micro.complete)?.plan.id ??
-					micros[micros.length - 1].plan.id;
-		return micros.find((micro) => micro.plan.id === pick) ?? null;
+		return micros.find((micro) => !micro.complete) ?? micros[micros.length - 1];
 	});
 
 	function todayWorkoutUrl(mesoId: string, microId: string): string {
@@ -1152,20 +1142,6 @@
 			<button type="button" class="btn" class:active={editMode} onclick={() => (editMode = !editMode)}>
 				{editMode ? '✓ Редактирование' : 'Редактировать'}
 			</button>
-			<div class="more-wrap">
-				<button type="button" class="btn" onclick={() => (showMoreActions = !showMoreActions)}>
-					Ещё ▾
-				</button>
-				{#if showMoreActions}
-					<div class="more-menu">
-						<button type="button" onclick={() => refreshMesoAnchorsFromData(true)}>Пересчитать якорные 1ПМ</button>
-						<button type="button" onclick={() => repairPlanMicroDatesFromAuto()}>
-							Восстановить даты μ
-						</button>
-						<button type="button" class="danger" onclick={clearCyclePlanState}>Сбросить план</button>
-					</div>
-				{/if}
-			</div>
 		{/if}
 		<button type="button" class="btn ghost-link" onclick={() => (showHelp = !showHelp)}>
 			{showHelp ? 'Скрыть методику' : 'Методика'}
@@ -1422,7 +1398,6 @@
 						onclick={() => {
 							macroPick = macro.plan.id;
 							mesoPick = macro.mesocycles[macro.mesocycles.length - 1]?.plan.id ?? null;
-							microPick = null;
 						}}
 					>
 						<span class="meso-tab-num">M{macro.index}</span>
@@ -1468,7 +1443,6 @@
 						onclick={() => {
 							macroPick = null;
 							mesoPick = meso.plan.id;
-							microPick = null;
 						}}
 					>
 						<span class="meso-tab-num">#{meso.index}</span>
@@ -1502,10 +1476,7 @@
 						class="meso-tab"
 						class:active={selectedMeso?.plan.id === meso.plan.id}
 						style="--meso-color: {mesocycleColor(meso.index)}"
-						onclick={() => {
-							mesoPick = meso.plan.id;
-							microPick = null;
-						}}
+						onclick={() => (mesoPick = meso.plan.id)}
 					>
 						<span class="meso-tab-num">#{meso.index}</span>
 						<span class="meso-tab-label">{meso.plan.label}</span>
@@ -1540,8 +1511,11 @@
 					</p>
 				</div>
 				<div class="detail-actions">
-					{#if selectedMicro}
-						<a class="btn small primary" href={todayWorkoutUrl(selectedMeso.plan.id, selectedMicro.plan.id)}>
+					{#if nextMicroToLog}
+						<a
+							class="btn small primary"
+							href={todayWorkoutUrl(selectedMeso.plan.id, nextMicroToLog.plan.id)}
+						>
 							Записать тренировку
 						</a>
 					{/if}
@@ -1570,14 +1544,6 @@
 				>
 					План (% и цели)
 				</button>
-				<button
-					type="button"
-					class="sub-tab"
-					class:active={mesoTab === 'workouts'}
-					onclick={() => (mesoTab = 'workouts')}
-				>
-					Тренировки (μ)
-				</button>
 				{#if editMode && usingManual}
 					<button
 						type="button"
@@ -1593,7 +1559,8 @@
 			{#if mesoTab === 'plan'}
 				<div class="tab-panel">
 					<p class="panel-hint muted">
-						План (% и кг) по якорному 1ПМ · факт — пик % от якоря за микроцикл (лучший подход)
+						План (% и кг) по якорному 1ПМ · факт — пик % от якоря за микроцикл (лучший подход).
+						Даты A/B — фактические тренировочные дни в каждом μ.
 					</p>
 					<div class="matrix-wrap">
 						<table class="matrix">
@@ -1612,6 +1579,39 @@
 									<th>Протокол</th>
 									{#each selectedMeso.microcycles as micro}
 										<th>μ{micro.plan.indexInMeso}</th>
+									{/each}
+								</tr>
+								<tr class="micro-dates-row">
+									<th colspan="3" class="micro-dates-label">Дни</th>
+									{#each selectedMeso.microcycles as micro (micro.plan.id)}
+										<th class="micro-dates-cell">
+											<div class="micro-days">
+												{#if micro.dayA}
+													<a class="day-link a" href="{base}/?date={micro.dayA.date}">
+														A · {formatDateRu(micro.dayA.date)}
+													</a>
+												{/if}
+												{#if micro.dayB}
+													<a class="day-link b" href="{base}/?date={micro.dayB.date}">
+														B · {formatDateRu(micro.dayB.date)}
+													</a>
+												{/if}
+												{#if !micro.dayA && !micro.dayB}
+													<span class="muted micro-empty">—</span>
+												{/if}
+											</div>
+											<div class="micro-dates-meta">
+												<span class="micro-badge" class:ok={micro.complete}>
+													{micro.complete ? 'A+B' : 'неполный'}
+												</span>
+												<a
+													class="micro-log-link"
+													href={todayWorkoutUrl(selectedMeso.plan.id, micro.plan.id)}
+												>
+													+
+												</a>
+											</div>
+										</th>
 									{/each}
 								</tr>
 							</thead>
@@ -1663,87 +1663,6 @@
 							</tbody>
 						</table>
 					</div>
-				</div>
-			{:else if mesoTab === 'workouts'}
-				<div class="tab-panel micro-timeline">
-					<div class="micro-picker-row">
-						{#each selectedMeso.microcycles as micro (micro.plan.id)}
-							<button
-								type="button"
-								class="micro-pick-btn"
-								class:active={selectedMicro?.plan.id === micro.plan.id}
-								class:complete={micro.complete}
-								onclick={() => (microPick = micro.plan.id)}
-							>
-								μ{micro.plan.indexInMeso}
-							</button>
-						{/each}
-						{#if selectedMicro}
-							<a class="btn small primary" href={todayWorkoutUrl(selectedMeso.plan.id, selectedMicro.plan.id)}>
-								Занести данные →
-							</a>
-						{/if}
-					</div>
-					{#each selectedMeso.microcycles as micro}
-						<article
-							class="micro-block"
-							class:complete={micro.complete}
-							class:selected={selectedMicro?.plan.id === micro.plan.id}
-						>
-							<div class="micro-top">
-								<span class="micro-label">μ{micro.plan.indexInMeso}</span>
-								<div class="micro-days">
-									{#if micro.dayA}
-										<a class="day-link a" href="{base}/?date={micro.dayA.date}">
-											A · {formatDateRu(micro.dayA.date)}
-										</a>
-									{/if}
-									{#if micro.dayB}
-										<a class="day-link b" href="{base}/?date={micro.dayB.date}">
-											B · {formatDateRu(micro.dayB.date)}
-										</a>
-									{/if}
-								</div>
-								<span class="micro-badge" class:ok={micro.complete}>
-									{micro.complete ? 'A+B' : 'неполный'}
-								</span>
-							</div>
-							{#if micro.intensityByExercise.length > 0}
-								<table class="result-table">
-									<thead>
-										<tr>
-											<th></th>
-											<th>Цель</th>
-											<th>Факт</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each micro.intensityByExercise as row}
-											<tr class:match={!row.plannedOnly && Math.abs(row.maxPct - row.targetPct) <= 3}>
-												<td>
-													<strong>{row.exercise}</strong>
-													<small class="muted">{row.protocolLabel ?? ''}</small>
-												</td>
-												<td>
-													{fmtNum(row.targetWeight)} кг
-													<small class="muted">({row.targetPct}%)</small>
-												</td>
-												<td>
-													{#if row.plannedOnly}
-														<span class="muted">—</span>
-													{:else}
-														{fmtNum(row.maxPct)}%
-													{/if}
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							{:else}
-								<p class="muted empty-micro">Нет данных по упражнениям</p>
-							{/if}
-						</article>
-					{/each}
 					{#if selectedMeso.gapAfterDays !== null && selectedMeso.gapAfterDays >= 14}
 						<p class="gap-note">
 							Перерыв до следующего блока: {Math.round(selectedMeso.gapAfterDays / 7)} нед.
@@ -1961,41 +1880,6 @@
 	.btn.ghost-link {
 		background: transparent;
 		color: var(--muted);
-	}
-
-	.more-wrap {
-		position: relative;
-	}
-
-	.more-menu {
-		position: absolute;
-		top: calc(100% + 0.35rem);
-		right: 0;
-		z-index: 5;
-		display: grid;
-		min-width: 11rem;
-		padding: 0.35rem;
-		border-radius: 0;
-		border: none;
-		background: var(--surface);
-		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-	}
-
-	.more-menu button {
-		text-align: left;
-		padding: 0.45rem 0.55rem;
-		border: none;
-		border-radius: 0;
-		background: transparent;
-		color: var(--text);
-	}
-
-	.more-menu button:hover {
-		background: var(--surface-2);
-	}
-
-	.more-menu button.danger {
-		color: var(--danger);
 	}
 
 	.ab-grid {
@@ -2575,7 +2459,7 @@
 	}
 
 	.matrix :global(col.col-micro) {
-		width: 5.25rem;
+		width: 6.5rem;
 	}
 
 	.matrix th,
@@ -2685,83 +2569,40 @@
 		color: var(--accent);
 	}
 
-	.micro-block.selected {
-		background: rgba(110, 231, 168, 0.06);
+	.matrix .micro-dates-row th {
+		top: 1.65rem;
+		padding-top: 0.2rem;
+		padding-bottom: 0.45rem;
+		vertical-align: top;
+		font-weight: 500;
 	}
 
-	.micro-picker-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem;
-		align-items: center;
-		margin-bottom: 0.75rem;
+	.matrix .micro-dates-label {
+		text-align: left;
+		font-size: 0.68rem;
 	}
 
-	.micro-pick-btn {
-		min-width: 2.5rem;
-		padding: 0.35rem 0.6rem;
-		border-radius: 0;
-		border: none;
-		background: var(--surface-2);
-		color: var(--text);
-		font-weight: 700;
-		font-size: 0.85rem;
-	}
-
-	.micro-pick-btn.active {
-		background: rgba(110, 231, 168, 0.14);
-		color: var(--accent);
-	}
-
-	.micro-pick-btn.complete {
-		background: rgba(110, 231, 168, 0.08);
-	}
-
-	.micro-timeline {
-		display: grid;
-		gap: 0.75rem;
-	}
-
-	.micro-block {
-		padding: 0.85rem 0;
-		border-radius: 0;
-		border: none;
-		border-bottom: 1px solid var(--line);
-		background: transparent;
-	}
-
-	.micro-block.complete {
-		opacity: 0.92;
-	}
-
-	.micro-top {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.65rem;
-	}
-
-	.micro-label {
-		font-weight: 800;
-		font-size: 1rem;
-		color: var(--muted);
-		min-width: 2rem;
+	.matrix .micro-dates-cell {
+		padding-inline: 0.25rem;
 	}
 
 	.micro-days {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-		flex: 1;
+		flex-direction: column;
+		gap: 0.25rem;
+		align-items: stretch;
 	}
 
 	.day-link {
-		padding: 0.25rem 0.55rem;
+		display: block;
+		padding: 0.2rem 0.35rem;
 		border-radius: 0;
 		text-decoration: none;
-		font-size: 0.8rem;
-		border: none;
+		font-size: 0.68rem;
+		line-height: 1.2;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.day-link.a {
@@ -2774,9 +2615,20 @@
 		color: var(--text);
 	}
 
+	.micro-empty {
+		font-size: 0.72rem;
+	}
+
+	.micro-dates-meta {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.35rem;
+		margin-top: 0.3rem;
+	}
+
 	.micro-badge {
-		margin-left: auto;
-		font-size: 0.75rem;
+		font-size: 0.65rem;
 		color: #fbbf24;
 	}
 
@@ -2784,41 +2636,17 @@
 		color: var(--accent);
 	}
 
-	.result-table {
-		width: 100%;
-		font-size: 0.8rem;
-		border-collapse: collapse;
-		table-layout: fixed;
-	}
-
-	.result-table th,
-	.result-table td {
-		padding: 0.35rem 0.45rem;
-		border: none;
-		border-bottom: 1px solid var(--line);
-		text-align: left;
-		vertical-align: top;
-	}
-
-	.result-table th {
-		color: var(--muted);
-		font-size: 0.72rem;
-		font-weight: 600;
-	}
-
-	.result-table tr.match td:last-child {
+	.micro-log-link {
+		display: inline-grid;
+		width: 1.1rem;
+		height: 1.1rem;
+		place-items: center;
 		color: var(--accent);
-		font-weight: 600;
-	}
-
-	.result-table small {
-		display: block;
-		font-size: 0.68rem;
-	}
-
-	.empty-micro {
-		margin: 0;
-		font-size: 0.82rem;
+		background: rgba(110, 231, 168, 0.1);
+		text-decoration: none;
+		font-size: 0.85rem;
+		font-weight: 800;
+		line-height: 1;
 	}
 
 	.gap-note {
