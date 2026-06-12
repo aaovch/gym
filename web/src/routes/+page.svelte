@@ -3,22 +3,18 @@
   import { browser } from '$app/environment';
   import { page } from '$app/state';
   import {
-    defaultActiveMesoMicro,
     exerciseTargetOnMicro,
     exercisesForMicroSession,
-    resolveMesoMicroSelection,
-    suggestSessionIndex
+    type EnrichedMicrocycle
   } from '$lib/cycle-plan';
   import { createLog } from '$lib/database';
   import { mesoProtocolId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, todayIso } from '$lib/format';
-  import { microHasDate } from '$lib/micro-plan';
   import {
     indexToSlot,
     mesocycleColor,
     slotColor,
     slotLabel,
-    slotToIndex,
     type WorkoutSlot
   } from '$lib/microcycle';
   import {
@@ -42,36 +38,48 @@
   const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
   const urlMeso = $derived.by(() => (browser ? page.url.searchParams.get('meso') : null));
   const urlMicro = $derived.by(() => (browser ? page.url.searchParams.get('micro') : null));
-  const selectedDate = $derived(urlDate ?? datePick);
+  const urlSession = $derived.by(() => {
+    const raw = browser ? page.url.searchParams.get('session') : null;
+    if (raw === '0') return 0 as const;
+    if (raw === '1') return 1 as const;
+    return null;
+  });
   const view = $derived(workoutStore.view);
   const mesocycles = $derived(view.cyclePlanView.mesocycles);
 
   const trainingContext = $derived.by(() => {
-    const resolved = resolveMesoMicroSelection(
-      mesocycles,
-      selectedDate,
-      mesoPick ?? urlMeso,
-      microPick ?? urlMicro
-    );
-    if (resolved) return resolved;
-    const hasExplicitPick = Boolean(mesoPick ?? urlMeso ?? microPick ?? urlMicro);
-    if (!hasExplicitPick && selectedDate === todayIso()) return defaultActiveMesoMicro(mesocycles);
-    return null;
+    const mesoId = mesoPick ?? urlMeso;
+    const microId = microPick ?? urlMicro;
+    if (!mesoId || !microId) return null;
+    const meso = mesocycles.find((item) => item.plan.id === mesoId);
+    const micro = meso?.microcycles.find((item) => item.plan.id === microId);
+    if (!meso || !micro) return null;
+    return { meso, micro };
   });
 
   const mesocycle = $derived(trainingContext?.meso ?? null);
   const microcycle = $derived(trainingContext?.micro ?? null);
-  const suggestedIndex = $derived.by(() =>
-    microcycle ? suggestSessionIndex(microcycle, selectedDate, view.entries, view.workoutTemplates) : 0
+  const activeIndex = $derived.by((): 0 | 1 | null => {
+    if (slotPick != null) return slotPick === 'B' ? 1 : 0;
+    return urlSession;
+  });
+  const sessionReady = $derived(mesocycle != null && microcycle != null && activeIndex != null);
+  const activeSlot = $derived(activeIndex != null ? indexToSlot(activeIndex) : null);
+  const plannedSessionDate = $derived.by(() => {
+    if (!microcycle || activeIndex == null) return null;
+    return sessionDateForIndex(microcycle, activeIndex);
+  });
+  const workoutDate = $derived(
+    sessionReady ? (urlDate ?? plannedSessionDate ?? datePick) : (urlDate ?? datePick)
   );
-  const activeIndex = $derived(slotPick != null ? slotToIndex(slotPick) : suggestedIndex);
-  const activeSlot = $derived(indexToSlot(activeIndex));
   const slotExercises = $derived.by(() =>
-    mesocycle ? exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex) : []
+    mesocycle && activeIndex != null
+      ? exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex)
+      : []
   );
   const entriesForDate = $derived(
     view.entries
-      .filter((entry) => entry.date === selectedDate)
+      .filter((entry) => entry.date === workoutDate)
       .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
   );
   const entryByExercise = $derived(new Map(entriesForDate.map((entry) => [entry.exercise, entry])));
@@ -80,7 +88,7 @@
     slotExercises.length ? Math.round((loggedPlanned / slotExercises.length) * 100) : 0
   );
   const availableDates = $derived([...new Set(view.entries.map((entry) => entry.date))].sort().reverse());
-  const lastTrainingDate = $derived(availableDates.find((date) => date < selectedDate) ?? null);
+  const lastTrainingDate = $derived(availableDates.find((date) => date < workoutDate) ?? null);
   const totalTrainingDays = $derived(new Set(view.entries.map((entry) => entry.date)).size);
 
   const protocolHints = $derived.by(() => {
@@ -112,6 +120,29 @@
     entriesForDate.filter((entry) => !slotExercises.includes(entry.exercise))
   );
 
+  function sessionDateForIndex(micro: EnrichedMicrocycle, index: 0 | 1): string | null {
+    return index === 0 ? (micro.dayA?.date ?? null) : (micro.dayB?.date ?? null);
+  }
+
+  function sessionProgressFor(micro: EnrichedMicrocycle, index: 0 | 1): number {
+    if (!mesocycle) return 0;
+    const exercises = exercisesForMicroSession(mesocycle, view.workoutTemplates, index);
+    if (!exercises.length) return 0;
+    const date = sessionDateForIndex(micro, index);
+    if (!date) return 0;
+    const logged = exercises.filter((exercise) =>
+      view.entries.some((entry) => entry.date === date && entry.exercise === exercise)
+    ).length;
+    return Math.round((logged / exercises.length) * 100);
+  }
+
+  function pickSession(slot: WorkoutSlot) {
+    slotPick = slot;
+    if (!microcycle) return;
+    const planned = sessionDateForIndex(microcycle, slot === 'B' ? 1 : 0);
+    if (planned) datePick = planned;
+  }
+
   function exerciseKind(name: string): ExerciseKind {
     return workoutStore.database.exercises.find((item) => item.name === name)?.kind ?? 'strength';
   }
@@ -124,7 +155,7 @@
     return {
       exercise: exerciseName,
       kind: exerciseKind(exerciseName),
-      date: selectedDate,
+      date: workoutDate,
       entries: view.entries,
       anchor1rm: mesocycle.anchorInfo[exerciseName]?.anchor ?? null,
       cyclePlan: view.cyclePlanForCalc,
@@ -146,7 +177,7 @@
     const params = new URLSearchParams();
     if (entryId) params.set('id', entryId);
     else params.set('exercise', exercise);
-    params.set('date', selectedDate);
+    params.set('date', workoutDate);
     if (mesocycle) params.set('meso', mesocycle.plan.id);
     if (microcycle) params.set('micro', microcycle.plan.id);
     params.set('session', String(activeIndex));
@@ -162,7 +193,7 @@
 
   async function confirmPlanned(exerciseName: string) {
     const input = plannedInput(exerciseName);
-    if (!input || !mesocycle || !microcycle) return;
+    if (!input || !mesocycle || !microcycle || activeIndex == null) return;
     busyId = exerciseName;
     error = '';
     try {
@@ -170,7 +201,7 @@
       const { db, log } = createLog(
         workoutStore.database,
         exerciseName,
-        selectedDate,
+        workoutDate,
         [{ kind: input.kind, sets, comment: null }],
         crypto.randomUUID()
       );
@@ -204,51 +235,65 @@
 <div class="container dashboard">
   <header class="page-header">
     <div>
-      <div class="eyebrow">Рабочий день</div>
-      <h1>{selectedDate === todayIso() ? 'Тренировка сегодня' : formatDateRu(selectedDate)}</h1>
+      <div class="eyebrow">{sessionReady ? 'Тренировка' : 'Обзор'}</div>
+      <h1>
+        {#if sessionReady && workoutDate}
+          {workoutDate === todayIso() ? 'Тренировка сегодня' : formatDateRu(workoutDate)}
+        {:else}
+          Выберите тренировку
+        {/if}
+      </h1>
       <p>
-        План, целевые веса и фактические подходы собраны в одном месте. Меняй дату, если нужно
-        подготовить тренировку заранее или восстановить запись.
+        {#if sessionReady}
+          План, целевые веса и факт по выбранной сессии. Меняй дату, если нужно записать тренировку
+          в другой день.
+        {:else}
+          Укажите мезоцикл, микроцикл и сессию A или B — появится план и записи по этому дню.
+        {/if}
       </p>
     </div>
-    <div class="date-control">
-      <span>Дата тренировки</span>
-      <input
-        type="date"
-        value={selectedDate}
-        oninput={(event) => (datePick = event.currentTarget.value)}
-        list="workout-dates"
-      />
-      <datalist id="workout-dates">
-        {#each availableDates as date (date)}
-          <option value={date}></option>
-        {/each}
-      </datalist>
-    </div>
+    {#if sessionReady}
+      <div class="date-control">
+        <span>Дата записи</span>
+        <input
+          type="date"
+          value={workoutDate}
+          oninput={(event) => (datePick = event.currentTarget.value)}
+          list="workout-dates"
+        />
+        <datalist id="workout-dates">
+          {#each availableDates as date (date)}
+            <option value={date}></option>
+          {/each}
+        </datalist>
+      </div>
+    {/if}
   </header>
 
-  <section class="metric-grid overview-metrics">
-    <article class="metric-card">
-      <span>План на тренировку</span>
-      <strong>{slotExercises.length}</strong>
-      <small>упражнений в сессии {activeSlot}</small>
-    </article>
-    <article class="metric-card">
-      <span>Готовность сессии</span>
-      <strong>{sessionProgress}%</strong>
-      <small>{loggedPlanned} из {slotExercises.length} записано</small>
-    </article>
-    <article class="metric-card">
-      <span>Всего тренировок</span>
-      <strong>{totalTrainingDays}</strong>
-      <small>дней в журнале</small>
-    </article>
-    <article class="metric-card">
-      <span>Предыдущая тренировка</span>
-      <strong class="date-value">{lastTrainingDate ? formatDateRu(lastTrainingDate) : '—'}</strong>
-      <small>{lastTrainingDate ? 'последняя запись до этой даты' : 'история пока пуста'}</small>
-    </article>
-  </section>
+  {#if sessionReady}
+    <section class="metric-grid overview-metrics">
+      <article class="metric-card">
+        <span>План на тренировку</span>
+        <strong>{slotExercises.length}</strong>
+        <small>упражнений в сессии {activeSlot}</small>
+      </article>
+      <article class="metric-card">
+        <span>Готовность сессии</span>
+        <strong>{sessionProgress}%</strong>
+        <small>{loggedPlanned} из {slotExercises.length} записано</small>
+      </article>
+      <article class="metric-card">
+        <span>Всего тренировок</span>
+        <strong>{totalTrainingDays}</strong>
+        <small>дней в журнале</small>
+      </article>
+      <article class="metric-card">
+        <span>Предыдущая тренировка</span>
+        <strong class="date-value">{lastTrainingDate ? formatDateRu(lastTrainingDate) : '—'}</strong>
+        <small>{lastTrainingDate ? 'последняя запись до этой даты' : 'история пока пуста'}</small>
+      </article>
+    </section>
+  {/if}
 
   {#if mesocycles.length === 0}
     <section class="card empty-state onboarding">
@@ -266,16 +311,24 @@
         <div>
           <div class="eyebrow">Контекст тренировки</div>
           <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
-          {#if mesocycle && microcycle}
+          {#if sessionReady && mesocycle && microcycle && activeSlot}
             <p>
-              Микроцикл {microcycle.plan.indexInMeso} · сессия {activeSlot} ·
-              {formatDateRu(mesocycle.plan.startDate)} — {formatDateRu(mesocycle.plan.endDate)}
+              Микроцикл {microcycle.plan.indexInMeso} · сессия {activeSlot}
+              {#if plannedSessionDate}
+                · {formatDateRu(plannedSessionDate)}
+              {:else}
+                · дата не назначена
+              {/if}
             </p>
+          {:else if mesocycle && microcycle}
+            <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
           {/if}
         </div>
-        <div class="session-ring" style={`--progress: ${sessionProgress * 3.6}deg`}>
-          <span>{sessionProgress}%</span>
-        </div>
+        {#if sessionReady}
+          <div class="session-ring" style={`--progress: ${sessionProgress * 3.6}deg`}>
+            <span>{sessionProgress}%</span>
+          </div>
+        {/if}
       </div>
 
       <div class="context-picker">
@@ -290,11 +343,7 @@
                 style={`--choice-color: ${mesocycleColor(meso.index)}`}
                 onclick={() => {
                   mesoPick = meso.plan.id;
-                  microPick =
-                    meso.microcycles.find((micro) => microHasDate(micro.plan, selectedDate))?.plan.id ??
-                    meso.microcycles.find((micro) => !micro.complete)?.plan.id ??
-                    meso.microcycles[0]?.plan.id ??
-                    null;
+                  microPick = null;
                   slotPick = null;
                 }}
               >
@@ -333,15 +382,30 @@
           <div class="choice-row compact">
             {#each ['A', 'B'] as slot (slot)}
               {@const slotKey = slot as WorkoutSlot}
+              {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
+              {@const slotDate = microcycle ? sessionDateForIndex(microcycle, slotIndex) : null}
+              {@const slotProgress = microcycle ? sessionProgressFor(microcycle, slotIndex) : 0}
               <button
                 type="button"
                 class="slot-choice"
                 class:active={activeSlot === slotKey}
+                class:disabled={!microcycle}
+                disabled={!microcycle}
                 style={`--choice-color: ${slotColor(slotKey)}`}
-                onclick={() => (slotPick = slotKey)}
+                onclick={() => pickSession(slotKey)}
               >
                 <b>{slot}</b>
-                <span>{slotLabel(slotKey)}</span>
+                <span>
+                  {slotLabel(slotKey)}
+                  {#if microcycle}
+                    <small>
+                      {slotDate ? formatDateRu(slotDate) : 'без даты'}
+                      {#if slotProgress > 0}
+                        · {slotProgress}%
+                      {/if}
+                    </small>
+                  {/if}
+                </span>
               </button>
             {/each}
           </div>
@@ -349,17 +413,37 @@
       </div>
     </section>
 
-    <div class="section-heading">
-      <div>
-        <h2>План сессии {activeSlot}</h2>
-        <p>Готово — по плану. Изменить — если нужно подправить.</p>
+    {#if !sessionReady}
+      <section class="card empty-state picker-empty">
+        <h2>Тренировка не выбрана</h2>
+        <p>
+          Выберите мезоцикл, микроцикл и сессию — ниже появится план с целевыми весами. Заполните
+          по кнопке «Готово» или отредактируйте уже записанные подходы.
+        </p>
+      </section>
+    {:else}
+      <div class="section-heading">
+        <div>
+          <h2>План сессии {activeSlot}</h2>
+          <p>
+            {#if sessionProgress === 100}
+              Сессия записана — можно отредактировать отдельные упражнения.
+            {:else if loggedPlanned > 0}
+              Часть упражнений уже записана — дозаполните остальные или измените факт.
+            {:else}
+              Готово — принять план как есть. Изменить — если нужно подправить веса или подходы.
+            {/if}
+          </p>
+        </div>
+        <a
+          class="button button-secondary"
+          href="{base}/add?date={workoutDate}&meso={mesocycle?.plan.id}&micro={microcycle?.plan.id}&session={activeIndex}"
+        >
+          Добавить вне плана
+        </a>
       </div>
-      <a class="button button-secondary" href="{base}/add?date={selectedDate}&session={activeIndex}">
-        Добавить вне плана
-      </a>
-    </div>
 
-    {#if mesocycle && microcycle && slotExercises.length > 0}
+      {#if slotExercises.length > 0}
       <section class="exercise-grid">
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
@@ -418,16 +502,17 @@
           </article>
         {/each}
       </section>
-    {:else}
-      <section class="card empty-state">
-        <h2>Для этой сессии нет упражнений</h2>
-        <p>Добавьте упражнения в мезоцикл или выберите другую сессию.</p>
-        <a class="button button-secondary" href="{base}/cycles">Открыть план</a>
-      </section>
+      {:else}
+        <section class="card empty-state">
+          <h2>Для этой сессии нет упражнений</h2>
+          <p>Добавьте упражнения в мезоцикл или выберите другую сессию.</p>
+          <a class="button button-secondary" href="{base}/cycles">Открыть план</a>
+        </section>
+      {/if}
     {/if}
   {/if}
 
-  {#if outOfPlanEntries.length > 0}
+  {#if sessionReady && outOfPlanEntries.length > 0}
     <div class="section-heading">
       <div>
         <h2>Вне плана</h2>
@@ -490,8 +575,9 @@
     line-height: 1.15;
   }
 
-  .onboarding {
-    margin-top: 24px;
+  .onboarding,
+  .picker-empty {
+    margin-top: 16px;
   }
 
   .training-card {
@@ -635,8 +721,21 @@
   }
 
   .slot-choice span {
+    display: grid;
+    gap: 2px;
     font-size: 10px;
     font-weight: 700;
+  }
+
+  .slot-choice span small {
+    color: var(--muted);
+    font-size: 8px;
+    font-weight: 650;
+  }
+
+  .slot-choice:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .exercise-grid {
