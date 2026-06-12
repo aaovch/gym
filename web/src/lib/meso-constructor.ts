@@ -13,7 +13,7 @@ import {
 	targetWeight,
 	type ProtocolTemplate
 } from './protocol';
-import type { WorkoutEntry } from './types';
+import type { Exercise, WorkoutEntry } from './types';
 
 export type MesoExerciseSetup = {
 	exercise: string;
@@ -43,13 +43,26 @@ export type MesoConstructorExerciseRow = {
 
 export function knownMesoExercises(
 	entries: WorkoutEntry[],
-	workoutTemplates: WorkoutTemplate[]
+	workoutTemplates: WorkoutTemplate[],
+	catalog: Exercise[] = []
 ): string[] {
 	const names = new Set<string>();
 	for (const entry of entries) names.add(entry.exercise);
 	for (const template of workoutTemplates) {
 		for (const exercise of template.exercises) names.add(exercise);
 	}
+	for (const exercise of catalog) {
+		if (exercise.kind === 'strength') names.add(exercise.name);
+	}
+	return pickMesoExercises([...names]);
+}
+
+export function mergeConstructorExerciseNames(
+	known: string[],
+	selection: Map<string, unknown>
+): string[] {
+	const names = new Set(known);
+	for (const exercise of selection.keys()) names.add(exercise);
 	return pickMesoExercises([...names]);
 }
 

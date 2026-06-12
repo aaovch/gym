@@ -1152,6 +1152,38 @@ export function removeExerciseFromMeso(
 	});
 }
 
+/** Добавить упражнение из каталога в мезоцикл (якорь из истории или вручную). */
+export function addExerciseToMeso(
+	plan: CyclePlan,
+	mesoId: string,
+	exercise: string,
+	entries: WorkoutEntry[],
+	keyMaps: ExerciseKeyMaps
+): CyclePlan {
+	const id = toExerciseId(exercise, keyMaps);
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			if (meso.anchor1rm[id] != null) return meso;
+
+			const resolved = resolveMesoAnchor1rm(entries, exercise, meso.startDate, meso.endDate);
+			const anchor1rm = { ...meso.anchor1rm };
+			if (resolved) {
+				anchor1rm[id] = resolved.value;
+				return { ...meso, anchor1rm };
+			}
+
+			anchor1rm[id] = 0;
+			return {
+				...meso,
+				anchor1rm,
+				anchor1rmManual: { ...(meso.anchor1rmManual ?? {}), [id]: true }
+			};
+		})
+	});
+}
+
 /** Убрать упражнение из всех мезоциклов плана (якоря и протоколы). */
 export function purgeExerciseFromPlan(plan: CyclePlan, exerciseId: string): CyclePlan {
 	return touchPlan({

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import {
+		addExerciseToMeso,
 		addMicrocycle,
 		addProtocolPhase,
 		assignDate,
@@ -33,6 +34,7 @@
 		createMesocycleFromConstructor,
 		defaultMesoStartDate,
 		knownMesoExercises,
+		mergeConstructorExerciseNames,
 		previewMesoPlan,
 		resolveExerciseAnchor,
 		suggestedMicroCount,
@@ -95,6 +97,9 @@
 	let constructorStart = $state('');
 	let constructorMicroCount = $state(4);
 	let constructorSelection = $state<Map<string, ConstructorRow>>(new Map());
+	let constructorQuery = $state('');
+	let constructorAddPick = $state('');
+	let mesoAddExercisePick = $state('');
 
 	const view = $derived(workoutStore.view);
 	const keyMaps = $derived(view.keyMaps);
@@ -166,7 +171,30 @@
 
 	const activeProtocolGuide = $derived(thesesStore.protocolGuideFor(activeTemplate.id));
 
-	const knownExercises = $derived(knownMesoExercises(view.entries, workoutTemplates));
+	const knownExercises = $derived(knownMesoExercises(view.entries, workoutTemplates, view.exercises));
+
+	const catalogStrengthExercises = $derived(
+		view.exercises
+			.filter((exercise) => exercise.kind === 'strength')
+			.map((exercise) => exercise.name)
+			.sort((a, b) => a.localeCompare(b, 'ru'))
+	);
+
+	const constructorExerciseList = $derived(
+		mergeConstructorExerciseNames(knownExercises, constructorSelection)
+	);
+
+	const filteredConstructorExercises = $derived(
+		constructorExerciseList.filter((exercise) => {
+			const q = constructorQuery.trim().toLowerCase();
+			if (!q) return true;
+			return exercise.toLowerCase().includes(q);
+		})
+	);
+
+	const constructorAddOptions = $derived(
+		catalogStrengthExercises.filter((name) => !constructorSelection.has(name))
+	);
 
 	const constructorExercises = $derived.by((): MesoExerciseSetup[] =>
 		[...constructorSelection.entries()]
@@ -225,6 +253,23 @@
 		);
 	});
 
+	function makeConstructorRow(
+		exercise: string,
+		start: string,
+		seed?: Partial<ConstructorRow> & { defaultProtocolId?: string; defaultEnabled?: boolean }
+	): ConstructorRow {
+		const resolved = resolveExerciseAnchor(view.entries, exercise, start);
+		return {
+			enabled: seed?.enabled ?? seed?.defaultEnabled ?? false,
+			protocolId: seed?.protocolId ?? seed?.defaultProtocolId ?? 'submax-effort',
+			anchor1rm: seed?.manual
+				? (seed.anchor1rm ?? 0)
+				: (resolved.value ?? seed?.anchor1rm ?? 0),
+			manual: seed?.manual ?? false,
+			anchorSource: seed?.manual ? 'вручную' : resolved.source
+		};
+	}
+
 	function exercisesFromSelection(selection: Map<string, ConstructorRow>): MesoExerciseSetup[] {
 		return [...selection.entries()]
 			.filter(([, row]) => row.enabled && row.anchor1rm > 0)
@@ -246,18 +291,58 @@
 
 		for (const exercise of knownExercises) {
 			const seedRow = seed?.get(exercise);
-			const resolved = resolveExerciseAnchor(view.entries, exercise, start);
-			next.set(exercise, {
-				enabled: seedRow?.enabled ?? templateExercises.has(exercise),
-				protocolId: seedRow?.protocolId ?? defaultProtocolId,
-				anchor1rm: seedRow?.manual
-					? seedRow.anchor1rm
-					: (resolved.value ?? seedRow?.anchor1rm ?? 0),
-				manual: seedRow?.manual ?? false,
-				anchorSource: seedRow?.manual ? 'вручную' : resolved.source
-			});
+			next.set(
+				exercise,
+				makeConstructorRow(exercise, start, {
+					...seedRow,
+					defaultProtocolId: defaultProtocolId,
+					defaultEnabled: templateExercises.has(exercise)
+				})
+			);
 		}
 		return next;
+	}
+
+	function blockExerciseList(selection: Map<string, ConstructorRow>): string[] {
+		return mergeConstructorExerciseNames(knownExercises, selection);
+	}
+
+	function blockAddOptions(selection: Map<string, ConstructorRow>): string[] {
+		return catalogStrengthExercises.filter((name) => !selection.has(name));
+	}
+
+	function addExerciseToConstructor(exerciseName: string) {
+		const name = exerciseName.trim();
+		if (!name || constructorSelection.has(name)) return;
+		const start = constructorStart || defaultMesoStartDate(view.entries);
+		const next = new Map(constructorSelection);
+		next.set(
+			name,
+			makeConstructorRow(name, start, {
+				enabled: true,
+				defaultProtocolId: 'submax-effort'
+			})
+		);
+		constructorSelection = next;
+		constructorAddPick = '';
+	}
+
+	function addExerciseToMacroBlock(blockId: string, exerciseName: string) {
+		const name = exerciseName.trim();
+		if (!name) return;
+		const start = macroStart || defaultMacroStartDate(view.entries);
+		macroBlocks = macroBlocks.map((block) => {
+			if (block.id !== blockId || block.selection.has(name)) return block;
+			const next = new Map(block.selection);
+			next.set(
+				name,
+				makeConstructorRow(name, start, {
+					enabled: true,
+					defaultProtocolId: block.defaultProtocolId
+				})
+			);
+			return { ...block, selection: next };
+		});
 	}
 
 	function patchMacroBlockRow(
@@ -334,16 +419,17 @@
 		const next = new Map<string, ConstructorRow>();
 
 		for (const exercise of knownExercises) {
-			const resolved = resolveExerciseAnchor(view.entries, exercise, start);
-			next.set(exercise, {
-				enabled: templateExercises.has(exercise),
-				protocolId: 'submax-effort',
-				anchor1rm: resolved.value ?? 0,
-				manual: false,
-				anchorSource: resolved.source
-			});
+			next.set(
+				exercise,
+				makeConstructorRow(exercise, start, {
+					defaultProtocolId: 'submax-effort',
+					defaultEnabled: templateExercises.has(exercise)
+				})
+			);
 		}
 		constructorSelection = next;
+		constructorQuery = '';
+		constructorAddPick = '';
 	}
 
 	function ensurePlanForEditor(): boolean {
@@ -674,6 +760,17 @@
 		save(removeExerciseFromMeso(plan, meso.plan.id, exercise, keyMaps));
 	}
 
+	function handleAddExerciseToMeso(meso: EnrichedMesocycle, exercise: string) {
+		if (!plan || !exercise.trim()) return;
+		save(addExerciseToMeso(plan, meso.plan.id, exercise.trim(), view.entries, keyMaps));
+		mesoAddExercisePick = '';
+	}
+
+	function mesoExercisesAvailableToAdd(meso: EnrichedMesocycle): string[] {
+		const inMeso = new Set(Object.keys(meso.anchorInfo));
+		return catalogStrengthExercises.filter((name) => !inMeso.has(name));
+	}
+
 	function handlePhaseChange(
 		index: number,
 		field: 'label' | 'intensityPct' | 'microFrom' | 'microTo',
@@ -795,6 +892,21 @@
 
 					<details class="macro-block-exercises" open>
 						<summary>Упражнения блока</summary>
+						<div class="constructor-add-row">
+							<select
+								class="field-select"
+								onchange={(e) => {
+									addExerciseToMacroBlock(block.id, e.currentTarget.value);
+									e.currentTarget.value = '';
+								}}
+							>
+								<option value="">+ добавить из каталога</option>
+								{#each blockAddOptions(block.selection) as name (name)}
+									<option value={name}>{name}</option>
+								{/each}
+							</select>
+							<a class="btn small ghost-link" href="{base}/exercises">Каталог упражнений</a>
+						</div>
 						<div class="constructor-table-wrap">
 							<table class="constructor-table">
 								<thead>
@@ -807,7 +919,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each knownExercises as exercise (exercise)}
+									{#each blockExerciseList(block.selection) as exercise (exercise)}
 										{@const row = block.selection.get(exercise)}
 										{#if row}
 											<tr class:disabled={!row.enabled}>
@@ -940,9 +1052,15 @@
 				<h3 id="meso-constructor-title">
 					{mesoConstructorMacroId ? 'Добавить мезо в макро' : 'Конструктор мезоцикла'}
 				</h3>
-				<p class="muted">Выберите упражнения, метод (протокол) и якорный 1ПМ — план % и кг строится автоматически.</p>
+				<p class="muted">
+					Упражнения берутся из каталога, истории тренировок и шаблонов дней. Выберите движения,
+					метод (протокол) и якорный 1ПМ — план % и кг строится автоматически.
+				</p>
 			</div>
-			<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
+			<div class="constructor-head-actions">
+				<a class="btn small ghost-link" href="{base}/exercises">Каталог</a>
+				<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
+			</div>
 		</div>
 
 		<div class="constructor-meta">
@@ -974,6 +1092,26 @@
 			</button>
 		</div>
 
+		<div class="constructor-add-row">
+			<label>
+				<span>Поиск</span>
+				<input class="field-input" bind:value={constructorQuery} placeholder="Фильтр по названию" />
+			</label>
+			<label>
+				<span>Из каталога</span>
+				<select
+					class="field-select"
+					bind:value={constructorAddPick}
+					onchange={(e) => addExerciseToConstructor(e.currentTarget.value)}
+				>
+					<option value="">+ добавить упражнение</option>
+					{#each constructorAddOptions as name (name)}
+						<option value={name}>{name}</option>
+					{/each}
+				</select>
+			</label>
+		</div>
+
 		<div class="constructor-table-wrap">
 			<table class="constructor-table">
 				<thead>
@@ -986,7 +1124,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each knownExercises as exercise (exercise)}
+					{#each filteredConstructorExercises as exercise (exercise)}
 						{@const row = constructorSelection.get(exercise)}
 						{#if row}
 							<tr class:disabled={!row.enabled}>
@@ -1913,9 +2051,22 @@
 					<div class="settings-block">
 						<div class="block-head">
 							<h4>Упражнения: якорный и текущий 1ПМ, протокол</h4>
-							<button type="button" class="btn small" onclick={() => handleSyncExercises(selectedMeso)}>
-								Подтянуть из тренировок
-							</button>
+							<div class="block-head-actions">
+								<select
+									class="field-select"
+									bind:value={mesoAddExercisePick}
+									onchange={(e) => handleAddExerciseToMeso(selectedMeso, e.currentTarget.value)}
+								>
+									<option value="">+ из каталога</option>
+									{#each mesoExercisesAvailableToAdd(selectedMeso) as name (name)}
+										<option value={name}>{name}</option>
+									{/each}
+								</select>
+								<a class="btn small ghost-link" href="{base}/exercises">Каталог</a>
+								<button type="button" class="btn small" onclick={() => handleSyncExercises(selectedMeso)}>
+									Подтянуть из тренировок
+								</button>
+							</div>
 						</div>
 						<div class="exercise-settings">
 							{#each Object.entries(selectedMeso.anchorInfo) as [exercise, info]}
@@ -2066,19 +2217,17 @@
 	.btn {
 		border-radius: 0;
 		padding: 0.5rem 0.85rem;
-		border: 1px solid var(--border);
+		border: none;
 		background: var(--surface-2);
 		color: var(--text);
 	}
 
 	.btn.primary {
-		border-color: rgba(110, 231, 168, 0.45);
 		background: rgba(110, 231, 168, 0.14);
 		color: var(--accent);
 	}
 
 	.btn.active {
-		border-color: rgba(110, 231, 168, 0.5);
 		background: rgba(110, 231, 168, 0.2);
 		color: var(--accent);
 	}
@@ -2091,7 +2240,7 @@
 	.btn.danger,
 	.btn.small.danger {
 		color: var(--danger);
-		border-color: rgba(255, 143, 143, 0.35);
+		background: rgba(255, 143, 143, 0.08);
 	}
 
 	.btn.ghost-link {
@@ -2112,9 +2261,9 @@
 		min-width: 11rem;
 		padding: 0.35rem;
 		border-radius: 0;
-		border: 1px solid var(--border);
+		border: none;
 		background: var(--surface);
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 	}
 
 	.more-menu button {
@@ -2164,10 +2313,10 @@
 
 	.protocol-guide-inline {
 		margin-top: 0.85rem;
-		padding: 0.85rem 0.95rem;
+		padding: 0.85rem 0;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
+		border: none;
+		background: transparent;
 		font-size: 0.86rem;
 		line-height: 1.4;
 	}
@@ -2278,7 +2427,8 @@
 	.intensity-matrix th,
 	.intensity-matrix td {
 		padding: 0.4rem 0.35rem;
-		border: 1px solid var(--border);
+		border: none;
+		border-bottom: 1px solid var(--line);
 		text-align: center;
 		vertical-align: middle;
 	}
@@ -2310,7 +2460,7 @@
 	.ab-card {
 		padding: 0.85rem;
 		border-radius: 0;
-		border: 1px solid color-mix(in srgb, var(--slot-color) 35%, var(--border));
+		border: none;
 		background: color-mix(in srgb, var(--slot-color) 8%, var(--surface-2));
 	}
 
@@ -2386,6 +2536,30 @@
 		margin: 0 0 0.25rem;
 	}
 
+	.constructor-head-actions,
+	.block-head-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.constructor-add-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		align-items: flex-end;
+		margin-bottom: 0.75rem;
+	}
+
+	.constructor-add-row label {
+		display: grid;
+		gap: 0.3rem;
+		min-width: min(240px, 100%);
+		font-size: 0.78rem;
+		color: var(--muted);
+	}
+
 	.constructor-meta {
 		display: flex;
 		flex-wrap: wrap;
@@ -2414,10 +2588,11 @@
 	}
 
 	.macro-block-card {
-		padding: 0.75rem;
+		padding: 0.75rem 0;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
+		border: none;
+		border-bottom: 1px solid var(--line);
+		background: transparent;
 	}
 
 	.macro-block-meta {
@@ -2476,7 +2651,7 @@
 	}
 
 	.orphan-picker {
-		border-style: dashed;
+		border: none;
 	}
 
 	.matrix-wrap.compact .matrix {
@@ -2492,7 +2667,7 @@
 
 	.constructor-table-wrap {
 		overflow: auto;
-		border: 1px solid var(--border);
+		border: none;
 		border-radius: 0;
 		margin-bottom: 1rem;
 	}
@@ -2506,7 +2681,8 @@
 	.constructor-table th,
 	.constructor-table td {
 		padding: 0.45rem 0.5rem;
-		border-bottom: 1px solid var(--border);
+		border: none;
+		border-bottom: 1px solid var(--line);
 		vertical-align: middle;
 	}
 
@@ -2560,12 +2736,22 @@
 		overflow: hidden;
 	}
 
+	.meso-picker,
+	.macro-picker,
+	.orphan-picker,
+	.meso-detail {
+		border: none;
+		box-shadow: none;
+		background: transparent;
+	}
+
 	.meso-tabs {
 		display: flex;
-		gap: 0.5rem;
+		gap: 0.35rem;
 		overflow-x: auto;
-		padding-bottom: 0.25rem;
+		padding: 0;
 		max-width: 100%;
+		background: transparent;
 		scrollbar-width: thin;
 	}
 
@@ -2574,15 +2760,15 @@
 		min-width: 9rem;
 		padding: 0.65rem 0.85rem;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
+		border: none;
+		background: transparent;
 		text-align: left;
 		color: var(--text);
 	}
 
 	.meso-tab.active {
-		border-color: color-mix(in srgb, var(--meso-color) 55%, var(--border));
-		background: color-mix(in srgb, var(--meso-color) 12%, var(--surface-2));
+		background: var(--surface-2);
+		color: var(--text);
 	}
 
 	.meso-tab-num {
@@ -2606,7 +2792,6 @@
 	}
 
 	.meso-detail {
-		border-color: color-mix(in srgb, var(--meso-color) 35%, var(--border));
 		min-width: 0;
 		overflow: hidden;
 	}
@@ -2633,11 +2818,12 @@
 		max-width: 320px;
 		font-size: 1.25rem;
 		font-weight: 700;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
+		background: transparent;
+		border: none;
+		border-bottom: 1px solid var(--line);
 		border-radius: 0;
 		color: var(--text);
-		padding: 0.35rem 0.5rem;
+		padding: 0.35rem 0;
 		margin-bottom: 0.25rem;
 	}
 
@@ -2652,9 +2838,9 @@
 		gap: 0.35rem;
 		flex-wrap: wrap;
 		margin-bottom: 1rem;
-		padding: 0.25rem;
+		padding: 0;
 		border-radius: 0;
-		background: var(--surface-2);
+		background: transparent;
 	}
 
 	.sub-tab {
@@ -2667,9 +2853,8 @@
 	}
 
 	.sub-tab.active {
-		background: var(--surface);
+		background: var(--surface-2);
 		color: var(--text);
-		box-shadow: 0 1px 0 var(--border);
 	}
 
 	.panel-hint {
@@ -2713,10 +2898,15 @@
 	.matrix th,
 	.matrix td {
 		padding: 0.55rem 0.45rem;
-		border: 1px solid var(--border);
+		border: none;
+		border-bottom: 1px solid var(--line);
 		text-align: center;
 		vertical-align: middle;
 		line-height: 1.25;
+	}
+
+	.matrix thead th {
+		border-bottom: 1px solid var(--line-strong);
 	}
 
 	.matrix thead th {
@@ -2773,7 +2963,6 @@
 	.matrix .cell-fact {
 		margin-top: 0.35rem;
 		padding-top: 0.3rem;
-		border-top: 1px dashed var(--border);
 	}
 
 	.matrix .cell-label {
@@ -2814,8 +3003,7 @@
 	}
 
 	.micro-block.selected {
-		border-color: rgba(110, 231, 168, 0.45);
-		box-shadow: 0 0 0 1px rgba(110, 231, 168, 0.15);
+		background: rgba(110, 231, 168, 0.06);
 	}
 
 	.micro-picker-row {
@@ -2830,7 +3018,7 @@
 		min-width: 2.5rem;
 		padding: 0.35rem 0.6rem;
 		border-radius: 0;
-		border: 1px solid var(--border);
+		border: none;
 		background: var(--surface-2);
 		color: var(--text);
 		font-weight: 700;
@@ -2838,13 +3026,12 @@
 	}
 
 	.micro-pick-btn.active {
-		border-color: rgba(110, 231, 168, 0.45);
 		background: rgba(110, 231, 168, 0.14);
 		color: var(--accent);
 	}
 
 	.micro-pick-btn.complete {
-		border-color: rgba(110, 231, 168, 0.25);
+		background: rgba(110, 231, 168, 0.08);
 	}
 
 	.micro-timeline {
@@ -2853,14 +3040,15 @@
 	}
 
 	.micro-block {
-		padding: 0.85rem;
+		padding: 0.85rem 0;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
+		border: none;
+		border-bottom: 1px solid var(--line);
+		background: transparent;
 	}
 
 	.micro-block.complete {
-		border-color: rgba(110, 231, 168, 0.25);
+		opacity: 0.92;
 	}
 
 	.micro-top {
@@ -2890,17 +3078,15 @@
 		border-radius: 0;
 		text-decoration: none;
 		font-size: 0.8rem;
-		border: 1px solid var(--border);
+		border: none;
 	}
 
 	.day-link.a {
-		border-color: rgba(91, 157, 255, 0.35);
 		background: rgba(91, 157, 255, 0.1);
 		color: var(--text);
 	}
 
 	.day-link.b {
-		border-color: rgba(110, 231, 168, 0.35);
 		background: rgba(110, 231, 168, 0.1);
 		color: var(--text);
 	}
@@ -2925,7 +3111,8 @@
 	.result-table th,
 	.result-table td {
 		padding: 0.35rem 0.45rem;
-		border-bottom: 1px solid var(--border);
+		border: none;
+		border-bottom: 1px solid var(--line);
 		text-align: left;
 		vertical-align: top;
 	}
@@ -2958,10 +3145,11 @@
 	}
 
 	.settings-block {
-		padding: 0.85rem;
+		padding: 0.85rem 0;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
+		border: none;
+		border-bottom: 1px solid var(--line);
+		background: transparent;
 		margin-bottom: 0.75rem;
 	}
 
@@ -2994,8 +3182,8 @@
 		gap: 0.25rem;
 		padding: 0.2rem 0.45rem;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface);
+		border: none;
+		background: var(--surface-2);
 		font-size: 0.78rem;
 	}
 
@@ -3017,10 +3205,11 @@
 		grid-template-columns: 1fr auto auto auto;
 		gap: 0.5rem;
 		align-items: end;
-		padding: 0.5rem;
+		padding: 0.5rem 0;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface);
+		border: none;
+		border-bottom: 1px solid var(--line);
+		background: transparent;
 	}
 
 	.exercise-setting-main {
@@ -3038,10 +3227,11 @@
 	.field-input,
 	.field-select {
 		background: var(--surface-2);
-		border: 1px solid var(--border);
+		border: none;
+		border-bottom: 1px solid var(--line);
 		border-radius: 0;
 		color: var(--text);
-		padding: 0.35rem 0.5rem;
+		padding: 0.35rem 0.25rem;
 		min-width: 0;
 	}
 
@@ -3056,10 +3246,11 @@
 	}
 
 	.assign-card {
-		padding: 0.65rem;
+		padding: 0.65rem 0;
 		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface);
+		border: none;
+		border-bottom: 1px solid var(--line);
+		background: transparent;
 		display: grid;
 		gap: 0.45rem;
 	}
@@ -3118,6 +3309,13 @@
 
 	.phase-card {
 		position: relative;
+		padding: 0.65rem 0;
+		border-radius: 0;
+		border: none;
+		border-bottom: 1px solid var(--line);
+		background: transparent;
+		display: grid;
+		gap: 0.45rem;
 	}
 
 	.phase-remove {
@@ -3131,15 +3329,6 @@
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 		gap: 0.5rem;
 		margin-top: 0.75rem;
-	}
-
-	.phase-card {
-		padding: 0.65rem;
-		border-radius: 0;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-		display: grid;
-		gap: 0.45rem;
 	}
 
 	.phase-card label {

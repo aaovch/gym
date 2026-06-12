@@ -48,9 +48,9 @@
 		display: inline-flex;
 		align-items: baseline;
 		gap: 0.25rem;
-		padding: 0.12rem 0.4rem;
+		padding: 0;
 		border-radius: 0;
-		border: 1px solid var(--border);
+		border: none;
 		font-size: 0.72rem;
 		line-height: 1.2;
 		white-space: nowrap;
@@ -70,8 +70,7 @@
 	}
 
 	.rm-tag.anchor {
-		border-color: rgba(196, 181, 253, 0.35);
-		background: rgba(196, 181, 253, 0.08);
+		background: transparent;
 	}
 
 	.rm-tag.anchor strong {
@@ -79,8 +78,7 @@
 	}
 
 	.rm-tag.current {
-		border-color: rgba(110, 231, 168, 0.35);
-		background: rgba(110, 231, 168, 0.08);
+		background: transparent;
 	}
 
 	.rm-tag.current strong {
