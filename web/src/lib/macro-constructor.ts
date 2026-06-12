@@ -4,6 +4,7 @@ import { buildProtocolMatrix, type ExerciseAnchorInfo, type ProtocolMatrixRow } 
 import { dateToMs } from './chart-time';
 import { defaultMicroSessions } from './micro-plan';
 import {
+	buildExerciseSessionsRecord,
 	buildMesocyclePlan,
 	type MesoConstructorInput,
 	type MesoExerciseSetup
@@ -106,6 +107,7 @@ export function previewMacroPlan(
 					.filter((row) => row.protocolId !== defaultProtocolId)
 					.map((row) => [toExerciseId(row.exercise, keyMaps), row.protocolId])
 			),
+			exerciseSessions: buildExerciseSessionsRecord(block.exercises, keyMaps),
 			microcycles: Array.from({ length: block.microCount }, (_, index) => ({
 				id: `preview-micro-${index + 1}`,
 				indexInMeso: index + 1,
@@ -127,7 +129,7 @@ export function previewMacroPlan(
 				blockAnchorInfo(block.exercises),
 				[],
 				keyMaps,
-				{ workoutTemplates }
+				{ workoutTemplates: mesoPlan.exerciseSessions ? [] : workoutTemplates }
 			)
 		});
 

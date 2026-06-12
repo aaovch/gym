@@ -20,6 +20,8 @@ export type MesoExerciseSetup = {
 	protocolId: string;
 	anchor1rm: number;
 	manual?: boolean;
+	/** 0 = тренировка A, 1 = тренировка B. Минимум один день. */
+	sessions: (0 | 1)[];
 };
 
 export type MesoConstructorInput = {
@@ -70,6 +72,38 @@ export function defaultMesoStartDate(entries: WorkoutEntry[]): string {
 	if (entries.length === 0) return new Date().toISOString().slice(0, 10);
 	const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
 	return sorted[sorted.length - 1].date;
+}
+
+export function defaultExerciseSessions(
+	exercise: string,
+	workoutTemplates: WorkoutTemplate[]
+): { sessionA: boolean; sessionB: boolean } {
+	if (workoutTemplates.length === 0) return { sessionA: true, sessionB: false };
+	const templateA = workoutTemplates.find((item) => item.indexInMicro === 0);
+	const templateB = workoutTemplates.find((item) => item.indexInMicro === 1);
+	const inA = !templateA?.exercises.length || templateA.exercises.includes(exercise);
+	const inB = !templateB?.exercises.length || templateB.exercises.includes(exercise);
+	if (!inA && !inB) return { sessionA: true, sessionB: false };
+	return { sessionA: inA, sessionB: inB };
+}
+
+export function sessionsFromFlags(sessionA: boolean, sessionB: boolean): (0 | 1)[] {
+	const sessions: (0 | 1)[] = [];
+	if (sessionA) sessions.push(0);
+	if (sessionB) sessions.push(1);
+	return sessions.length ? sessions : [0];
+}
+
+export function buildExerciseSessionsRecord(
+	exercises: MesoExerciseSetup[],
+	keyMaps: ExerciseKeyMaps
+): Record<string, (0 | 1)[]> {
+	const record: Record<string, (0 | 1)[]> = {};
+	for (const row of exercises) {
+		const sessions: (0 | 1)[] = row.sessions.length ? row.sessions : [0];
+		record[toExerciseId(row.exercise, keyMaps)] = sessions;
+	}
+	return record;
 }
 
 export function resolveExerciseAnchor(
@@ -131,6 +165,7 @@ function buildPreviewMesoPlan(
 		anchor1rm,
 		anchor1rmManual,
 		exerciseProtocols,
+		exerciseSessions: buildExerciseSessionsRecord(input.exercises, keyMaps),
 		microcycles: microPlans
 	};
 
@@ -145,7 +180,9 @@ export function previewMesoPlan(
 ): ProtocolMatrixRow[] {
 	if (input.exercises.length === 0 || input.microCount < 1) return [];
 	const { mesoPlan, microPlans, anchorInfo } = buildPreviewMesoPlan(plan, input, keyMaps);
-	return buildProtocolMatrix(mesoPlan, microPlans, plan, anchorInfo, [], keyMaps, { workoutTemplates });
+	return buildProtocolMatrix(mesoPlan, microPlans, plan, anchorInfo, [], keyMaps, {
+		workoutTemplates: mesoPlan.exerciseSessions ? [] : workoutTemplates
+	});
 }
 
 export function suggestedMicroCount(templates: ProtocolTemplate[], exercises: MesoExerciseSetup[]): number {
@@ -210,6 +247,7 @@ export function buildMesocyclePlan(input: MesoConstructorInput, keyMaps: Exercis
 		anchor1rm,
 		anchor1rmManual,
 		exerciseProtocols,
+		exerciseSessions: buildExerciseSessionsRecord(input.exercises, keyMaps),
 		microcycles: Array.from({ length: input.microCount }, (_, index) => ({
 			id: `micro-${crypto.randomUUID().slice(0, 8)}`,
 			indexInMeso: index + 1,

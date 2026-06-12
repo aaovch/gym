@@ -454,6 +454,9 @@ function compactMesocycle(meso: MesocyclePlan): StoredMesocyclePlan {
 	if (meso.exerciseProtocols && Object.keys(meso.exerciseProtocols).length) {
 		stored.exerciseProtocols = meso.exerciseProtocols;
 	}
+	if (meso.exerciseSessions && Object.keys(meso.exerciseSessions).length) {
+		stored.exerciseSessions = meso.exerciseSessions;
+	}
 	return stored;
 }
 
@@ -514,6 +517,17 @@ function validateCyclePlan(plan: CyclePlan): CyclePlan {
 		for (const [exerciseId, templateId] of Object.entries(meso.exerciseProtocols ?? {})) {
 			if (!isBundledProtocolId(templateId) && !templateIds.has(templateId)) {
 				issues.push(`${meso.id}: отсутствующий протокол ${templateId} для ${exerciseId}`);
+			}
+		}
+		for (const [exerciseId, sessions] of Object.entries(meso.exerciseSessions ?? {})) {
+			if (!Array.isArray(sessions) || sessions.length === 0) {
+				issues.push(`${meso.id}: exerciseSessions[${exerciseId}] должен содержать хотя бы один день`);
+				continue;
+			}
+			for (const sessionIndex of sessions) {
+				if (sessionIndex !== 0 && sessionIndex !== 1) {
+					issues.push(`${meso.id}: exerciseSessions[${exerciseId}] содержит неверный индекс дня`);
+				}
 			}
 		}
 		for (const micro of meso.microcycles) {
@@ -665,6 +679,9 @@ function migrateStoredCyclePlan(raw: JsonObject): CyclePlan {
 				: {},
 			exerciseProtocols: isObject(meso.exerciseProtocols)
 				? (meso.exerciseProtocols as Record<string, string>)
+				: undefined,
+			exerciseSessions: isObject(meso.exerciseSessions)
+				? (meso.exerciseSessions as Record<string, (0 | 1)[]>)
 				: undefined
 		};
 	});

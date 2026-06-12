@@ -34,10 +34,12 @@
 	} from '$lib/microcycle';
 	import {
 		createMesocycleFromConstructor,
+		defaultExerciseSessions,
 		defaultMesoStartDate,
 		knownMesoExercises,
 		previewMesoPlan,
 		resolveExerciseAnchor,
+		sessionsFromFlags,
 		suggestedMicroCount,
 		type MesoExerciseSetup
 	} from '$lib/meso-constructor';
@@ -64,6 +66,8 @@
 		anchor1rm: number;
 		manual: boolean;
 		anchorSource: string;
+		sessionA: boolean;
+		sessionB: boolean;
 	};
 
 	type MacroBlockDraft = {
@@ -185,7 +189,8 @@
 				exercise,
 				protocolId: row.protocolId,
 				anchor1rm: row.anchor1rm,
-				manual: row.manual
+				manual: row.manual,
+				sessions: sessionsFromFlags(row.sessionA, row.sessionB)
 			}))
 	);
 
@@ -265,10 +270,7 @@
 		if (!plan || constructorExercises.length === 0) return null;
 		const maxPhase = maxProtocolMicroTo(plan, constructorExercises, constructorProtocolId);
 		const micro = microCoverageParts(constructorMicroCount, maxPhase);
-		const sessions = sessionCoverageParts(
-			constructorExercises.map((row) => row.exercise),
-			workoutTemplates
-		);
+		const sessions = sessionCoverageFromExercises(constructorExercises);
 		return {
 			microWorked: micro.worked,
 			microMissed: micro.missed,
@@ -283,6 +285,7 @@
 		seed?: Partial<ConstructorRow> & { defaultProtocolId?: string; defaultEnabled?: boolean }
 	): ConstructorRow {
 		const resolved = resolveExerciseAnchor(view.entries, exercise, start);
+		const sessionDefaults = defaultExerciseSessions(exercise, workoutTemplates);
 		return {
 			enabled: seed?.enabled ?? seed?.defaultEnabled ?? false,
 			protocolId: seed?.protocolId ?? seed?.defaultProtocolId ?? 'submax-effort',
@@ -290,7 +293,9 @@
 				? (seed.anchor1rm ?? 0)
 				: (resolved.value ?? seed?.anchor1rm ?? 0),
 			manual: seed?.manual ?? false,
-			anchorSource: seed?.manual ? 'вручную' : resolved.source
+			anchorSource: seed?.manual ? 'вручную' : resolved.source,
+			sessionA: seed?.sessionA ?? sessionDefaults.sessionA,
+			sessionB: seed?.sessionB ?? sessionDefaults.sessionB
 		};
 	}
 
@@ -301,7 +306,8 @@
 				exercise,
 				protocolId: row.protocolId,
 				anchor1rm: row.anchor1rm,
-				manual: row.manual
+				manual: row.manual,
+				sessions: sessionsFromFlags(row.sessionA, row.sessionB)
 			}));
 	}
 
@@ -427,6 +433,15 @@
 			}
 			return { ...block, selection: next };
 		});
+	}
+
+	function toggleConstructorSession(exercise: string, session: 'a' | 'b') {
+		const row = constructorSelection.get(exercise);
+		if (!row) return;
+		const sessionA = session === 'a' ? !row.sessionA : row.sessionA;
+		const sessionB = session === 'b' ? !row.sessionB : row.sessionB;
+		if (!sessionA && !sessionB) return;
+		patchConstructorRow(exercise, { sessionA, sessionB });
 	}
 
 	function patchConstructorRow(exercise: string, patch: Partial<ConstructorRow>) {
@@ -897,6 +912,19 @@
 		}
 		return { worked: worked.join(' · '), missed: missed.join(', ') };
 	}
+
+	function sessionCoverageFromExercises(exercises: MesoExerciseSetup[]) {
+		if (exercises.length === 0) return { worked: '', missed: '' };
+		const worked: string[] = [];
+		const missed: string[] = [];
+		for (const sessionIndex of [0, 1] as const) {
+			const letter = sessionColumnTitle(sessionIndex);
+			const count = exercises.filter((row) => row.sessions.includes(sessionIndex)).length;
+			if (count > 0) worked.push(`${letter} (${count})`);
+			else missed.push(letter);
+		}
+		return { worked: worked.join(' · '), missed: missed.join(', ') };
+	}
 </script>
 
 <div class="cycles-page">
@@ -1229,6 +1257,10 @@
 				<h3 id="meso-constructor-title">
 					{mesoConstructorMacroId ? 'Добавить мезо в макро' : 'Конструктор мезоцикла'}
 				</h3>
+				<p class="muted constructor-hint">
+					Для каждого упражнения выберите день <strong>A</strong> и/или <strong>B</strong> — от этого
+					зависит, в каком блоке предпросмотра и плана оно появится.
+				</p>
 			</div>
 			<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
 		</div>
@@ -1295,6 +1327,7 @@
 					<thead>
 						<tr>
 							<th>Упражнение</th>
+							<th>День</th>
 							<th>Якорь, кг</th>
 							<th>Метод</th>
 							<th></th>
@@ -1306,6 +1339,28 @@
 							{#if row}
 								<tr>
 									<td>{exercise}</td>
+									<td class="session-picks">
+										<div class="session-pick-group" role="group" aria-label="День для {exercise}">
+											<button
+												type="button"
+												class="session-pick session-a"
+												class:active={row.sessionA}
+												aria-pressed={row.sessionA}
+												onclick={() => toggleConstructorSession(exercise, 'a')}
+											>
+												A
+											</button>
+											<button
+												type="button"
+												class="session-pick session-b"
+												class:active={row.sessionB}
+												aria-pressed={row.sessionB}
+												onclick={() => toggleConstructorSession(exercise, 'b')}
+											>
+												B
+											</button>
+										</div>
+									</td>
 									<td>
 										<input
 											class="field-input"
@@ -2687,6 +2742,46 @@
 
 	.constructor-empty {
 		margin: 0 0 1rem;
+	}
+
+	.constructor-hint {
+		margin: 0.35rem 0 0;
+		font-size: 0.78rem;
+		line-height: 1.45;
+		max-width: 36rem;
+	}
+
+	.session-picks {
+		width: 5.5rem;
+	}
+
+	.session-pick-group {
+		display: inline-flex;
+		gap: 0.25rem;
+	}
+
+	.session-pick {
+		min-width: 1.85rem;
+		padding: 0.18rem 0.4rem;
+		border: 1px solid var(--line);
+		border-radius: 0.35rem;
+		background: transparent;
+		color: var(--muted);
+		font-size: 0.72rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.session-pick.session-a.active {
+		border-color: #5b9dff;
+		background: rgb(91 157 255 / 16%);
+		color: #5b9dff;
+	}
+
+	.session-pick.session-b.active {
+		border-color: #6ee7a8;
+		background: rgb(110 231 168 / 14%);
+		color: #6ee7a8;
 	}
 
 	.constructor-preview {

@@ -61,6 +61,8 @@ export type MesocyclePlan = {
 	anchor1rmManual?: Record<string, boolean>;
 	/** Свой протокол: exerciseId → templateId. Пусто → templateId мезо. */
 	exerciseProtocols?: Record<string, string>;
+	/** Дни A/B для упражнения: exerciseId → [0] и/или [1]. */
+	exerciseSessions?: Record<string, (0 | 1)[]>;
 };
 
 export type MacrocyclePlan = {
@@ -380,9 +382,15 @@ function exerciseInSession(
 	exercise: string,
 	sessionIndex: 0 | 1,
 	templates: WorkoutTemplate[],
-	day: TrainingDay | null
+	day: TrainingDay | null,
+	meso: MesocyclePlan,
+	keyMaps: ExerciseKeyMaps
 ): boolean {
 	if (day?.exercises.includes(exercise)) return true;
+	const mesoSessions = meso.exerciseSessions?.[toExerciseId(exercise, keyMaps)];
+	if (mesoSessions && mesoSessions.length > 0) {
+		return mesoSessions.includes(sessionIndex);
+	}
 	const template = templates.find((item) => item.indexInMicro === sessionIndex);
 	if (template && template.exercises.length > 0) {
 		return template.exercises.includes(exercise);
@@ -412,7 +420,14 @@ export function buildProtocolMatrix(
 				for (const sessionIndex of [0, 1] as const) {
 					const day = sessionIndex === 0 ? (microView?.dayA ?? null) : (microView?.dayB ?? null);
 					const date = day?.date ?? null;
-					const applicable = exerciseInSession(exercise, sessionIndex, workoutTemplates, day);
+					const applicable = exerciseInSession(
+						exercise,
+						sessionIndex,
+						workoutTemplates,
+						day,
+						mesoPlan,
+						keyMaps
+					);
 					const { pct, phase } = targetPctForExercise(cyclePlan, mesoPlan, micro, exercise, keyMaps);
 					let factMaxPct: number | null = null;
 					let factMaxWeight: number | null = null;
@@ -1213,7 +1228,9 @@ export function removeExerciseFromMeso(
 			delete anchor1rmManual[id];
 			const exerciseProtocols = { ...(meso.exerciseProtocols ?? {}) };
 			delete exerciseProtocols[id];
-			return { ...meso, anchor1rm, anchor1rmManual, exerciseProtocols };
+			const exerciseSessions = { ...(meso.exerciseSessions ?? {}) };
+			delete exerciseSessions[id];
+			return { ...meso, anchor1rm, anchor1rmManual, exerciseProtocols, exerciseSessions };
 		})
 	});
 }
@@ -1244,7 +1261,8 @@ export function addExerciseToMeso(
 			return {
 				...meso,
 				anchor1rm,
-				anchor1rmManual: { ...(meso.anchor1rmManual ?? {}), [id]: true }
+				anchor1rmManual: { ...(meso.anchor1rmManual ?? {}), [id]: true },
+				exerciseSessions: { ...(meso.exerciseSessions ?? {}), [id]: [0, 1] }
 			};
 		})
 	});
@@ -1261,7 +1279,9 @@ export function purgeExerciseFromPlan(plan: CyclePlan, exerciseId: string): Cycl
 			delete anchor1rmManual[exerciseId];
 			const exerciseProtocols = { ...(meso.exerciseProtocols ?? {}) };
 			delete exerciseProtocols[exerciseId];
-			return { ...meso, anchor1rm, anchor1rmManual, exerciseProtocols };
+			const exerciseSessions = { ...(meso.exerciseSessions ?? {}) };
+			delete exerciseSessions[exerciseId];
+			return { ...meso, anchor1rm, anchor1rmManual, exerciseProtocols, exerciseSessions };
 		})
 	});
 }
