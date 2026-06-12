@@ -4,6 +4,7 @@
 		addExerciseToMeso,
 		addMicrocycle,
 		assignDate,
+		compareProtocolMatrixRows,
 		emptyCyclePlan,
 		markAnchorManual,
 		removeMacrocycle,
@@ -50,6 +51,7 @@
 	import { thesesStore, formatAdaptationStars } from '$lib/training-theses';
 
 	type MesoTab = 'plan' | 'settings';
+	type PlanningTab = 'program' | 'methodology';
 
 	type ConstructorRow = {
 		enabled: boolean;
@@ -67,8 +69,7 @@
 		selection: Map<string, ConstructorRow>;
 	};
 
-	let editMode = $state(false);
-	let showHelp = $state(false);
+	let planningTab = $state<PlanningTab>('program');
 	let showMacroConstructor = $state(false);
 	let showMesoConstructor = $state(false);
 	let mesoTab = $state<MesoTab>('plan');
@@ -98,6 +99,14 @@
 	const displayMesos = $derived(cyclePlanView.mesocycles);
 	const usingManual = $derived(cyclePlanView.usingManualPlan);
 	const unassigned = $derived(cyclePlanView.unassignedDates);
+	const hasMethodologyContent = $derived(
+		workoutTemplates.length > 0 ||
+			protocolTemplates.length > 0 ||
+			thesesStore.groups.length > 0 ||
+			thesesStore.matrices.length > 0 ||
+			thesesStore.volumeGuides.length > 0 ||
+			thesesStore.protocolGuides.length > 0
+	);
 
 	const selectedMacro = $derived.by((): EnrichedMacrocycle | null => {
 		if (displayMacros.length === 0) return null;
@@ -474,7 +483,6 @@
 
 	function openMacroConstructor() {
 		if (!ensurePlanForConstructor()) return;
-		editMode = true;
 		const macroNum = (workoutStore.cyclePlan?.macrocycles.length ?? 0) + 1;
 		macroLabel = `Макро ${macroNum}`;
 		macroStart = defaultMacroStartDate(view.entries);
@@ -518,7 +526,6 @@
 
 	function openMesoConstructor(macroId: string | null = null) {
 		if (!ensurePlanForConstructor()) return;
-		editMode = true;
 		mesoConstructorMacroId = macroId;
 		const scopeMesos = macroId
 			? (plan?.macrocycles.find((macro) => macro.id === macroId)?.mesoIds.length ?? 0)
@@ -590,7 +597,7 @@
 
 	function handleImport() {
 		importCyclePlanFromAuto();
-		editMode = true;
+		planningTab = 'program';
 		mesoTab = 'settings';
 	}
 
@@ -712,7 +719,8 @@
 				...row,
 				cells: row.cells.filter((cell) => cell.sessionIndex === sessionIndex)
 			}))
-			.filter((row) => row.cells.some((cell) => cell.applicable));
+			.filter((row) => row.cells.some((cell) => cell.applicable))
+			.sort(compareProtocolMatrixRows);
 	}
 </script>
 
@@ -1177,18 +1185,40 @@
 		<button type="button" class="btn" onclick={() => openMesoConstructor()}>Добавить мезоцикл</button>
 		{#if !usingManual}
 			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
-		{:else}
-			<button type="button" class="btn" class:active={editMode} onclick={() => (editMode = !editMode)}>
-				{editMode ? '✓ Редактирование' : 'Редактировать'}
-			</button>
 		{/if}
-		<button type="button" class="btn ghost-link" onclick={() => (showHelp = !showHelp)}>
-			{showHelp ? 'Скрыть методику' : 'Методика'}
-		</button>
 	</div>
 </section>
 
-{#if showHelp}
+<nav class="planning-tabs" aria-label="Разделы планирования">
+	<button
+		type="button"
+		class="planning-tab"
+		class:active={planningTab === 'program'}
+		onclick={() => (planningTab = 'program')}
+	>
+		Программа
+	</button>
+	<button
+		type="button"
+		class="planning-tab"
+		class:active={planningTab === 'methodology'}
+		onclick={() => (planningTab = 'methodology')}
+	>
+		Методика
+	</button>
+</nav>
+
+{#if planningTab === 'methodology'}
+	{#if !hasMethodologyContent}
+		<section class="card empty-state">
+			<h3>Методика пока не заполнена</h3>
+			<p class="muted">
+				Здесь появятся шаблоны тренировок A/B, справочники по объёму и описания методов — после
+				импорта тренировок или настройки <code>data/training-theses.json</code>.
+			</p>
+			<a class="btn" href="{base}/protocols">Шаблоны протоколов</a>
+		</section>
+	{:else}
 	<section class="card help-card">
 		<h3>Шаблоны тренировок A / B</h3>
 		<div class="ab-grid">
@@ -1403,8 +1433,8 @@
 			</div>
 		{/if}
 	</section>
-{/if}
-
+	{/if}
+{:else}
 <!-- 2. Выбор макро / мезо -->
 {#if displayMesos.length === 0}
 	<section class="card empty-state">
@@ -1423,7 +1453,7 @@
 		<section class="card macro-picker">
 			<div class="picker-head">
 				<h3>Макроциклы</h3>
-				{#if editMode && usingManual}
+				{#if usingManual}
 					<button type="button" class="btn small primary" onclick={openMacroConstructor}>+ Макро</button>
 				{/if}
 			</div>
@@ -1448,7 +1478,7 @@
 					</button>
 				{/each}
 			</div>
-			{#if selectedMacro && editMode && plan}
+			{#if selectedMacro && usingManual && plan}
 				<div class="macro-inline-edit">
 					<input
 						class="field-input"
@@ -1495,7 +1525,7 @@
 	<section class="card meso-picker">
 		<div class="picker-head">
 			<h3>{selectedMacro ? `Мезо в «${selectedMacro.plan.label}»` : 'Мезоциклы'}</h3>
-			{#if editMode && usingManual}
+			{#if usingManual}
 				<button
 					type="button"
 					class="btn small primary"
@@ -1534,7 +1564,7 @@
 			<div class="detail-head">
 				<div>
 					<p class="detail-kicker">Мезоцикл #{selectedMeso.index}</p>
-					{#if editMode && plan}
+					{#if usingManual && plan}
 						<input
 							class="detail-title-input"
 							value={selectedMeso.plan.label}
@@ -1558,7 +1588,7 @@
 							Записать тренировку
 						</a>
 					{/if}
-					{#if editMode && plan}
+					{#if usingManual && plan}
 						<button type="button" class="btn small" onclick={() => handleAddMicro(selectedMeso.plan.id)}>
 							+ μ
 						</button>
@@ -1583,7 +1613,7 @@
 				>
 					План (% и цели)
 				</button>
-				{#if editMode && usingManual}
+				{#if usingManual}
 					<button
 						type="button"
 						class="sub-tab"
@@ -1732,7 +1762,7 @@
 						</p>
 					{/if}
 				</div>
-			{:else if mesoTab === 'settings' && editMode && plan}
+			{:else if mesoTab === 'settings' && usingManual && plan}
 				<div class="tab-panel">
 					{#if unassigned.length > 0}
 						<div class="settings-block">
@@ -1861,6 +1891,7 @@
 		</section>
 	{/if}
 {/if}
+{/if}
 </div>
 
 <style>
@@ -1870,6 +1901,30 @@
 		min-width: 0;
 		max-width: 100%;
 		overflow-x: clip;
+	}
+
+	.planning-tabs {
+		display: flex;
+		gap: 0.35rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.15rem;
+	}
+
+	.planning-tab {
+		padding: 0.5rem 0.9rem;
+		border: 1px solid var(--line);
+		border-radius: 0;
+		background: transparent;
+		color: var(--muted);
+		font-size: 0.85rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.planning-tab.active {
+		color: var(--text);
+		background: var(--surface-2);
+		border-color: var(--line-strong);
 	}
 
 	.planning-head {
@@ -1921,11 +1976,6 @@
 
 	.btn.primary {
 		background: rgba(110, 231, 168, 0.14);
-		color: var(--accent);
-	}
-
-	.btn.active {
-		background: rgba(110, 231, 168, 0.2);
 		color: var(--accent);
 	}
 

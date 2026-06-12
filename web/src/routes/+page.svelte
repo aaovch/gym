@@ -5,6 +5,7 @@
   import {
     exerciseTargetOnMicro,
     exercisesForMicroSession,
+    sortExercisesByAnchorDesc,
     type EnrichedMicrocycle
   } from '$lib/cycle-plan';
   import { createLog } from '$lib/database';
@@ -72,11 +73,13 @@
   const workoutDate = $derived(
     sessionReady ? (urlDate ?? plannedSessionDate ?? datePick) : (urlDate ?? datePick)
   );
-  const slotExercises = $derived.by(() =>
-    mesocycle && activeIndex != null
-      ? exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex)
-      : []
-  );
+  const slotExercises = $derived.by(() => {
+    if (!mesocycle || activeIndex == null) return [];
+    return sortExercisesByAnchorDesc(
+      exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex),
+      mesocycle.anchorInfo
+    );
+  });
   const entriesForDate = $derived(
     view.entries
       .filter((entry) => entry.date === workoutDate)

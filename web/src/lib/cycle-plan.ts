@@ -122,6 +122,27 @@ export type ProtocolMatrixRow = {
 	cells: ProtocolMatrixCell[];
 };
 
+export function compareByAnchorDesc(
+	anchorInfo: Record<string, ExerciseAnchorInfo>,
+	a: string,
+	b: string
+): number {
+	const diff = (anchorInfo[b]?.anchor ?? 0) - (anchorInfo[a]?.anchor ?? 0);
+	return diff !== 0 ? diff : a.localeCompare(b, 'ru');
+}
+
+export function sortExercisesByAnchorDesc(
+	exercises: string[],
+	anchorInfo: Record<string, ExerciseAnchorInfo>
+): string[] {
+	return [...exercises].sort((a, b) => compareByAnchorDesc(anchorInfo, a, b));
+}
+
+export function compareProtocolMatrixRows(a: ProtocolMatrixRow, b: ProtocolMatrixRow): number {
+	const diff = b.anchor - a.anchor;
+	return diff !== 0 ? diff : a.exercise.localeCompare(b.exercise, 'ru');
+}
+
 export type ExerciseAnchorInfo = {
 	/** Якорный 1ПМ — фиксируется на старт мезо, основа плана % и кг. */
 	anchor: number;
@@ -381,9 +402,7 @@ export function buildProtocolMatrix(
 	const { microViews = [], workoutTemplates = [] } = options;
 	const microViewByIndex = new Map(microViews.map((micro) => [micro.plan.indexInMeso, micro]));
 
-	return Object.keys(anchorInfo)
-		.sort((a, b) => a.localeCompare(b, 'ru'))
-		.map((exercise) => {
+	return sortExercisesByAnchorDesc(Object.keys(anchorInfo), anchorInfo).map((exercise) => {
 			const template = templateForExercise(cyclePlan, mesoPlan, exercise, keyMaps);
 			const anchor = anchorInfo[exercise].anchor;
 			const cells: ProtocolMatrixCell[] = [];
