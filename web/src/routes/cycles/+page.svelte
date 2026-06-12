@@ -108,18 +108,6 @@
 	const displayMesos = $derived(cyclePlanView.mesocycles);
 	const usingManual = $derived(cyclePlanView.usingManualPlan);
 	const unassigned = $derived(cyclePlanView.unassignedDates);
-	const totalMicros = $derived(
-		displayMesos.reduce((total, meso) => total + meso.microcycles.length, 0)
-	);
-	const completedMicros = $derived(
-		displayMesos.reduce(
-			(total, meso) => total + meso.microcycles.filter((micro) => micro.complete).length,
-			0
-		)
-	);
-	const planProgress = $derived(
-		totalMicros > 0 ? Math.round((completedMicros / totalMicros) * 100) : 0
-	);
 
 	const selectedMacro = $derived.by((): EnrichedMacrocycle | null => {
 		if (displayMacros.length === 0) return null;
@@ -1156,29 +1144,6 @@
 	</div>
 </section>
 
-<section class="plan-metrics">
-	<article>
-		<span>Макроциклов</span>
-		<strong>{displayMacros.length}</strong>
-		<small>длинных программ</small>
-	</article>
-	<article>
-		<span>Мезоциклов</span>
-		<strong>{displayMesos.length}</strong>
-		<small>тренировочных блоков</small>
-	</article>
-	<article>
-		<span>Микроциклов завершено</span>
-		<strong>{completedMicros} / {totalMicros}</strong>
-		<small>{planProgress}% общего плана</small>
-	</article>
-	<article class:attention={unassigned.length > 0}>
-		<span>Дат вне плана</span>
-		<strong>{unassigned.length}</strong>
-		<small>{unassigned.length ? 'можно распределить по циклам' : 'все записи связаны'}</small>
-	</article>
-</section>
-
 {#if showHelp}
 	<section class="card help-card">
 		<h3>Шаблоны тренировок A / B</h3>
@@ -2079,62 +2044,10 @@
 		line-height: 1.55;
 	}
 
-	.plan-metrics {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 0.75rem;
-		margin-bottom: 0.35rem;
-	}
-
-	.plan-metrics article {
-		padding: 1rem;
-		background: var(--surface);
-		border: 1px solid var(--line);
-		border-radius: 0.9rem;
-	}
-
-	.plan-metrics article.attention {
-		border-color: rgba(255, 179, 92, 0.28);
-	}
-
-	.plan-metrics span,
-	.plan-metrics strong,
-	.plan-metrics small {
-		display: block;
-	}
-
-	.plan-metrics span {
-		color: var(--muted);
-		font-size: 0.68rem;
-		font-weight: 700;
-	}
-
-	.plan-metrics strong {
-		margin-top: 0.5rem;
-		font-size: 1.45rem;
-		letter-spacing: -0.04em;
-	}
-
-	.plan-metrics small {
-		margin-top: 0.35rem;
-		color: var(--muted);
-		font-size: 0.66rem;
-	}
-
 	@media (max-width: 900px) {
 		.planning-head {
 			align-items: flex-start;
 			flex-direction: column;
-		}
-
-		.plan-metrics {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
-
-	@media (max-width: 520px) {
-		.plan-metrics {
-			grid-template-columns: 1fr;
 		}
 	}
 
