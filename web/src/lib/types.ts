@@ -1,7 +1,13 @@
 import type { MovementBlockId } from './muscle-groups';
 
+export type StrengthSet = [weightKg: number, reps: number];
+export type RunSet = [durationMin: number, speedKmh: number];
+export type JumpSet = [setCount: number, repsPerSet: number];
+export type ExerciseSet = StrengthSet | RunSet | JumpSet;
+
 export type SessionRow = {
-	sets: [number, number][];
+	kind: ExerciseKind;
+	sets: ExerciseSet[];
 	comment?: string | null;
 };
 
@@ -27,7 +33,8 @@ export type ExerciseLog = {
 };
 
 export type WorkoutDatabase = {
-	version: 3;
+	version: 4;
+	revision: number;
 	updatedAt: string;
 	exercises: Exercise[];
 	logs: ExerciseLog[];
@@ -47,9 +54,10 @@ export type WorkoutEntry = {
 	id?: string;
 	exerciseId?: string;
 	exercise: string;
+	kind: ExerciseKind;
 	date: string;
 	parts: string[];
-	sets: [number, number][];
+	sets: ExerciseSet[];
 	microSessionId?: string;
 };
 

@@ -112,7 +112,7 @@ export function evaluateEntryVolume(
 	anchor1rm: number | null,
 	guideRows: VolumeGuideRow[]
 ): VolumeCheckResult | null {
-	if (isCardioExercise(entry.exercise) || !anchor1rm) return null;
+	if (entry.kind !== 'strength' || isCardioExercise(entry.exercise) || !anchor1rm) return null;
 	return evaluateSessionVolume(entry.sets, anchor1rm, guideRows);
 }
 

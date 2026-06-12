@@ -10,20 +10,25 @@
 
 ### Хранение данных
 
-Единый формат — JSON в `data/workouts.json`:
+Единый формат — JSON v4 в `data/workouts.json`. Старые v1–v3 мигрируют при загрузке:
 
 ```json
 {
-  "version": 1,
+  "version": 4,
+  "revision": 1,
   "updatedAt": "2026-06-11T12:00:00",
-  "sessions": [
+  "exercises": [
+    { "id": "squat", "n": "Приседания со штангой на спине", "k": "strength" }
+  ],
+  "logs": [
     {
       "id": "uuid",
-      "exercise": "Приседания со штангой на спине",
+      "exerciseId": "squat",
       "date": "2026-05-21",
-      "rows": [
+      "blocks": [
         {
-          "sets": [[100, 5], [110, 5]],
+          "kind": "strength",
+          "sets": [{"weightKg": 100, "reps": 5}, {"weightKg": 110, "reps": 5}],
           "comment": "все кластерно"
         }
       ]

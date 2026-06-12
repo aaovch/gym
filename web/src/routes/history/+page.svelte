@@ -1,289 +1,407 @@
 <script lang="ts">
-	import { page } from '$app/state';
-	import { browser } from '$app/environment';
-	import { base } from '$app/paths';
-	import { uniqueExercises } from '$lib/database';
-	import { fmtNum, fmtSet, formatDateRu } from '$lib/format';
-	import { exerciseHistory } from '$lib/history';
-	import { workoutStore } from '$lib/workout-store';
+  import { page } from '$app/state';
+  import { browser } from '$app/environment';
+  import { base } from '$app/paths';
+  import { formatDateRu, fmtNum } from '$lib/format';
+  import type { ExerciseKind, ExerciseSet, WorkoutSession } from '$lib/types';
+  import { workoutStore } from '$lib/workout-store';
 
-	let exerciseLocal = $state('');
-	let query = $state('');
-	let sortOrder = $state<'new' | 'old'>('new');
+  let exerciseLocal = $state('');
+  let query = $state('');
+  let sortOrder = $state<'new' | 'old'>('new');
+  let visibleDays = $state(12);
 
-	const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
-	const exercise = $derived(exerciseLocal || urlExercise || '');
-	const view = $derived(workoutStore.view);
+  const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
+  const exercise = $derived(exerciseLocal || urlExercise || '');
+  const view = $derived(workoutStore.view);
+  const exerciseKinds = $derived(
+    new Map(view.entries.map((entry) => [entry.exercise, entry.kind] as const))
+  );
+  const exercises = $derived(
+    [...new Set(view.sessions.map((session) => session.exercise))].sort((a, b) =>
+      a.localeCompare(b, 'ru')
+    )
+  );
+  const filteredExercises = $derived(
+    exercises.filter((name) => name.toLowerCase().includes(query.trim().toLowerCase()))
+  );
+  const selectedSessions = $derived(
+    view.sessions
+      .filter((session) => !exercise.trim() || session.exercise === exercise.trim())
+      .sort((a, b) =>
+        sortOrder === 'new' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
+      )
+  );
+  const groupedDays = $derived.by(() => {
+    const groups = new Map<string, WorkoutSession[]>();
+    for (const session of selectedSessions) {
+      const bucket = groups.get(session.date) ?? [];
+      bucket.push(session);
+      groups.set(session.date, bucket);
+    }
+    return [...groups.entries()].slice(0, exercise.trim() ? Number.POSITIVE_INFINITY : visibleDays);
+  });
+  const selectedKind = $derived(exercise.trim() ? exerciseKinds.get(exercise.trim()) ?? 'strength' : null);
+  const selectedSummary = $derived(
+    exercise.trim() ? view.summary.find((item) => item.exercise === exercise.trim()) ?? null : null
+  );
+  const totalSets = $derived(
+    selectedSessions.reduce(
+      (total, session) =>
+        total + session.rows.reduce((rowTotal, row) => rowTotal + row.sets.length, 0),
+      0
+    )
+  );
+  const trainingDays = $derived(new Set(view.sessions.map((session) => session.date)).size);
+  const period = $derived.by(() => {
+    const dates = view.sessions.map((session) => session.date).sort();
+    return dates.length ? { from: dates[0], to: dates[dates.length - 1] } : null;
+  });
 
-	const exercises = $derived(uniqueExercises(view.sessions));
-	const newestFirst = $derived(sortOrder === 'new');
+  function setLabel(kind: ExerciseKind, set: ExerciseSet): string {
+    const [first, second] = set;
+    if (kind === 'run') return `${first} мин · ${second} км/ч`;
+    if (kind === 'jumps') return `${first} подх. × ${second}`;
+    return `${first} кг × ${second}`;
+  }
 
-	const filteredExercises = $derived(
-		exercises.filter((name) => name.toLowerCase().includes(query.trim().toLowerCase()))
-	);
-
-	const history = $derived(
-		exercise.trim() ? exerciseHistory(view.sessions, exercise.trim(), newestFirst) : []
-	);
-
-	const summary = $derived.by(() => {
-		if (history.length === 0) return null;
-		const dates = history.map((item) => item.session.date).sort();
-		const totalSets = history.reduce((sum, item) => sum + item.allSets.length, 0);
-		const best1rm = Math.max(...history.map((item) => item.est1rm));
-		return {
-			sessions: history.length,
-			sets: totalSets,
-			from: dates[0],
-			to: dates[dates.length - 1],
-			best1rm
-		};
-	});
+  function sessionKind(session: WorkoutSession): ExerciseKind {
+    return exerciseKinds.get(session.exercise) ?? session.rows[0]?.kind ?? 'strength';
+  }
 </script>
 
-<section class="card">
-	<div class="toolbar">
-		<div>
-			<h2>История подходов</h2>
-			<p class="muted">Все тренировки по выбранному упражнению в хронологическом порядке.</p>
-		</div>
-		<label class="sort-field">
-			<span>Порядок</span>
-			<select bind:value={sortOrder}>
-				<option value="new">Сначала новые</option>
-				<option value="old">Сначала старые</option>
-			</select>
-		</label>
-	</div>
+<div class="container">
+  <header class="page-header">
+    <div>
+      <div class="eyebrow">Дневник тренировок</div>
+      <h1>Журнал</h1>
+      <p>
+        Просматривайте тренировки по датам или выберите упражнение, чтобы увидеть всю его историю.
+      </p>
+    </div>
+    <a class="button button-primary" href="{base}/add">Новая запись</a>
+  </header>
 
-	<div class="picker">
-		<label>
-			<span>Упражнение</span>
-			<input
-				value={exercise}
-				oninput={(e) => (exerciseLocal = e.currentTarget.value)}
-				list="history-exercises"
-				placeholder="Начните вводить название..."
-			/>
-			<datalist id="history-exercises">
-				{#each exercises as name (name)}
-					<option value={name}></option>
-				{/each}
-			</datalist>
-		</label>
-		<label>
-			<span>Фильтр списка</span>
-			<input bind:value={query} type="search" placeholder="Присед..." />
-		</label>
-	</div>
+  <section class="metric-grid">
+    <article class="metric-card">
+      <span>Тренировочных дней</span>
+      <strong>{trainingDays}</strong>
+      <small>за всё время</small>
+    </article>
+    <article class="metric-card">
+      <span>Записей упражнений</span>
+      <strong>{view.sessions.length}</strong>
+      <small>отдельных движений</small>
+    </article>
+    <article class="metric-card">
+      <span>Упражнений</span>
+      <strong>{exercises.length}</strong>
+      <small>есть в истории</small>
+    </article>
+    <article class="metric-card">
+      <span>Период данных</span>
+      <strong class="period-value">{period ? formatDateRu(period.from) : '—'}</strong>
+      <small>{period ? `по ${formatDateRu(period.to)}` : 'журнал пока пуст'}</small>
+    </article>
+  </section>
 
-	{#if query.trim() && !exercise.trim()}
-		<div class="exercise-chips">
-			{#each filteredExercises.slice(0, 12) as name (name)}
-				<button type="button" class="chip" onclick={() => (exerciseLocal = name)}>{name}</button>
-			{/each}
-		</div>
-	{/if}
-</section>
+  <section class="card filters">
+    <label class="exercise-filter">
+      Упражнение
+      <input
+        value={exercise}
+        oninput={(event) => (exerciseLocal = event.currentTarget.value)}
+        list="history-exercises"
+        placeholder="Все упражнения"
+      />
+      <datalist id="history-exercises">
+        {#each exercises as name (name)}
+          <option value={name}></option>
+        {/each}
+      </datalist>
+    </label>
+    <label>
+      Найти в каталоге
+      <input bind:value={query} type="search" placeholder="Например, присед" />
+    </label>
+    <label>
+      Порядок
+      <select bind:value={sortOrder}>
+        <option value="new">Сначала новые</option>
+        <option value="old">Сначала старые</option>
+      </select>
+    </label>
+    {#if exercise.trim()}
+      <button class="button button-ghost clear-filter" type="button" onclick={() => (exerciseLocal = '')}>
+        Показать все
+      </button>
+    {/if}
+  </section>
 
-{#if exercise.trim() && summary}
-	<section class="card summary">
-		<div class="summary-grid">
-			<div>
-				<p class="label">Сессий</p>
-				<p class="value">{summary.sessions}</p>
-			</div>
-			<div>
-				<p class="label">Подходов</p>
-				<p class="value">{summary.sets}</p>
-			</div>
-			<div>
-				<p class="label">Лучшая 1ПМ</p>
-				<p class="value">{fmtNum(summary.best1rm)} кг</p>
-			</div>
-			<div>
-				<p class="label">Период</p>
-				<p class="value small">{formatDateRu(summary.from)} — {formatDateRu(summary.to)}</p>
-			</div>
-		</div>
-	</section>
-{/if}
+  {#if query.trim()}
+    <div class="exercise-chips">
+      {#each filteredExercises.slice(0, 16) as name (name)}
+        <button
+          type="button"
+          class:active={exercise === name}
+          onclick={() => {
+            exerciseLocal = name;
+            query = '';
+          }}
+        >
+          {name}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
-{#if !exercise.trim()}
-	<section class="card muted">Выберите упражнение, чтобы увидеть историю подходов.</section>
-{:else if history.length === 0}
-	<section class="card muted">Нет записей для «{exercise}».</section>
-{:else}
-	<section class="timeline">
-		{#each history as item (item.session.id)}
-			<article class="card session-card">
-				<div class="session-head">
-					<div>
-						<p class="date">{formatDateRu(item.session.date)}</p>
-						<p class="muted meta-line">
-							{item.allSets.length} подх. · тоннаж {fmtNum(item.tonnage)} кг · 1ПМ {fmtNum(item.est1rm)} кг
-						</p>
-					</div>
-					<a class="edit-link" href="{base}/add?id={item.session.id}">Изменить</a>
-				</div>
+  {#if exercise.trim() && selectedSummary}
+    <div class="section-heading">
+      <div>
+        <h2>{exercise}</h2>
+        <p>{selectedKind === 'strength' ? 'Силовая история' : selectedKind === 'run' ? 'Беговая история' : 'Прыжковая история'}</p>
+      </div>
+      <a class="button button-secondary" href="{base}/stats?exercise={encodeURIComponent(exercise)}">
+        Открыть аналитику
+      </a>
+    </div>
+    <section class="metric-grid selected-metrics">
+      <article class="metric-card">
+        <span>Сессий</span>
+        <strong>{selectedSessions.length}</strong>
+        <small>с этим упражнением</small>
+      </article>
+      <article class="metric-card">
+        <span>Подходов</span>
+        <strong>{totalSets}</strong>
+        <small>во всех записях</small>
+      </article>
+      {#if selectedSummary.kind === 'strength'}
+        <article class="metric-card accent-metric">
+          <span>Лучший расчётный 1ПМ</span>
+          <strong>{fmtNum(selectedSummary.best1rm.value)} кг</strong>
+          <small>{selectedSummary.best1rm.date ? formatDateRu(selectedSummary.best1rm.date) : '—'}</small>
+        </article>
+        <article class="metric-card">
+          <span>Лучший вес</span>
+          <strong>{fmtNum(selectedSummary.bestWeight.weight)} кг</strong>
+          <small>{selectedSummary.bestWeight.reps} повторений</small>
+        </article>
+      {/if}
+    </section>
+  {/if}
 
-				{#each item.session.rows as row}
-					{#if row.sets.length > 0}
-						<div class="row-block">
-							<div class="sets">
-								{#each row.sets as [weight, reps]}
-									<span
-										class="badge"
-										class:best={weight === item.bestSet[0] && reps === item.bestSet[1]}
-									>
-										{fmtSet(weight, reps)}
-									</span>
-								{/each}
-							</div>
-							{#if row.comment}
-								<p class="comment muted">{row.comment}</p>
-							{/if}
-						</div>
-					{/if}
-				{/each}
-			</article>
-		{/each}
-	</section>
-{/if}
+  <div class="section-heading">
+    <div>
+      <h2>{exercise.trim() ? 'История упражнения' : 'Последние тренировки'}</h2>
+      <p>{exercise.trim() ? `${groupedDays.length} тренировочных дней` : 'Сгруппировано по датам'}</p>
+    </div>
+  </div>
+
+  {#if groupedDays.length === 0}
+    <section class="card empty-state">
+      <h2>Записей не найдено</h2>
+      <p>Смените фильтр или добавьте первую тренировку.</p>
+      <a class="button button-primary" href="{base}/add">Добавить тренировку</a>
+    </section>
+  {:else}
+    <section class="timeline">
+      {#each groupedDays as [date, sessions] (date)}
+        <article class="day-card card">
+          <div class="day-heading">
+            <div>
+              <strong>{formatDateRu(date)}</strong>
+              <span>{sessions.length} {sessions.length === 1 ? 'упражнение' : 'упражнений'}</span>
+            </div>
+            <a class="button button-ghost" href="{base}/?date={date}">Открыть день</a>
+          </div>
+          <div class="session-list">
+            {#each sessions as session (session.id)}
+              {@const kind = sessionKind(session)}
+              <div class="session-row">
+                <div class="session-name">
+                  <a href="{base}/history?exercise={encodeURIComponent(session.exercise)}">
+                    {session.exercise}
+                  </a>
+                  <span>{kind === 'strength' ? 'Силовое' : kind === 'run' ? 'Кардио' : 'Прыжки'}</span>
+                </div>
+                <div class="sets">
+                  {#each session.rows as row}
+                    {#each row.sets as set}
+                      <span>{setLabel(kind, set)}</span>
+                    {/each}
+                  {/each}
+                </div>
+                <a class="edit-link" href="{base}/add?id={session.id}">Изменить</a>
+              </div>
+            {/each}
+          </div>
+        </article>
+      {/each}
+    </section>
+
+    {#if !exercise.trim() && groupedDays.length < new Set(selectedSessions.map((item) => item.date)).size}
+      <button class="button button-secondary load-more" type="button" onclick={() => (visibleDays += 12)}>
+        Показать ещё
+      </button>
+    {/if}
+  {/if}
+</div>
 
 <style>
-	.toolbar {
-		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		align-items: end;
-		flex-wrap: wrap;
-		margin-bottom: 1rem;
-	}
+  .period-value {
+    font-size: 16px;
+  }
 
-	h2 {
-		margin: 0 0 0.25rem;
-	}
+  .filters {
+    display: grid;
+    grid-template-columns: minmax(220px, 2fr) minmax(180px, 1fr) 170px auto;
+    gap: 12px;
+    align-items: end;
+    margin-top: 16px;
+    padding: 18px;
+  }
 
-	.sort-field,
-	.picker label {
-		display: grid;
-		gap: 0.35rem;
-		font-size: 0.85rem;
-		color: var(--muted);
-	}
+  .clear-filter {
+    white-space: nowrap;
+  }
 
-	.picker {
-		display: grid;
-		grid-template-columns: 2fr 1fr;
-		gap: 0.75rem;
-	}
+  .exercise-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 12px;
+  }
 
-	input,
-	select {
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		color: var(--text);
-		padding: 0.55rem 0.75rem;
-	}
+  .exercise-chips button {
+    padding: 7px 10px;
+    color: var(--muted-strong);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 11px;
+  }
 
-	.exercise-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-top: 1rem;
-	}
+  .exercise-chips button.active {
+    color: var(--accent);
+    border-color: rgb(185 243 90 / 30%);
+  }
 
-	.chip {
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-		color: var(--text);
-		border-radius: 999px;
-		padding: 0.4rem 0.75rem;
-	}
+  .selected-metrics {
+    margin-bottom: 5px;
+  }
 
-	.summary-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-		gap: 1rem;
-	}
+  .accent-metric {
+    background: linear-gradient(145deg, rgb(185 243 90 / 10%), var(--surface));
+    border-color: rgb(185 243 90 / 22%);
+  }
 
-	.label {
-		margin: 0;
-		color: var(--muted);
-		font-size: 0.85rem;
-	}
+  .timeline {
+    display: grid;
+    gap: 10px;
+  }
 
-	.value {
-		margin: 0.2rem 0 0;
-		font-size: 1.35rem;
-		font-weight: 700;
-	}
+  .day-card {
+    padding: 0 20px;
+  }
 
-	.value.small {
-		font-size: 1rem;
-		font-weight: 600;
-	}
+  .day-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 17px 0;
+    border-bottom: 1px solid var(--line);
+  }
 
-	.timeline {
-		display: grid;
-		gap: 0.85rem;
-	}
+  .day-heading strong,
+  .day-heading span {
+    display: block;
+  }
 
-	.session-card {
-		display: grid;
-		gap: 0.75rem;
-	}
+  .day-heading strong {
+    font-size: 15px;
+  }
 
-	.session-head {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.75rem;
-		align-items: start;
-	}
+  .day-heading span {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 10px;
+  }
 
-	.date {
-		margin: 0;
-		font-size: 1.05rem;
-		font-weight: 700;
-	}
+  .session-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.9fr) minmax(0, 2fr) auto;
+    gap: 16px;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid rgb(37 45 61 / 65%);
+  }
 
-	.meta-line {
-		margin: 0.25rem 0 0;
-		font-size: 0.9rem;
-	}
+  .session-row:last-child {
+    border-bottom: 0;
+  }
 
-	.edit-link {
-		font-size: 0.9rem;
-		white-space: nowrap;
-	}
+  .session-name a,
+  .session-name span {
+    display: block;
+  }
 
-	.row-block + .row-block {
-		padding-top: 0.5rem;
-		border-top: 1px dashed var(--border);
-	}
+  .session-name a {
+    font-size: 13px;
+    font-weight: 750;
+  }
 
-	.sets {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem;
-	}
+  .session-name a:hover {
+    color: var(--accent);
+  }
 
-	.badge.best {
-		border-color: rgba(110, 231, 168, 0.55);
-		background: rgba(110, 231, 168, 0.14);
-		color: var(--accent);
-	}
+  .session-name span {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 9px;
+  }
 
-	.comment {
-		margin: 0.35rem 0 0;
-		font-size: 0.85rem;
-	}
+  .sets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
 
-	@media (max-width: 720px) {
-		.picker {
-			grid-template-columns: 1fr;
-		}
-	}
+  .sets span {
+    padding: 5px 7px;
+    color: var(--muted-strong);
+    background: #0a0f17;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 10px;
+  }
+
+  .edit-link {
+    color: var(--blue);
+    font-size: 10px;
+  }
+
+  .load-more {
+    display: flex;
+    margin: 18px auto 0;
+  }
+
+  @media (max-width: 950px) {
+    .filters {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 680px) {
+    .filters {
+      grid-template-columns: 1fr;
+    }
+
+    .session-row {
+      grid-template-columns: 1fr;
+      gap: 9px;
+    }
+  }
 </style>

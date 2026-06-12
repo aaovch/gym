@@ -28,7 +28,7 @@ export type MesoConstructorInput = {
 	microCount: number;
 	defaultProtocolId?: string;
 	exercises: MesoExerciseSetup[];
-	/** При создании внутри макро — id родительского макроцикла. */
+	/** Макроцикл, в чей упорядоченный список mesoIds будет добавлен новый блок. */
 	macroId?: string;
 };
 
@@ -157,6 +157,7 @@ export function createMesocycleFromConstructor(
 	if (!macroId) {
 		return {
 			...plan,
+			revision: plan.revision + 1,
 			updatedAt: new Date().toISOString(),
 			mesocycles: [...plan.mesocycles, meso]
 		};
@@ -164,6 +165,7 @@ export function createMesocycleFromConstructor(
 
 	return {
 		...plan,
+		revision: plan.revision + 1,
 		updatedAt: new Date().toISOString(),
 		macrocycles: (plan.macrocycles ?? []).map((macro) =>
 			macro.id === macroId ? { ...macro, mesoIds: [...macro.mesoIds, meso.id] } : macro
@@ -190,7 +192,6 @@ export function buildMesocyclePlan(input: MesoConstructorInput, keyMaps: Exercis
 		label: input.label.trim() || 'Новый блок',
 		startDate: input.startDate,
 		endDate: '',
-		macroId: input.macroId,
 		templateId: defaultProtocolId,
 		anchor1rm,
 		anchor1rmManual,

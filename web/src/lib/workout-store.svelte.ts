@@ -41,7 +41,7 @@ type SyncState = {
 };
 
 function emptyDatabase(): WorkoutDatabase {
-	return { version: 3, updatedAt: '', exercises: [], logs: [] };
+	return { version: 4, revision: 0, updatedAt: '', exercises: [], logs: [] };
 }
 
 function normalizeLoadedCyclePlan(
@@ -68,9 +68,10 @@ function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 			? cyclePlanView.mesocycles
 			: autoMesocyclesAsView(microcycles, entries);
 	const cyclePlanForCalc: CyclePlan = cyclePlan
-		? normalizeCyclePlan(cyclePlan, microcycles.byDate)
-		: {
-				version: 3,
+			? normalizeCyclePlan(cyclePlan, microcycles.byDate)
+			: {
+				version: 4,
+				revision: 0,
 				updatedAt: '',
 				templates: bundledProtocolTemplates(),
 				macrocycles: [],
@@ -152,7 +153,11 @@ class WorkoutStore {
 	}
 
 	private persistLocally(db: WorkoutDatabase) {
-		const next = { ...db, updatedAt: new Date().toISOString() };
+		const next = {
+			...db,
+			revision: db.revision + 1,
+			updatedAt: new Date().toISOString()
+		};
 		this.database = next;
 		saveLocalDatabase(next);
 		this.patchSync({
@@ -356,7 +361,7 @@ class WorkoutStore {
 
 		const token = getGitHubToken();
 		if (token) {
-			await this.persistToGitHub(result.database, 'Repair workout data links');
+			await this.persistToGitHub(token, result.database, 'Repair workout data links');
 			if (result.plan) {
 				await this.persistCyclePlanToGitHub(token, result.plan);
 			}

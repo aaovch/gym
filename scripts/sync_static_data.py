@@ -1,4 +1,4 @@
-"""Sync data/*.json → web/static/data/ (v3, minified)."""
+"""Sync data/*.json → web/static/data/ (v4, minified)."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ STATIC_DIR = ROOT / "web" / "static" / "data"
 
 def minify_json(path: Path) -> dict:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    if path.name == "workouts.json" and raw.get("version") != 3:
-        raise SystemExit(f"{path.name}: expected version 3, got {raw.get('version')!r}")
-    if path.name == "cycle-plan.json" and raw.get("version") != 3:
-        raise SystemExit(f"{path.name}: expected version 3, got {raw.get('version')!r}")
+    if path.name == "workouts.json" and raw.get("version") != 4:
+        raise SystemExit(f"{path.name}: expected version 4, got {raw.get('version')!r}")
+    if path.name == "cycle-plan.json" and raw.get("version") != 4:
+        raise SystemExit(f"{path.name}: expected version 4, got {raw.get('version')!r}")
     text = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
     path.write_text(text, encoding="utf-8")
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -33,7 +33,8 @@ def main() -> None:
         cycle_plan.write_text(
             json.dumps(
                 {
-                    "version": 3,
+                    "version": 4,
+                    "revision": 0,
                     "updatedAt": "",
                     "templates": [],
                     "macrocycles": [],
@@ -53,7 +54,7 @@ def main() -> None:
         raw = minify_json(src)
         if name == "workouts.json":
             print(
-                f"{name}: v3, {len(raw.get('exercises', []))} exercises, "
+                f"{name}: v4, {len(raw.get('exercises', []))} exercises, "
                 f"{len(raw.get('logs', []))} logs -> {STATIC_DIR / name}"
             )
         else:

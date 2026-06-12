@@ -74,7 +74,7 @@
 			role="img"
 			aria-label="График 1ПМ по датам: {title}"
 		>
-			{#each layout.dateTicks as tick (tick.date)}
+			{#each layout.dateTicks as tick (`${tick.x}:${tick.label}`)}
 				<line
 					x1={tick.x}
 					y1={layout.plotTop}

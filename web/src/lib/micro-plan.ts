@@ -2,14 +2,14 @@ import type { TrainingDay } from './microcycle';
 
 export type MicroSessionPlan = {
 	id: string;
-	indexInMicro: number;
+	indexInMicro: 0 | 1;
 	date?: string;
 };
 
 export type MicrocyclePlan = {
 	id: string;
 	indexInMeso: number;
-	sessions: MicroSessionPlan[];
+	sessions: [MicroSessionPlan, MicroSessionPlan];
 	label?: string;
 	intensityPct?: number;
 };
@@ -18,7 +18,7 @@ function newSessionId(): string {
 	return `ms-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export function defaultMicroSessions(): MicroSessionPlan[] {
+export function defaultMicroSessions(): [MicroSessionPlan, MicroSessionPlan] {
 	return [
 		{ id: newSessionId(), indexInMicro: 0 },
 		{ id: newSessionId(), indexInMicro: 1 }
@@ -44,14 +44,17 @@ export function sessionPlanByIndex(
 }
 
 export function normalizeMicrocyclePlan(micro: MicrocyclePlan): MicrocyclePlan {
+	const byIndex = new Map(micro.sessions?.map((session) => [session.indexInMicro, session]));
+	const defaults = defaultMicroSessions();
 	return {
 		id: micro.id,
 		indexInMeso: micro.indexInMeso,
 		label: micro.label,
 		intensityPct: micro.intensityPct,
-		sessions: micro.sessions?.length
-			? [...micro.sessions].sort((a, b) => a.indexInMicro - b.indexInMicro)
-			: defaultMicroSessions()
+		sessions: [
+			{ ...(byIndex.get(0) ?? defaults[0]), indexInMicro: 0 },
+			{ ...(byIndex.get(1) ?? defaults[1]), indexInMicro: 1 }
+		]
 	};
 }
 
@@ -70,7 +73,7 @@ export function microFromOverviewDays(
 			day.indexInMicro >= 0 && day.indexInMicro <= 1
 				? day.indexInMicro
 				: sessions.findIndex((s) => !s.date);
-		if (idx >= 0) sessions[idx] = { ...sessions[idx], date: day.date };
+		if (idx === 0 || idx === 1) sessions[idx] = { ...sessions[idx], date: day.date };
 	}
 	return normalizeMicrocyclePlan({ id: microId, indexInMeso, sessions });
 }

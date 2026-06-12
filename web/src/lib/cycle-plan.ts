@@ -53,8 +53,6 @@ export type MesocyclePlan = {
 	startDate: string;
 	endDate: string;
 	microcycles: MicrocyclePlan[];
-	/** Принадлежность макроциклу. */
-	macroId?: string;
 	/** Протокол по умолчанию для упражнений без своего шаблона. */
 	templateId: string;
 	/** Якорные 1ПМ на старт мезо: exerciseId → кг. */
@@ -76,7 +74,8 @@ export type MacrocyclePlan = {
 };
 
 export type CyclePlan = {
-	version: 3;
+	version: 4;
+	revision: number;
 	updatedAt: string;
 	templates: ProtocolTemplate[];
 	macrocycles: MacrocyclePlan[];
@@ -92,7 +91,7 @@ export type EnrichedMicrocycle = {
 	phase: ProtocolPhase | null;
 	/** @deprecated используй intensityByExercise */
 	targetPct: number | null;
-	intensityByExercise: ReturnType<typeof sessionIntensity>[];
+	intensityByExercise: NonNullable<ReturnType<typeof sessionIntensity>>[];
 };
 
 export type ProtocolMatrixCell = {
@@ -162,7 +161,8 @@ function newId(prefix: string): string {
 
 export function emptyCyclePlan(): CyclePlan {
 	return {
-		version: 3,
+		version: 4,
+		revision: 0,
 		updatedAt: '',
 		templates: bundledProtocolTemplates(),
 		macrocycles: [],
@@ -174,7 +174,7 @@ export function emptyCyclePlan(): CyclePlan {
 export function normalizeCyclePlan(plan: CyclePlan, _byDate?: Map<string, TrainingDay>): CyclePlan {
 	return ensureBundledProtocols({
 		...plan,
-		version: 3,
+		version: 4,
 		macrocycles: plan.macrocycles ?? [],
 		mesocycles: plan.mesocycles.map((meso) => ({
 			...meso,
@@ -209,7 +209,7 @@ export function ensureBundledProtocols(plan: CyclePlan): CyclePlan {
 		ordered.every((item, index) => JSON.stringify(item) === JSON.stringify(plan.templates[index]));
 	if (unchanged) return plan;
 
-	return touchPlan({ ...plan, templates: ordered });
+	return { ...plan, templates: ordered };
 }
 
 function mesoExercisesFromPlan(
@@ -454,7 +454,8 @@ export function importPlanFromAuto(
 	});
 
 	return {
-		version: 3,
+		version: 4,
+		revision: (existing?.revision ?? 0) + 1,
 		updatedAt: new Date().toISOString(),
 		templates,
 		macrocycles: existing?.macrocycles ?? [],
@@ -499,7 +500,7 @@ function enrichMicro(
 	const defaultPhase = phaseForMicro(defaultTemplate, plan.indexInMeso);
 	const targetPct = plan.intensityPct ?? defaultPhase?.intensityPct ?? null;
 
-	const intensityByExercise: ReturnType<typeof sessionIntensity>[] = [];
+	const intensityByExercise: NonNullable<ReturnType<typeof sessionIntensity>>[] = [];
 	const microExercises = exercisesInMicro(plan, dayA, dayB, meso, entries, keyMaps);
 
 	for (const exercise of microExercises) {
@@ -536,7 +537,7 @@ function enrichMicro(
 }
 
 function reindexMeso(meso: MesocyclePlan): MesocyclePlan {
-	const microcycles = meso.microcycles
+	const microcycles = [...meso.microcycles]
 		.sort((a, b) => a.indexInMeso - b.indexInMeso)
 		.map((micro, index) => ({ ...micro, indexInMeso: index + 1 }));
 	const allDates = microcycles.flatMap((micro) => microDates(micro)).sort();
@@ -936,20 +937,28 @@ export function assignSessionDate(
 				...meso,
 				microcycles: meso.microcycles.map((micro) => {
 					if (micro.id !== microId) return micro;
-					const sessions = [...micro.sessions];
+					const sessions: MicrocyclePlan['sessions'] = [
+						{ ...micro.sessions[0] },
+						{ ...micro.sessions[1] }
+					];
 					let idx =
 						indexInMicro ??
 						sessions.findIndex((session) => !session.date);
 					if (idx < 0) idx = sessions.length - 1;
 					return {
 						...micro,
-						sessions: sessions.map((session, sessionIdx) =>
-							sessionIdx === idx
-								? { ...session, date }
-								: session.date === date
-									? { ...session, date: undefined }
-									: session
-						)
+						sessions: [
+							idx === 0
+								? { ...sessions[0], date }
+								: sessions[0].date === date
+									? { ...sessions[0], date: undefined }
+									: sessions[0],
+							idx === 1
+								? { ...sessions[1], date }
+								: sessions[1].date === date
+									? { ...sessions[1], date: undefined }
+									: sessions[1]
+						]
 					};
 				})
 			});
@@ -975,9 +984,14 @@ export function unassignSessionDate(plan: CyclePlan, date: string): CyclePlan {
 				...meso,
 				microcycles: meso.microcycles.map((micro) => ({
 					...micro,
-					sessions: micro.sessions.map((session) =>
-						session.date === date ? { ...session, date: undefined } : session
-					)
+					sessions: [
+						micro.sessions[0].date === date
+							? { ...micro.sessions[0], date: undefined }
+							: micro.sessions[0],
+						micro.sessions[1].date === date
+							? { ...micro.sessions[1], date: undefined }
+							: micro.sessions[1]
+					]
 				}))
 			})
 		)
@@ -1265,7 +1279,11 @@ export function updateMacrocycle(
 }
 
 function touchPlan(plan: CyclePlan): CyclePlan {
-	return { ...plan, updatedAt: new Date().toISOString() };
+	return {
+		...plan,
+		revision: plan.revision + 1,
+		updatedAt: new Date().toISOString()
+	};
 }
 
 /** Fallback: auto mesocycles as read-only enriched view when no manual plan. */
@@ -1276,7 +1294,8 @@ export function autoMesocyclesAsView(
 	const keyMaps = buildExerciseKeyMapsFromEntries(entries);
 	const templates = bundledProtocolTemplates();
 	const cyclePlan: CyclePlan = {
-		version: 3,
+		version: 4,
+		revision: 0,
 		updatedAt: '',
 		templates: templates.map((item) => structuredClone(item)),
 		macrocycles: [],

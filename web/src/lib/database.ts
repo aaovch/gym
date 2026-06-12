@@ -1,5 +1,14 @@
 import { ensureExerciseCatalog, exerciseName, resolveExerciseId } from './exercises';
-import type { RowInput, SessionRow, SetInput, WorkoutDatabase, WorkoutEntry, WorkoutSession } from './types';
+import type {
+	ExerciseKind,
+	ExerciseSet,
+	RowInput,
+	SessionRow,
+	SetInput,
+	WorkoutDatabase,
+	WorkoutEntry,
+	WorkoutSession
+} from './types';
 
 export function formatWeight(value: number): string {
 	if (Number.isInteger(value)) return String(value);
@@ -10,22 +19,23 @@ export function formatSet(weight: number, reps: number): string {
 	return `${formatWeight(weight)}×${formatWeight(reps)}`;
 }
 
-export function formatSetsCell(sets: [number, number][], comment?: string | null): string {
+export function formatSetsCell(sets: ExerciseSet[], comment?: string | null): string {
 	const body = sets.map(([weight, reps]) => formatSet(weight, reps)).join(', ');
 	if (!comment?.trim()) return body;
 	return `${body} (${comment.trim()})`;
 }
 
-export function parseSetInputs(inputs: SetInput[]): [number, number][] {
+export function parseSetInputs(inputs: SetInput[]): ExerciseSet[] {
 	return inputs
-		.map(({ weight, reps }) => [Number(weight.replace(',', '.')), Number(reps.replace(',', '.'))] as [number, number])
+		.map(({ weight, reps }) => [Number(weight.replace(',', '.')), Number(reps.replace(',', '.'))] as ExerciseSet)
 		.filter(([weight, reps]) => Number.isFinite(weight) && Number.isFinite(reps) && weight > 0 && reps > 0);
 }
 
-export function rowInputToSessionRow(row: RowInput): SessionRow | null {
+export function rowInputToSessionRow(row: RowInput, kind: ExerciseKind = 'strength'): SessionRow | null {
 	const sets = parseSetInputs(row.sets);
 	if (sets.length === 0) return null;
 	return {
+		kind,
 		sets,
 		comment: row.comment.trim() || null
 	};
@@ -33,7 +43,7 @@ export function rowInputToSessionRow(row: RowInput): SessionRow | null {
 
 export function sessionToEntry(session: WorkoutSession): WorkoutEntry {
 	const parts: string[] = [];
-	const sets: [number, number][] = [];
+	const sets: ExerciseSet[] = [];
 
 	for (const row of session.rows) {
 		if (row.sets.length === 0) continue;
@@ -45,6 +55,7 @@ export function sessionToEntry(session: WorkoutSession): WorkoutEntry {
 		id: session.id,
 		exerciseId: session.exerciseId,
 		exercise: session.exercise,
+		kind: session.rows[0]?.kind ?? 'strength',
 		date: session.date,
 		parts,
 		sets,

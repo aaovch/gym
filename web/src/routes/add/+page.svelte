@@ -38,6 +38,9 @@
 
 	const view = $derived(workoutStore.view);
 	const exercises = $derived(uniqueExercisesFromDb(workoutStore.database));
+	const exerciseKind = $derived(
+		workoutStore.database.exercises.find((item) => item.name === exercise.trim())?.kind ?? 'strength'
+	);
 	const editId = $derived.by(() => (browser ? page.url.searchParams.get('id') : null));
 	const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
 	const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
@@ -84,11 +87,11 @@
 		editingId = session.id;
 		exercise = session.exercise;
 		date = session.date;
-		mainRow = sessionRowToInput(session.rows[0] ?? { sets: [], comment: null });
+		mainRow = sessionRowToInput(session.rows[0] ?? { kind: 'strength', sets: [], comment: null });
 		extraRows = session.rows.slice(1).map((row) => sessionRowToInput(row));
 	}
 
-	function sessionRowToInput(row: { sets: [number, number][]; comment?: string | null }): RowInput {
+	function sessionRowToInput(row: WorkoutSession['rows'][number]): RowInput {
 		return {
 			sets: row.sets.map(([weight, reps]) => ({
 				weight: String(weight).replace('.', ','),
@@ -119,8 +122,10 @@
 	const previewLog = $derived.by((): ExerciseLog | null => {
 		const name = exercise.trim();
 		if (!name) return null;
+		const kind =
+			workoutStore.database.exercises.find((item) => item.name === name)?.kind ?? 'strength';
 		const rows = [mainRow, ...extraRows]
-			.map(rowInputToSessionRow)
+			.map((row) => rowInputToSessionRow(row, kind))
 			.filter((row): row is NonNullable<typeof row> => row !== null);
 		if (rows.length === 0) return null;
 		return createLog(workoutStore.database, name, date, rows, editingId ?? crypto.randomUUID()).log;
@@ -233,10 +238,15 @@
 			</div>
 		{/if}
 
-		<SetEditor bind:row={mainRow} label="Основной блок" />
+		<SetEditor bind:row={mainRow} label="Основной блок" kind={exerciseKind} />
 
 		{#each extraRows as _, index (index)}
-			<SetEditor bind:row={extraRows[index]} label="Дополнительный блок" onremove={() => removeExtraRow(index)} />
+			<SetEditor
+				bind:row={extraRows[index]}
+				label="Дополнительный блок"
+				kind={exerciseKind}
+				onremove={() => removeExtraRow(index)}
+			/>
 		{/each}
 
 		<div class="form-actions">

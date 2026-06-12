@@ -1,701 +1,806 @@
 <script lang="ts">
-	import { base } from '$app/paths';
-	import { browser } from '$app/environment';
-	import { page } from '$app/state';
-	import {
-		defaultActiveMesoMicro,
-		exerciseTargetOnMicro,
-		exercisesForMicroSession,
-		resolveMesoMicroSelection,
-		suggestSessionIndex
-	} from '$lib/cycle-plan';
-	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
-	import { microHasDate } from '$lib/micro-plan';
-	import {
-		indexToSlot,
-		mesocycleColor,
-		sessionIndexLabel,
-		slotColor,
-		slotLabel,
-		slotToIndex,
-		type WorkoutSlot
-	} from '$lib/microcycle';
-	import RmLabels from '$lib/components/RmLabels.svelte';
-	import { thesesStore } from '$lib/training-theses';
-	import {
-		evaluateEntryVolume,
-		resolveVolumeAnchor1rm,
-		TRAINING_VOLUME_GUIDE_ID,
-		volumeCheckLabel
-	} from '$lib/volume-guide';
-	import { deleteSession, workoutStore } from '$lib/workout-store';
+  import { base } from '$app/paths';
+  import { browser } from '$app/environment';
+  import { page } from '$app/state';
+  import {
+    defaultActiveMesoMicro,
+    exerciseTargetOnMicro,
+    exercisesForMicroSession,
+    resolveMesoMicroSelection,
+    suggestSessionIndex
+  } from '$lib/cycle-plan';
+  import { formatDateRu, fmtNum, todayIso } from '$lib/format';
+  import { microHasDate } from '$lib/micro-plan';
+  import {
+    indexToSlot,
+    mesocycleColor,
+    slotColor,
+    slotLabel,
+    slotToIndex,
+    type WorkoutSlot
+  } from '$lib/microcycle';
+  import RmLabels from '$lib/components/RmLabels.svelte';
+  import { thesesStore } from '$lib/training-theses';
+  import type { ExerciseKind, ExerciseSet } from '$lib/types';
+  import {
+    evaluateEntryVolume,
+    resolveVolumeAnchor1rm,
+    TRAINING_VOLUME_GUIDE_ID,
+    volumeCheckLabel
+  } from '$lib/volume-guide';
+  import { deleteSession, workoutStore } from '$lib/workout-store';
 
-	let datePick = $state(todayIso());
-	let mesoPick = $state<string | null>(null);
-	let microPick = $state<string | null>(null);
-	let slotPick = $state<WorkoutSlot | null>(null);
-	let busyId = $state<string | null>(null);
-	let error = $state('');
+  let datePick = $state(todayIso());
+  let mesoPick = $state<string | null>(null);
+  let microPick = $state<string | null>(null);
+  let slotPick = $state<WorkoutSlot | null>(null);
+  let busyId = $state<string | null>(null);
+  let error = $state('');
 
-	const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
-	const urlMeso = $derived.by(() => (browser ? page.url.searchParams.get('meso') : null));
-	const urlMicro = $derived.by(() => (browser ? page.url.searchParams.get('micro') : null));
-	const selectedDate = $derived(urlDate ?? datePick);
-	const view = $derived(workoutStore.view);
+  const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
+  const urlMeso = $derived.by(() => (browser ? page.url.searchParams.get('meso') : null));
+  const urlMicro = $derived.by(() => (browser ? page.url.searchParams.get('micro') : null));
+  const selectedDate = $derived(urlDate ?? datePick);
+  const view = $derived(workoutStore.view);
+  const mesocycles = $derived(view.cyclePlanView.mesocycles);
 
-	const mesocycles = $derived(view.cyclePlanView.mesocycles);
+  const trainingContext = $derived.by(() => {
+    const resolved = resolveMesoMicroSelection(
+      mesocycles,
+      selectedDate,
+      mesoPick ?? urlMeso,
+      microPick ?? urlMicro
+    );
+    if (resolved) return resolved;
+    const hasExplicitPick = Boolean(mesoPick ?? urlMeso ?? microPick ?? urlMicro);
+    if (!hasExplicitPick && selectedDate === todayIso()) return defaultActiveMesoMicro(mesocycles);
+    return null;
+  });
 
-	const trainingContext = $derived.by(() => {
-		const resolved = resolveMesoMicroSelection(
-			mesocycles,
-			selectedDate,
-			mesoPick ?? urlMeso,
-			microPick ?? urlMicro
-		);
-		if (resolved) return resolved;
-		const hasExplicitPick = Boolean(mesoPick ?? urlMeso ?? microPick ?? urlMicro);
-		if (!hasExplicitPick && selectedDate === todayIso()) {
-			return defaultActiveMesoMicro(mesocycles);
-		}
-		return null;
-	});
+  const mesocycle = $derived(trainingContext?.meso ?? null);
+  const microcycle = $derived(trainingContext?.micro ?? null);
+  const suggestedIndex = $derived.by(() =>
+    microcycle ? suggestSessionIndex(microcycle, selectedDate, view.entries, view.workoutTemplates) : 0
+  );
+  const activeIndex = $derived(slotPick != null ? slotToIndex(slotPick) : suggestedIndex);
+  const activeSlot = $derived(indexToSlot(activeIndex));
+  const slotExercises = $derived.by(() =>
+    mesocycle ? exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex) : []
+  );
+  const entriesForDate = $derived(
+    view.entries
+      .filter((entry) => entry.date === selectedDate)
+      .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
+  );
+  const entryByExercise = $derived(new Map(entriesForDate.map((entry) => [entry.exercise, entry])));
+  const loggedPlanned = $derived(slotExercises.filter((exercise) => entryByExercise.has(exercise)).length);
+  const sessionProgress = $derived(
+    slotExercises.length ? Math.round((loggedPlanned / slotExercises.length) * 100) : 0
+  );
+  const availableDates = $derived([...new Set(view.entries.map((entry) => entry.date))].sort().reverse());
+  const lastTrainingDate = $derived(availableDates.find((date) => date < selectedDate) ?? null);
+  const totalTrainingDays = $derived(new Set(view.entries.map((entry) => entry.date)).size);
 
-	const mesocycle = $derived(trainingContext?.meso ?? null);
-	const microcycle = $derived(trainingContext?.micro ?? null);
+  const protocolHints = $derived.by(() => {
+    if (!mesocycle || !microcycle) {
+      return new Map<string, NonNullable<ReturnType<typeof exerciseTargetOnMicro>>>();
+    }
+    const hints = new Map<string, NonNullable<ReturnType<typeof exerciseTargetOnMicro>>>();
+    for (const exercise of slotExercises) {
+      const anchor = mesocycle.anchorInfo[exercise]?.anchor;
+      if (!anchor) continue;
+      const row = exerciseTargetOnMicro(
+        view.cyclePlanForCalc,
+        mesocycle.plan,
+        microcycle.plan,
+        exercise,
+        anchor,
+        view.keyMaps,
+        entryByExercise.get(exercise)
+      );
+      if (row) hints.set(exercise, row);
+    }
+    return hints;
+  });
 
-	const suggestedIndex = $derived.by((): number => {
-		if (!microcycle) return 0;
-		return suggestSessionIndex(microcycle, selectedDate, view.entries, view.workoutTemplates);
-	});
+  const volumeGuideRows = $derived(
+    thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
+  );
+  const volumeHints = $derived.by(() => {
+    const hints = new Map<string, NonNullable<ReturnType<typeof evaluateEntryVolume>>>();
+    if (volumeGuideRows.length === 0) return hints;
+    for (const entry of entriesForDate) {
+      const anchor = resolveVolumeAnchor1rm(
+        view.entries,
+        entry.exercise,
+        entry.date,
+        mesocycle?.anchorInfo[entry.exercise]?.anchor,
+        entry.id
+      );
+      const check = evaluateEntryVolume(entry, anchor, volumeGuideRows);
+      if (check) hints.set(entry.exercise, check);
+    }
+    return hints;
+  });
 
-	const activeIndex = $derived(slotPick != null ? slotToIndex(slotPick) : suggestedIndex);
-	const activeSlot = $derived(indexToSlot(activeIndex));
+  function addUrl(exercise: string, entryId?: string): string {
+    const params = new URLSearchParams();
+    if (entryId) params.set('id', entryId);
+    else params.set('exercise', exercise);
+    params.set('date', selectedDate);
+    if (mesocycle) params.set('meso', mesocycle.plan.id);
+    if (microcycle) params.set('micro', microcycle.plan.id);
+    params.set('session', String(activeIndex));
+    return `${base}/add?${params.toString()}`;
+  }
 
-	const slotExercises = $derived.by(() => {
-		if (!mesocycle) return [];
-		return exercisesForMicroSession(mesocycle, view.workoutTemplates, activeIndex);
-	});
+  function setLabel(kind: ExerciseKind, set: ExerciseSet): string {
+    const [first, second] = set;
+    if (kind === 'run') return `${first} мин · ${second} км/ч`;
+    if (kind === 'jumps') return `${first} подх. × ${second}`;
+    return `${first} кг × ${second}`;
+  }
 
-	const trainingDay = $derived(view.microcycles.byDate.get(selectedDate) ?? null);
-	const template = $derived(
-		view.workoutTemplates.find((item) => item.indexInMicro === activeIndex) ?? null
-	);
-
-	const entriesForDate = $derived(
-		view.entries
-			.filter((entry) => entry.date === selectedDate)
-			.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'))
-	);
-
-	const entryByExercise = $derived(new Map(entriesForDate.map((entry) => [entry.exercise, entry])));
-
-	const protocolHints = $derived.by(() => {
-		if (!mesocycle || !microcycle) {
-			return new Map<string, NonNullable<ReturnType<typeof exerciseTargetOnMicro>>>();
-		}
-		const hints = new Map<string, NonNullable<ReturnType<typeof exerciseTargetOnMicro>>>();
-		for (const exercise of slotExercises) {
-			const anchor = mesocycle.anchorInfo[exercise]?.anchor;
-			if (!anchor) continue;
-			const entry = entryByExercise.get(exercise);
-			const row = exerciseTargetOnMicro(
-				view.cyclePlanForCalc,
-				mesocycle.plan,
-				microcycle.plan,
-				exercise,
-				anchor,
-				view.keyMaps,
-				entry
-			);
-			if (row) hints.set(exercise, row);
-		}
-		return hints;
-	});
-
-	const volumeGuideRows = $derived(
-		thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
-	);
-
-	const volumeHints = $derived.by(() => {
-		if (volumeGuideRows.length === 0) return new Map<string, NonNullable<ReturnType<typeof evaluateEntryVolume>>>();
-		const hints = new Map<string, NonNullable<ReturnType<typeof evaluateEntryVolume>>>();
-		for (const entry of entriesForDate) {
-			const mesoAnchor = mesocycle?.anchorInfo[entry.exercise]?.anchor;
-			const anchor = resolveVolumeAnchor1rm(
-				view.entries,
-				entry.exercise,
-				entry.date,
-				mesoAnchor,
-				entry.id
-			);
-			const check = evaluateEntryVolume(entry, anchor, volumeGuideRows);
-			if (check) hints.set(entry.exercise, check);
-		}
-		return hints;
-	});
-
-	const availableDates = $derived(
-		[...new Set(view.entries.map((entry) => entry.date))].sort().reverse()
-	);
-
-	function addUrl(exercise: string, entryId?: string): string {
-		const params = new URLSearchParams();
-		if (entryId) params.set('id', entryId);
-		else params.set('exercise', exercise);
-		params.set('date', selectedDate);
-		if (mesocycle) params.set('meso', mesocycle.plan.id);
-		if (microcycle) params.set('micro', microcycle.plan.id);
-		params.set('session', String(activeIndex));
-		return `${base}/add?${params.toString()}`;
-	}
-
-	async function removeEntry(id: string | undefined) {
-		if (!id) return;
-		busyId = id;
-		error = '';
-		try {
-			await deleteSession(id);
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Не удалось удалить';
-		} finally {
-			busyId = null;
-		}
-	}
+  async function removeEntry(id: string | undefined) {
+    if (!id) return;
+    busyId = id;
+    error = '';
+    try {
+      await deleteSession(id);
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Не удалось удалить запись';
+    } finally {
+      busyId = null;
+    }
+  }
 </script>
 
-<section class="card">
-	<div class="toolbar">
-		<div>
-			<h2>Тренировка на сегодня</h2>
-			<p class="muted">Выбери микроцикл — увидишь цели по протоколу и сможешь занести подходы.</p>
-		</div>
-		<label class="date-field">
-			<span>Дата</span>
-			<input type="date" value={selectedDate} oninput={(e) => (datePick = e.currentTarget.value)} list="workout-dates" />
-			<datalist id="workout-dates">
-				{#each availableDates as date (date)}
-					<option value={date}></option>
-				{/each}
-			</datalist>
-		</label>
-	</div>
+<div class="container dashboard">
+  <header class="page-header">
+    <div>
+      <div class="eyebrow">Рабочий день</div>
+      <h1>{selectedDate === todayIso() ? 'Тренировка сегодня' : formatDateRu(selectedDate)}</h1>
+      <p>
+        План, целевые веса и фактические подходы собраны в одном месте. Меняй дату, если нужно
+        подготовить тренировку заранее или восстановить запись.
+      </p>
+    </div>
+    <div class="date-control">
+      <span>Дата тренировки</span>
+      <input
+        type="date"
+        value={selectedDate}
+        oninput={(event) => (datePick = event.currentTarget.value)}
+        list="workout-dates"
+      />
+      <datalist id="workout-dates">
+        {#each availableDates as date (date)}
+          <option value={date}></option>
+        {/each}
+      </datalist>
+    </div>
+  </header>
 
-	{#if mesocycles.length === 0}
-		<p class="empty">
-			Нет плана циклов. Создай мезоцикл на вкладке
-			<a href="{base}/cycles">Циклы</a> или импортируй из истории тренировок.
-		</p>
-	{:else}
-		<div class="cycle-pickers">
-			<div class="picker-block">
-				<span class="picker-label">Мезоцикл</span>
-				<div class="picker-tabs">
-					{#each mesocycles as meso (meso.plan.id)}
-						<button
-							type="button"
-							class="picker-tab"
-							class:active={mesocycle?.plan.id === meso.plan.id}
-							style="--meso-color: {mesocycleColor(meso.index)}"
-							onclick={() => {
-								mesoPick = meso.plan.id;
-								microPick =
-									meso.microcycles.find((micro) => microHasDate(micro.plan, selectedDate))
-										?.plan.id ??
-									meso.microcycles.find((micro) => !micro.complete)?.plan.id ??
-									meso.microcycles[0]?.plan.id ??
-									null;
-								slotPick = null;
-							}}
-						>
-							<span class="tab-num">#{meso.index}</span>
-							<span class="tab-label">{meso.plan.label}</span>
-						</button>
-					{/each}
-				</div>
-			</div>
+  <section class="metric-grid overview-metrics">
+    <article class="metric-card">
+      <span>План на тренировку</span>
+      <strong>{slotExercises.length}</strong>
+      <small>упражнений в сессии {activeSlot}</small>
+    </article>
+    <article class="metric-card">
+      <span>Готовность сессии</span>
+      <strong>{sessionProgress}%</strong>
+      <small>{loggedPlanned} из {slotExercises.length} записано</small>
+    </article>
+    <article class="metric-card">
+      <span>Всего тренировок</span>
+      <strong>{totalTrainingDays}</strong>
+      <small>дней в журнале</small>
+    </article>
+    <article class="metric-card">
+      <span>Предыдущая тренировка</span>
+      <strong class="date-value">{lastTrainingDate ? formatDateRu(lastTrainingDate) : '—'}</strong>
+      <small>{lastTrainingDate ? 'последняя запись до этой даты' : 'история пока пуста'}</small>
+    </article>
+  </section>
 
-			{#if mesocycle && mesocycle.microcycles.length > 0}
-				<div class="picker-block">
-					<span class="picker-label">Микроцикл</span>
-					<div class="picker-tabs micro-tabs">
-						{#each mesocycle.microcycles as micro (micro.plan.id)}
-							<button
-								type="button"
-								class="picker-tab micro-tab"
-								class:active={microcycle?.plan.id === micro.plan.id}
-								class:complete={micro.complete}
-								onclick={() => {
-									microPick = micro.plan.id;
-									slotPick = null;
-								}}
-							>
-								μ{micro.plan.indexInMeso}
-								{#if micro.complete}
-									<span class="micro-ok">✓</span>
-								{/if}
-							</button>
-						{/each}
-					</div>
-				</div>
-			{/if}
-		</div>
+  {#if mesocycles.length === 0}
+    <section class="card empty-state onboarding">
+      <div class="eyebrow">Первый шаг</div>
+      <h2>Соберите первый тренировочный цикл</h2>
+      <p>
+        Задайте блоки макроцикла, протоколы и упражнения. После этого здесь появится готовый план
+        каждой тренировки.
+      </p>
+      <a class="button button-primary" href="{base}/cycles">Создать макроцикл</a>
+    </section>
+  {:else}
+    <section class="card training-card">
+      <div class="training-top">
+        <div>
+          <div class="eyebrow">Контекст тренировки</div>
+          <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
+          {#if mesocycle && microcycle}
+            <p>
+              Микроцикл {microcycle.plan.indexInMeso} · сессия {activeSlot} ·
+              {formatDateRu(mesocycle.plan.startDate)} — {formatDateRu(mesocycle.plan.endDate)}
+            </p>
+          {/if}
+        </div>
+        <div class="session-ring" style={`--progress: ${sessionProgress * 3.6}deg`}>
+          <span>{sessionProgress}%</span>
+        </div>
+      </div>
 
-		{#if mesocycle && microcycle}
-			<div class="meso-banner" style="--meso-color: {mesocycleColor(mesocycle.index)}">
-				<strong>μ{microcycle.plan.indexInMeso}</strong>
-				<span class="muted">
-					· {mesocycle.plan.label} · {formatDateRu(mesocycle.plan.startDate)} — {formatDateRu(mesocycle.plan.endDate)}
-					· {microcycle.complete ? 'полный A+B' : 'неполный'}
-				</span>
-			</div>
+      <div class="context-picker">
+        <div>
+          <span class="control-label">Мезоцикл</span>
+          <div class="choice-row">
+            {#each mesocycles as meso (meso.plan.id)}
+              <button
+                type="button"
+                class="choice"
+                class:active={mesocycle?.plan.id === meso.plan.id}
+                style={`--choice-color: ${mesocycleColor(meso.index)}`}
+                onclick={() => {
+                  mesoPick = meso.plan.id;
+                  microPick =
+                    meso.microcycles.find((micro) => microHasDate(micro.plan, selectedDate))?.plan.id ??
+                    meso.microcycles.find((micro) => !micro.complete)?.plan.id ??
+                    meso.microcycles[0]?.plan.id ??
+                    null;
+                  slotPick = null;
+                }}
+              >
+                <b>{meso.index}</b>
+                <span>{meso.plan.label}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
 
-			<div class="slot-picker">
-				<span class="picker-label">Тренировка</span>
-				<div class="slot-tabs">
-					{#each ['A', 'B'] as slot (slot)}
-					{@const slotKey = slot as WorkoutSlot}
-						<button
-							type="button"
-							class="slot-tab"
-							class:active={activeSlot === slotKey}
-							style="--slot-color: {slotColor(slotKey)}"
-							onclick={() => (slotPick = slotKey)}
-						>
-							<span class="slot-badge">{slot}</span>
-							{slotLabel(slotKey)}
-							{#if template && activeSlot === slotKey}
-								<span class="muted"> · {template.label}</span>
-							{/if}
-						</button>
-					{/each}
-				</div>
-			</div>
+        {#if mesocycle}
+          <div>
+            <span class="control-label">Микроцикл</span>
+            <div class="choice-row compact">
+              {#each mesocycle.microcycles as micro (micro.plan.id)}
+                <button
+                  type="button"
+                  class="micro-choice"
+                  class:active={microcycle?.plan.id === micro.plan.id}
+                  class:complete={micro.complete}
+                  onclick={() => {
+                    microPick = micro.plan.id;
+                    slotPick = null;
+                  }}
+                >
+                  {micro.plan.indexInMeso}
+                  <small>{micro.complete ? 'готов' : 'в работе'}</small>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
 
-			{#if slotExercises.length > 0}
-				<div class="workout-plan">
-					<h3>Упражнения · {sessionIndexLabel(activeIndex)}</h3>
-					<div class="exercise-cards">
-						{#each slotExercises as exercise (exercise)}
-							{@const entry = entryByExercise.get(exercise)}
-							{@const hint = protocolHints.get(exercise)}
-							{@const rm = mesocycle?.anchorInfo[exercise]}
-							<article class="exercise-card" class:logged={Boolean(entry)}>
-								<div class="exercise-head">
-									<h4>{exercise}</h4>
-									<a class="action-link" href={addUrl(exercise, entry?.id)}>
-										{entry ? 'Изменить' : 'Записать'}
-									</a>
-								</div>
-								{#if hint || rm}
-									<div class="target-hint">
-										{#if rm}
-											<RmLabels
-												anchor={rm.anchor}
-												current={rm.current1rm}
-												currentDate={rm.current1rmDate}
-											/>
-										{/if}
-										{#if hint}
-											<p>
-												{hint.protocolLabel}: цель ~{fmtNum(hint.targetWeight)} кг ({hint.targetPct}% от якоря)
-											</p>
-										{/if}
-									</div>
-								{/if}
-								{#if entry}
-									<div class="sets">
-										{#each entry.sets as [weight, reps]}
-											<span class="badge">{weight}×{reps}</span>
-										{/each}
-									</div>
-									{#if hint && !hint.plannedOnly}
-										<p
-											class="fact-hint"
-											class:match={Math.abs(hint.maxPct - hint.targetPct) <= 3}
-										>
-											Факт пик {fmtNum(hint.maxPct)}% от якоря · {fmtNum(hint.maxWeight)} кг
-										</p>
-									{/if}
-									{#if volumeHints.has(exercise)}
-										{@const volume = volumeHints.get(exercise)!}
-										<p
-											class="volume-hint"
-											class:ok={volume.status === 'ok'}
-											class:low={volume.status === 'low'}
-											class:high={volume.status === 'high'}
-										>
-											{volumeCheckLabel(volume)}
-										</p>
-									{/if}
-								{:else}
-									<p class="muted pending">Ещё не записано</p>
-								{/if}
-							</article>
-						{/each}
-					</div>
-				</div>
-			{:else}
-				<p class="empty">В этом мезо нет упражнений для тренировки {activeSlot}. Настрой их на вкладке Циклы.</p>
-			{/if}
-		{:else if !mesocycle || !microcycle}
-			<p class="empty hint">
-				Выбери мезоцикл и μ для {formatDateRu(selectedDate)} — или восстанови даты на вкладке
-				<a href="{base}/cycles">Циклы</a> → Ещё → «Восстановить даты μ».
-			</p>
-		{/if}
-	{/if}
-</section>
+        <div>
+          <span class="control-label">Сессия</span>
+          <div class="choice-row compact">
+            {#each ['A', 'B'] as slot (slot)}
+              {@const slotKey = slot as WorkoutSlot}
+              <button
+                type="button"
+                class="slot-choice"
+                class:active={activeSlot === slotKey}
+                style={`--choice-color: ${slotColor(slotKey)}`}
+                onclick={() => (slotPick = slotKey)}
+              >
+                <b>{slot}</b>
+                <span>{slotLabel(slotKey)}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      </div>
+    </section>
 
-{#if entriesForDate.length > 0}
-	<section class="card">
-		<h3>Все записи на {formatDateRu(selectedDate)}</h3>
-		<div class="plan-list">
-			{#each entriesForDate as entry (entry.id ?? `${entry.exercise}-${entry.date}`)}
-				<article class="plan-item">
-					<div class="plan-head">
-						<h3>{entry.exercise}</h3>
-						{#if entry.id}
-							<a class="edit-link" href={addUrl(entry.exercise, entry.id)}>Изменить</a>
-						{/if}
-					</div>
-					<p>{entry.parts.join(' ')}</p>
-					<div class="sets">
-						{#each entry.sets as [weight, reps]}
-							<span class="badge">{weight}×{reps}</span>
-						{/each}
-					</div>
-					{#if entry.id}
-						<button
-							type="button"
-							class="ghost danger"
-							disabled={busyId === entry.id}
-							onclick={() => removeEntry(entry.id)}
-						>
-							{busyId === entry.id ? 'Удаляем...' : 'Удалить'}
-						</button>
-					{/if}
-				</article>
-			{/each}
-		</div>
-	</section>
-{/if}
+    <div class="section-heading">
+      <div>
+        <h2>План сессии {activeSlot}</h2>
+        <p>Цели протокола и уже выполненные подходы</p>
+      </div>
+      <a class="button button-secondary" href="{base}/add?date={selectedDate}&session={activeIndex}">
+        Добавить вне плана
+      </a>
+    </div>
 
-{#if error}
-	<section class="card error">{error}</section>
-{/if}
+    {#if mesocycle && microcycle && slotExercises.length > 0}
+      <section class="exercise-grid">
+        {#each slotExercises as exercise, index (exercise)}
+          {@const entry = entryByExercise.get(exercise)}
+          {@const hint = protocolHints.get(exercise)}
+          {@const rm = mesocycle.anchorInfo[exercise]}
+          {@const volume = volumeHints.get(exercise)}
+          <article class="exercise-item" class:complete={Boolean(entry)}>
+            <div class="exercise-index">{entry ? '✓' : index + 1}</div>
+            <div class="exercise-content">
+              <div class="exercise-heading">
+                <div>
+                  <h3>{exercise}</h3>
+                  {#if hint}
+                    <p>
+                      {hint.protocolLabel} · цель {fmtNum(hint.targetWeight)} кг · {hint.targetPct}%
+                    </p>
+                  {:else}
+                    <p>{entry?.kind === 'run' ? 'Кардио' : entry?.kind === 'jumps' ? 'Прыжковая работа' : 'Силовая работа'}</p>
+                  {/if}
+                </div>
+                <a class="button {entry ? 'button-secondary' : 'button-primary'}" href={addUrl(exercise, entry?.id)}>
+                  {entry ? 'Изменить' : 'Записать'}
+                </a>
+              </div>
 
-<section class="card muted meta">
-	Обновлено: {new Date(view.updatedAt || Date.now()).toLocaleString('ru-RU')}
-</section>
+              {#if rm}
+                <div class="rm-row">
+                  <RmLabels anchor={rm.anchor} current={rm.current1rm} currentDate={rm.current1rmDate} />
+                </div>
+              {/if}
+
+              {#if entry}
+                <div class="set-list">
+                  {#each entry.sets as set}
+                    <span>{setLabel(entry.kind, set)}</span>
+                  {/each}
+                </div>
+                <div class="feedback-row">
+                  {#if hint && !hint.plannedOnly}
+                    <span class:good={Math.abs(hint.maxPct - hint.targetPct) <= 3}>
+                      Пик {fmtNum(hint.maxPct)}% · {fmtNum(hint.maxWeight)} кг
+                    </span>
+                  {/if}
+                  {#if volume}
+                    <span class:good={volume.status === 'ok'} class:warning={volume.status !== 'ok'}>
+                      {volumeCheckLabel(volume)}
+                    </span>
+                  {/if}
+                </div>
+              {:else}
+                <div class="pending-line">
+                  <span></span>
+                  Подходы ещё не записаны
+                </div>
+              {/if}
+            </div>
+          </article>
+        {/each}
+      </section>
+    {:else}
+      <section class="card empty-state">
+        <h2>Для этой сессии нет упражнений</h2>
+        <p>Добавьте упражнения в мезоцикл или выберите другую сессию.</p>
+        <a class="button button-secondary" href="{base}/cycles">Открыть план</a>
+      </section>
+    {/if}
+  {/if}
+
+  {#if entriesForDate.length > 0}
+    <div class="section-heading">
+      <div>
+        <h2>Журнал за день</h2>
+        <p>Все записи, включая упражнения вне текущего плана</p>
+      </div>
+    </div>
+    <section class="day-log card">
+      {#each entriesForDate as entry (entry.id ?? `${entry.exercise}-${entry.date}`)}
+        <article>
+          <div>
+            <strong>{entry.exercise}</strong>
+            <div class="inline-sets">
+              {#each entry.sets as set}
+                <span>{setLabel(entry.kind, set)}</span>
+              {/each}
+            </div>
+          </div>
+          <div class="log-actions">
+            {#if entry.id}
+              <a href={addUrl(entry.exercise, entry.id)}>Изменить</a>
+              <button type="button" disabled={busyId === entry.id} onclick={() => removeEntry(entry.id)}>
+                {busyId === entry.id ? 'Удаление...' : 'Удалить'}
+              </button>
+            {/if}
+          </div>
+        </article>
+      {/each}
+    </section>
+  {/if}
+
+  {#if error}
+    <section class="error-banner">{error}</section>
+  {/if}
+</div>
 
 <style>
-	.toolbar {
-		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		align-items: end;
-		flex-wrap: wrap;
-		margin-bottom: 1rem;
-	}
+  .dashboard {
+    padding-bottom: 30px;
+  }
 
-	h2,
-	h3,
-	h4 {
-		margin: 0;
-	}
+  .date-control {
+    width: 176px;
+  }
 
-	h3 {
-		margin-bottom: 0.75rem;
-		font-size: 0.95rem;
-	}
+  .date-control span,
+  .control-label {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 750;
+  }
 
-	.date-field {
-		display: grid;
-		gap: 0.35rem;
-		color: var(--muted);
-		font-size: 0.85rem;
-	}
+  .overview-metrics {
+    margin-bottom: 16px;
+  }
 
-	input[type='date'] {
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		color: var(--text);
-		padding: 0.55rem 0.75rem;
-	}
+  .date-value {
+    font-size: 17px;
+    line-height: 1.15;
+  }
 
-	.empty {
-		margin: 0;
-		color: var(--muted);
-	}
+  .onboarding {
+    margin-top: 24px;
+  }
 
-	.cycle-pickers {
-		display: grid;
-		gap: 0.75rem;
-		margin-bottom: 1rem;
-	}
+  .training-card {
+    padding: 24px;
+  }
 
-	.picker-block {
-		display: grid;
-		gap: 0.35rem;
-	}
+  .training-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--line);
+  }
 
-	.picker-label {
-		font-size: 0.78rem;
-		font-weight: 600;
-		color: var(--muted);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
+  .training-top h2 {
+    margin: 6px 0 6px;
+    font-size: 27px;
+  }
 
-	.picker-tabs {
-		display: flex;
-		gap: 0.4rem;
-		overflow-x: auto;
-		padding-bottom: 0.15rem;
-	}
+  .training-top p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
 
-	.picker-tab {
-		flex: 0 0 auto;
-		padding: 0.45rem 0.7rem;
-		border-radius: 10px;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-		color: var(--text);
-		text-align: left;
-		font-size: 0.82rem;
-	}
+  .session-ring {
+    display: grid;
+    width: 68px;
+    height: 68px;
+    flex: 0 0 auto;
+    place-items: center;
+    background:
+      radial-gradient(circle closest-side, #151b27 78%, transparent 80% 100%),
+      conic-gradient(var(--accent) var(--progress), #2a3242 0);
+    border-radius: 50%;
+  }
 
-	.picker-tab.active {
-		border-color: color-mix(in srgb, var(--meso-color, var(--accent)) 50%, var(--border));
-		background: color-mix(in srgb, var(--meso-color, var(--accent)) 12%, var(--surface-2));
-	}
+  .session-ring span {
+    font-size: 12px;
+    font-weight: 850;
+  }
 
-	.tab-num {
-		display: block;
-		font-weight: 800;
-		color: var(--meso-color, var(--accent));
-		font-size: 0.78rem;
-	}
+  .context-picker {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(180px, 0.7fr);
+    gap: 22px;
+    padding-top: 22px;
+  }
 
-	.tab-label {
-		display: block;
-		margin-top: 0.1rem;
-		white-space: nowrap;
-	}
+  .choice-row {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
 
-	.micro-tab {
-		min-width: 2.75rem;
-		text-align: center;
-		font-weight: 700;
-	}
+  .choice,
+  .micro-choice,
+  .slot-choice {
+    color: var(--muted-strong);
+    background: #0d121b;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    cursor: pointer;
+  }
 
-	.micro-tab.complete {
-		border-color: rgba(110, 231, 168, 0.3);
-	}
+  .choice {
+    min-width: 132px;
+    padding: 9px 11px;
+    text-align: left;
+  }
 
-	.micro-ok {
-		margin-left: 0.2rem;
-		color: var(--accent);
-		font-size: 0.75rem;
-	}
+  .choice b,
+  .choice span {
+    display: block;
+  }
 
-	.meso-banner {
-		margin-bottom: 0.75rem;
-		padding: 0.6rem 0.85rem;
-		border-radius: 12px;
-		border: 1px solid color-mix(in srgb, var(--meso-color) 40%, var(--border));
-		background: color-mix(in srgb, var(--meso-color) 10%, var(--surface-2));
-		font-size: 0.9rem;
-	}
+  .choice b {
+    color: var(--choice-color);
+    font-size: 10px;
+  }
 
-	.meso-banner strong {
-		color: var(--meso-color);
-	}
+  .choice span {
+    margin-top: 3px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-	.slot-picker {
-		display: grid;
-		gap: 0.35rem;
-		margin-bottom: 1rem;
-	}
+  .choice.active,
+  .slot-choice.active {
+    color: var(--text);
+    background: color-mix(in srgb, var(--choice-color) 10%, #111722);
+    border-color: color-mix(in srgb, var(--choice-color) 40%, var(--line));
+  }
 
-	.slot-tabs {
-		display: flex;
-		gap: 0.4rem;
-		flex-wrap: wrap;
-	}
+  .micro-choice {
+    min-width: 58px;
+    padding: 8px;
+    font-size: 14px;
+    font-weight: 850;
+  }
 
-	.slot-tab {
-		padding: 0.45rem 0.75rem;
-		border-radius: 10px;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-		color: var(--text);
-		font-size: 0.85rem;
-	}
+  .micro-choice small {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 8px;
+    font-weight: 650;
+  }
 
-	.slot-tab.active {
-		border-color: color-mix(in srgb, var(--slot-color) 45%, var(--border));
-		background: color-mix(in srgb, var(--slot-color) 12%, var(--surface-2));
-	}
+  .micro-choice.active {
+    color: var(--accent);
+    background: rgb(185 243 90 / 8%);
+    border-color: rgb(185 243 90 / 36%);
+  }
 
-	.slot-badge {
-		display: inline-grid;
-		place-items: center;
-		width: 1.35rem;
-		height: 1.35rem;
-		margin-right: 0.3rem;
-		border-radius: 999px;
-		background: var(--slot-color);
-		color: #0f1115;
-		font-size: 0.72rem;
-		font-weight: 800;
-		vertical-align: middle;
-	}
+  .micro-choice.complete small {
+    color: var(--accent);
+  }
 
-	.exercise-cards {
-		display: grid;
-		gap: 0.65rem;
-	}
+  .slot-choice {
+    display: flex;
+    min-width: 94px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+  }
 
-	.exercise-card {
-		padding: 0.85rem;
-		border-radius: 12px;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-	}
+  .slot-choice b {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    color: #0b1016;
+    background: var(--choice-color);
+    border-radius: 8px;
+  }
 
-	.exercise-card.logged {
-		border-color: rgba(110, 231, 168, 0.25);
-	}
+  .slot-choice span {
+    font-size: 10px;
+    font-weight: 700;
+  }
 
-	.exercise-head {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.75rem;
-		align-items: start;
-		margin-bottom: 0.35rem;
-	}
+  .exercise-grid {
+    display: grid;
+    gap: 10px;
+  }
 
-	.exercise-head h4 {
-		font-size: 1rem;
-	}
+  .exercise-item {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 14px;
+    padding: 18px;
+    background: linear-gradient(145deg, #131925, #0e131d);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
 
-	.action-link {
-		font-size: 0.88rem;
-		white-space: nowrap;
-	}
+  .exercise-item.complete {
+    border-color: rgb(185 243 90 / 22%);
+  }
 
-	.target-hint {
-		display: grid;
-		gap: 0.35rem;
-		margin: 0 0 0.5rem;
-		font-size: 0.82rem;
-		color: var(--accent-2);
-	}
+  .exercise-index {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    color: var(--muted);
+    background: #0a0e16;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    font-size: 12px;
+    font-weight: 850;
+  }
 
-	.target-hint p {
-		margin: 0;
-	}
+  .exercise-item.complete .exercise-index {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
 
-	.fact-hint {
-		margin: 0.35rem 0 0;
-		font-size: 0.82rem;
-		color: var(--accent-2);
-	}
+  .exercise-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
 
-	.fact-hint.match {
-		color: var(--accent);
-	}
+  .exercise-heading h3 {
+    margin: 1px 0 4px;
+    font-size: 16px;
+  }
 
-	.pending {
-		margin: 0;
-		font-size: 0.82rem;
-	}
+  .exercise-heading p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
 
-	.plan-list {
-		display: grid;
-		gap: 0.85rem;
-	}
+  .rm-row {
+    margin-top: 10px;
+  }
 
-	.plan-item {
-		padding: 1rem;
-		border-radius: 12px;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-	}
+  .set-list,
+  .inline-sets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
 
-	.plan-head {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.75rem;
-		align-items: start;
-	}
+  .set-list {
+    margin-top: 14px;
+  }
 
-	.plan-item h3 {
-		margin: 0 0 0.35rem;
-		font-size: 1.05rem;
-	}
+  .set-list span,
+  .inline-sets span {
+    padding: 6px 9px;
+    color: var(--muted-strong);
+    background: #0a0f17;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 700;
+  }
 
-	.edit-link {
-		font-size: 0.9rem;
-	}
+  .feedback-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 10px;
+    color: var(--blue);
+    font-size: 10px;
+  }
 
-	.plan-item p {
-		margin: 0 0 0.75rem;
-		color: var(--muted);
-	}
+  .feedback-row .good {
+    color: var(--accent);
+  }
 
-	.sets {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem;
-		margin-bottom: 0.5rem;
-	}
+  .feedback-row .warning {
+    color: var(--orange);
+  }
 
-	.badge {
-		padding: 0.2rem 0.45rem;
-		border-radius: 999px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		font-size: 0.82rem;
-	}
+  .pending-line {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 15px;
+    color: var(--muted);
+    font-size: 10px;
+  }
 
-	button.ghost {
-		background: transparent;
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		color: var(--text);
-		padding: 0.45rem 0.75rem;
-	}
+  .pending-line span {
+    width: 18px;
+    height: 1px;
+    background: var(--line-strong);
+  }
 
-	button.danger {
-		color: var(--danger);
-	}
+  .day-log {
+    padding: 4px 18px;
+  }
 
-	.error {
-		color: var(--danger);
-	}
+  .day-log article {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
 
-	.meta {
-		font-size: 0.9rem;
-	}
+  .day-log article:last-child {
+    border-bottom: 0;
+  }
 
-	.volume-hint {
-		margin: 0.35rem 0 0;
-		font-size: 0.82rem;
-		color: var(--accent-2);
-	}
+  .day-log strong {
+    display: block;
+    margin-bottom: 7px;
+    font-size: 13px;
+  }
 
-	.volume-hint.ok {
-		color: var(--accent);
-	}
+  .inline-sets span {
+    padding: 3px 6px;
+    font-size: 9px;
+  }
 
-	.volume-hint.low {
-		color: #fbbf24;
-	}
+  .log-actions {
+    display: flex;
+    gap: 10px;
+    font-size: 10px;
+  }
 
-	.volume-hint.high {
-		color: var(--danger);
-	}
+  .log-actions a {
+    color: var(--blue);
+  }
+
+  .log-actions button {
+    padding: 0;
+    color: var(--danger);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .error-banner {
+    margin-top: 14px;
+    padding: 13px 16px;
+    color: #ffd3d3;
+    background: rgb(255 114 114 / 10%);
+    border: 1px solid rgb(255 114 114 / 24%);
+    border-radius: 12px;
+  }
+
+  @media (max-width: 1050px) {
+    .context-picker {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 680px) {
+    .date-control {
+      width: 100%;
+    }
+
+    .training-card {
+      padding: 18px;
+    }
+
+    .exercise-item {
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .exercise-index {
+      width: 30px;
+      height: 30px;
+    }
+
+    .exercise-heading {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .exercise-heading .button {
+      width: 100%;
+    }
+
+    .day-log article {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
 </style>

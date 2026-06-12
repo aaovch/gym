@@ -154,8 +154,7 @@ export function createMacrocycleFromConstructor(
 			startDate: currentStart,
 			microCount: block.microCount,
 			defaultProtocolId: block.defaultProtocolId,
-			exercises: block.exercises,
-			macroId
+			exercises: block.exercises
 		};
 		const meso = buildMesocyclePlan(mesoInput, keyMaps);
 		mesoIds.push(meso.id);
@@ -178,6 +177,7 @@ export function createMacrocycleFromConstructor(
 
 	return {
 		...plan,
+		revision: plan.revision + 1,
 		updatedAt: new Date().toISOString(),
 		macrocycles: [...(plan.macrocycles ?? []), macro],
 		mesocycles: [...plan.mesocycles, ...newMesos]

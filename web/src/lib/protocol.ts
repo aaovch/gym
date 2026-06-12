@@ -18,7 +18,7 @@ function best1rmFromEntries(
 ): Best1rmHit | null {
 	let best: Best1rmHit | null = null;
 	for (const entry of entries) {
-		if (entry.exercise !== exercise || !predicate(entry.date)) continue;
+		if (entry.kind !== 'strength' || entry.exercise !== exercise || !predicate(entry.date)) continue;
 		for (const [weight, reps] of entry.sets) {
 			const value = epley1rm(weight, reps);
 			if (!best || value > best.value) {
@@ -321,7 +321,7 @@ export function sessionIntensity(
 	anchor1rm: number,
 	targetPct: number
 ): SessionIntensity | null {
-	if (!entry.sets.length || !anchor1rm) return null;
+	if (entry.kind !== 'strength' || !entry.sets.length || !anchor1rm) return null;
 	const tonnage = entry.sets.reduce((sum, [w, r]) => sum + w * r, 0);
 	const reps = entry.sets.reduce((sum, [, r]) => sum + r, 0);
 	const avgWeight = reps ? tonnage / reps : 0;

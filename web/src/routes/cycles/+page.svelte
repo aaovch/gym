@@ -108,6 +108,18 @@
 	const displayMesos = $derived(cyclePlanView.mesocycles);
 	const usingManual = $derived(cyclePlanView.usingManualPlan);
 	const unassigned = $derived(cyclePlanView.unassignedDates);
+	const totalMicros = $derived(
+		displayMesos.reduce((total, meso) => total + meso.microcycles.length, 0)
+	);
+	const completedMicros = $derived(
+		displayMesos.reduce(
+			(total, meso) => total + meso.microcycles.filter((micro) => micro.complete).length,
+			0
+		)
+	);
+	const planProgress = $derived(
+		totalMicros > 0 ? Math.round((completedMicros / totalMicros) * 100) : 0
+	);
 
 	const selectedMacro = $derived.by((): EnrichedMacrocycle | null => {
 		if (displayMacros.length === 0) return null;
@@ -527,7 +539,7 @@
 		editMode = true;
 		mesoConstructorMacroId = macroId;
 		const scopeMesos = macroId
-			? (plan?.mesocycles.filter((meso) => meso.macroId === macroId).length ?? 0)
+			? (plan?.macrocycles.find((macro) => macro.id === macroId)?.mesoIds.length ?? 0)
 			: (workoutStore.cyclePlan?.mesocycles.length ?? 0);
 		constructorLabel = `Блок ${scopeMesos + 1}`;
 		constructorStart = defaultMesoStartDate(view.entries);
@@ -561,7 +573,7 @@
 		);
 		save(next);
 		const meso = next.mesocycles[next.mesocycles.length - 1];
-		if (meso?.macroId) macroPick = meso.macroId;
+		if (mesoConstructorMacroId) macroPick = mesoConstructorMacroId;
 		mesoPick = meso?.id ?? null;
 		mesoTab = 'plan';
 		showMesoConstructor = false;
@@ -895,7 +907,7 @@
 											</td>
 											{#each row.cells as cell}
 												<td class="pct">
-													{#if cell.pct != null}
+													{#if cell.pct != null && cell.targetWeight != null}
 														<span class="pct-val">{cell.pct}%</span>
 														<small>{fmtNum(cell.targetWeight)} кг</small>
 														{#if cell.label}
@@ -1061,7 +1073,7 @@
 									<td class="proto-name" title={row.templateName}>{shortProtocolName(row.templateName)}</td>
 									{#each row.cells as cell}
 										<td class="pct">
-											{#if cell.pct != null}
+											{#if cell.pct != null && cell.targetWeight != null}
 												<span class="pct-val">{cell.pct}%</span>
 												<small>{fmtNum(cell.targetWeight)} кг</small>
 												{#if cell.label}
@@ -1097,23 +1109,25 @@
 {/if}
 
 <!-- 1. Шапка -->
-<section class="card page-head">
+<section class="planning-head">
 	<div>
-		<h2>Циклы тренировок</h2>
-		<p class="muted">
-			Макроцикл — цепочка мезо-блоков (μ). В каждом мезо — якорный 1ПМ для плана и протокол % по μ.
+		<div class="eyebrow">Архитектура программы</div>
+		<h1>Планирование</h1>
+		<p>
+			Собирайте макроциклы из последовательных блоков, назначайте протоколы и контролируйте
+			прогресс каждого микроцикла.
 		</p>
 	</div>
 	<div class="head-actions">
-		<button type="button" class="btn primary" onclick={openMacroConstructor}>+ Макроцикл</button>
-		<button type="button" class="btn" onclick={() => openMesoConstructor()}>+ Мезо</button>
+		<button type="button" class="btn primary" onclick={openMacroConstructor}>Создать макроцикл</button>
+		<button type="button" class="btn" onclick={() => openMesoConstructor()}>Добавить мезоцикл</button>
 		<button
 			type="button"
 			class="btn"
 			class:active={showProtocolEditor}
 			onclick={toggleProtocolEditor}
 		>
-			Шаблоны протокола
+			Протоколы
 		</button>
 		{#if !usingManual}
 			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
@@ -1137,9 +1151,32 @@
 			</div>
 		{/if}
 		<button type="button" class="btn ghost-link" onclick={() => (showHelp = !showHelp)}>
-			{showHelp ? 'Скрыть справку' : 'Справка A/B'}
+			{showHelp ? 'Скрыть методику' : 'Методика'}
 		</button>
 	</div>
+</section>
+
+<section class="plan-metrics">
+	<article>
+		<span>Макроциклов</span>
+		<strong>{displayMacros.length}</strong>
+		<small>длинных программ</small>
+	</article>
+	<article>
+		<span>Мезоциклов</span>
+		<strong>{displayMesos.length}</strong>
+		<small>тренировочных блоков</small>
+	</article>
+	<article>
+		<span>Микроциклов завершено</span>
+		<strong>{completedMicros} / {totalMicros}</strong>
+		<small>{planProgress}% общего плана</small>
+	</article>
+	<article class:attention={unassigned.length > 0}>
+		<span>Дат вне плана</span>
+		<strong>{unassigned.length}</strong>
+		<small>{unassigned.length ? 'можно распределить по циклам' : 'все записи связаны'}</small>
+	</article>
 </section>
 
 {#if showHelp}
@@ -1794,7 +1831,7 @@
 												</div>
 												<div class="cell-fact">
 													<span class="cell-label">факт</span>
-													{#if cell.plannedOnly || cell.factMaxPct == null}
+													{#if cell.plannedOnly || cell.factMaxPct == null || cell.factMaxWeight == null}
 														<span class="fact-empty">—</span>
 													{:else}
 														<span class="fact-val">{fmtNum(cell.factMaxPct)}%</span>
@@ -2021,22 +2058,89 @@
 		max-width: 100%;
 		overflow-x: clip;
 	}
-	h2,
+
+	.planning-head {
+		display: flex;
+		align-items: end;
+		justify-content: space-between;
+		gap: 2rem;
+		margin-bottom: 0.25rem;
+		padding: 0.3rem 0 0.5rem;
+	}
+
+	.planning-head h1 {
+		margin: 0.35rem 0 0.5rem;
+	}
+
+	.planning-head p {
+		max-width: 650px;
+		margin: 0;
+		color: var(--muted);
+		line-height: 1.55;
+	}
+
+	.plan-metrics {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.75rem;
+		margin-bottom: 0.35rem;
+	}
+
+	.plan-metrics article {
+		padding: 1rem;
+		background: var(--surface);
+		border: 1px solid var(--line);
+		border-radius: 0.9rem;
+	}
+
+	.plan-metrics article.attention {
+		border-color: rgba(255, 179, 92, 0.28);
+	}
+
+	.plan-metrics span,
+	.plan-metrics strong,
+	.plan-metrics small {
+		display: block;
+	}
+
+	.plan-metrics span {
+		color: var(--muted);
+		font-size: 0.68rem;
+		font-weight: 700;
+	}
+
+	.plan-metrics strong {
+		margin-top: 0.5rem;
+		font-size: 1.45rem;
+		letter-spacing: -0.04em;
+	}
+
+	.plan-metrics small {
+		margin-top: 0.35rem;
+		color: var(--muted);
+		font-size: 0.66rem;
+	}
+
+	@media (max-width: 900px) {
+		.planning-head {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.plan-metrics {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 520px) {
+		.plan-metrics {
+			grid-template-columns: 1fr;
+		}
+	}
+
 	h3,
 	h4 {
 		margin: 0;
-	}
-
-	.page-head {
-		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		flex-wrap: wrap;
-		align-items: start;
-	}
-
-	.page-head h2 {
-		margin-bottom: 0.25rem;
 	}
 
 	.head-actions {

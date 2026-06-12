@@ -31,13 +31,6 @@ function bestSetNearReps(sets: SetPair[], low: number, high: number): SetPair | 
 	return bestSetByWeight(candidates);
 }
 
-function exerciseChartKind(name: string): 'strength' | 'run' | 'jumps' {
-	const lower = name.toLowerCase();
-	if (lower.includes('бег')) return 'run';
-	if (lower.includes('прыж')) return 'jumps';
-	return 'strength';
-}
-
 function computeEntryMetrics(sets: SetPair[]) {
 	const tonnage = sets.reduce((sum, [weight, reps]) => sum + weight * reps, 0);
 	const maxWeightSet = bestSetByWeight(sets);
@@ -78,7 +71,7 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 
 	for (const entry of entries) {
 		const metrics = computeEntryMetrics(entry.sets);
-		const kind = exerciseChartKind(entry.exercise);
+		const kind = entry.kind;
 
 		if (!summaryMap.has(entry.exercise)) {
 			summaryMap.set(entry.exercise, {

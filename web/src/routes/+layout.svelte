@@ -1,233 +1,243 @@
 <script lang="ts">
-	import '../app.css';
-	import { onMount } from 'svelte';
-	import { base } from '$app/paths';
-	import { page } from '$app/state';
-	import { getGitHubToken, setGitHubToken } from '$lib/auth';
-	import {
-		connectGitHub,
-		pushToGitHub,
-		resetToBundled,
-		workoutStore
-	} from '$lib/workout-store';
-	import { thesesStore } from '$lib/training-theses';
+  import '../app.css';
+  import { onMount } from 'svelte';
+  import { page } from '$app/stores';
+  import { getGitHubToken, setGitHubToken } from '$lib/auth';
+  import {
+    connectGitHub,
+    pushToGitHub,
+    resetToBundled,
+    workoutStore
+  } from '$lib/workout-store';
+  import { thesesStore } from '$lib/training-theses';
 
-	let { data, children } = $props();
+  export let data;
 
-	let githubToken = $state(getGitHubToken());
-	let showSettings = $state(false);
+  let settingsOpen = false;
+  let token = '';
 
-	onMount(() => {
-		workoutStore.bootstrap(data.bundled, data.bundledCyclePlan ?? null);
-		thesesStore.bootstrap(data.theses);
-		workoutStore.connectIfTokenSaved();
-	});
+  const navigation = [
+    { href: '/', label: 'Обзор', short: 'Обзор' },
+    { href: '/cycles', label: 'План', short: 'План' },
+    { href: '/history', label: 'Журнал', short: 'Журнал' },
+    { href: '/stats', label: 'Аналитика', short: 'Аналитика' }
+  ];
 
-	const sourceLabel = $derived(
-		workoutStore.sync.source === 'github'
-			? 'GitHub'
-			: workoutStore.sync.source === 'local'
-				? 'локально в браузере'
-				: 'сборка сайта'
-	);
+  $: path = $page.url.pathname;
+  $: view = workoutStore.view;
+  $: macrocycles = view.cyclePlanView.macrocycles;
+  $: mesocycles = view.cyclePlanView.mesocycles;
+  $: activeMeso = mesocycles.length ? mesocycles[mesocycles.length - 1] : null;
+  $: activeMacro = activeMeso
+    ? macrocycles.find((macrocycle) => macrocycle.plan.mesoIds.includes(activeMeso.plan.id)) ?? null
+    : null;
+  $: activeMicro =
+    activeMeso?.microcycles.find((microcycle) => !microcycle.complete) ??
+    activeMeso?.microcycles[activeMeso.microcycles.length - 1] ??
+    null;
+  $: completedSessions = activeMeso
+    ? activeMeso.microcycles.reduce(
+        (total, microcycle) =>
+          total + Number(Boolean(microcycle.dayA)) + Number(Boolean(microcycle.dayB)),
+        0
+      )
+    : 0;
+  $: totalSessions = activeMeso
+    ? activeMeso.microcycles.length * 2
+    : 0;
+  $: cycleProgress = totalSessions ? Math.round((completedSessions / totalSessions) * 100) : 0;
+  $: sourceLabel =
+    workoutStore.sync.source === 'github'
+      ? 'GitHub'
+      : workoutStore.sync.source === 'local'
+        ? 'Локальные данные'
+        : 'Данные сборки';
 
-	const tabs = [
-		{ href: `${base}/`, label: 'Сегодня', exact: true },
-		{ href: `${base}/cycles`, label: 'Циклы', exact: false },
-		{ href: `${base}/body`, label: 'Карта', exact: false },
-		{ href: `${base}/history`, label: 'История', exact: false },
-		{ href: `${base}/stats`, label: 'Статистика', exact: false },
-		{ href: `${base}/schema`, label: 'Схемы', exact: false },
-		{ href: `${base}/add`, label: 'Запись', exact: false }
-	];
+  onMount(() => {
+    workoutStore.bootstrap(data.bundled, data.bundledCyclePlan ?? null);
+    thesesStore.bootstrap(data.theses);
+    workoutStore.connectIfTokenSaved();
+    token = getGitHubToken();
+  });
 
-	async function saveToken() {
-		setGitHubToken(githubToken);
-		if (!githubToken.trim()) {
-			workoutStore.patchSync({
-				workoutsSha: null,
-				cyclePlanSha: null,
-				githubLogin: null,
-				syncing: false,
-				error: '',
-				message: 'Token удалён. Данные остаются в браузере.'
-			});
-			return;
-		}
-		await connectGitHub(githubToken);
-	}
+  async function saveSettings() {
+    setGitHubToken(token);
+    if (!token.trim()) {
+      workoutStore.patchSync({
+        workoutsSha: null,
+        cyclePlanSha: null,
+        githubLogin: null,
+        syncing: false,
+        error: '',
+        message: 'GitHub отключён. Данные остаются в браузере.'
+      });
+      return;
+    }
+    await connectGitHub(token);
+  }
 
-	async function syncNow() {
-		await pushToGitHub(githubToken);
-	}
+  async function syncNow() {
+    await pushToGitHub(token);
+  }
+
+  function isActive(href: string) {
+    if (href === '/') return path === '/';
+    return path.startsWith(href);
+  }
 </script>
 
-<div class="shell">
-	<header class="container header">
-		<div>
-			<p class="eyebrow">aaovch / gym</p>
-			<h1>План тренировок</h1>
-			<p class="sync-note">
-				Данные: {sourceLabel}{#if workoutStore.sync.githubLogin} · {workoutStore.sync.githubLogin}{/if}
-			</p>
-		</div>
-		<div class="header-side">
-			<nav class="tabs">
-				{#each tabs as tab (tab.href)}
-					<a
-						href={tab.href}
-						class:active={tab.exact
-							? page.url.pathname === base || page.url.pathname === `${base}/`
-							: page.url.pathname.startsWith(tab.href)}
-					>
-						{tab.label}
-					</a>
-				{/each}
-			</nav>
-			<button type="button" class="ghost" onclick={() => (showSettings = !showSettings)}>
-				{showSettings ? 'Скрыть' : 'GitHub'}
-			</button>
-		</div>
-	</header>
+<svelte:head>
+  <title>Gym Planner</title>
+  <meta
+    name="description"
+    content="Личный помощник для планирования макроциклов, мезоциклов и тренировок"
+  />
+</svelte:head>
 
-	{#if showSettings}
-		<section class="container card settings">
-			<h2>Синхронизация</h2>
-			<p class="muted">
-				Тренировки — <code>data/workouts.json</code>, план циклов —
-				<code>data/cycle-plan.json</code>. Локально в браузере и опционально в GitHub.
-			</p>
-			<p class="muted">
-				Fine-grained token: Contents Read and write для <code>aaovch/gym</code>, или classic
-				<code>repo</code>.
-			</p>
-			<div class="settings-row">
-				<input type="password" bind:value={githubToken} placeholder="github_pat_..." />
-				<button type="button" class="primary" onclick={saveToken} disabled={workoutStore.sync.syncing}>
-					{workoutStore.sync.syncing ? 'Подключаем...' : 'Сохранить token'}
-				</button>
-				{#if githubToken.trim()}
-					<button type="button" class="ghost" onclick={syncNow} disabled={workoutStore.sync.syncing}>
-						Отправить в GitHub
-					</button>
-				{/if}
-				<button type="button" class="ghost" onclick={() => resetToBundled(data.bundled)}>
-					Сбросить локальные
-				</button>
-			</div>
-			{#if workoutStore.sync.message}
-				<p class="success">{workoutStore.sync.message}</p>
-			{/if}
-			{#if workoutStore.sync.error}
-				<p class="error">{workoutStore.sync.error}</p>
-			{/if}
-		</section>
-	{/if}
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="На главную">
+      <span class="brand-mark">GP</span>
+      <span>
+        <strong>Gym Planner</strong>
+        <small>личный тренерский штаб</small>
+      </span>
+    </a>
+    <button
+      class="mobile-settings"
+      type="button"
+      aria-label="Открыть настройки"
+      on:click={() => (settingsOpen = true)}
+    >
+      Настройки
+    </button>
 
-	<main class="container main">
-		{@render children()}
-	</main>
+    <nav class="primary-nav" aria-label="Основная навигация">
+      {#each navigation as item}
+        <a href={item.href} class:active={isActive(item.href)}>
+          <span class="nav-marker"></span>
+          {item.label}
+        </a>
+      {/each}
+    </nav>
+
+    <a class="quick-action" href="/add">
+      <span>+</span>
+      Записать тренировку
+    </a>
+
+    {#if activeMeso}
+      <section class="cycle-glance">
+        <div class="eyebrow">Текущий блок</div>
+        <strong>{activeMeso.plan.label}</strong>
+        <span>{activeMacro?.plan.label ?? 'Вне макроцикла'}</span>
+        <div class="progress-track" aria-label={`Выполнено ${cycleProgress}%`}>
+          <span style={`width: ${cycleProgress}%`}></span>
+        </div>
+        <div class="cycle-glance-meta">
+          <span>{completedSessions} из {totalSessions} тренировок</span>
+          <b>{cycleProgress}%</b>
+        </div>
+        {#if activeMicro}
+          <small>Сейчас: микроцикл {activeMicro.plan.indexInMeso}</small>
+        {/if}
+      </section>
+    {/if}
+
+    <div class="sidebar-footer">
+      <button class="settings-button" type="button" on:click={() => (settingsOpen = true)}>
+        <span>Настройки</span>
+        <small>{sourceLabel}</small>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <slot />
+  </main>
+
+  <nav class="mobile-nav" aria-label="Мобильная навигация">
+    {#each navigation as item}
+      <a href={item.href} class:active={isActive(item.href)}>{item.short}</a>
+    {/each}
+    <a href="/add" class:active={path.startsWith('/add')}>Запись</a>
+  </nav>
 </div>
 
-<style>
-	.shell {
-		padding: 2rem 0 3rem;
-	}
+{#if settingsOpen}
+  <div
+    class="dialog-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label="Закрыть настройки"
+    on:click={() => (settingsOpen = false)}
+    on:keydown={(event) => event.key === 'Escape' && (settingsOpen = false)}
+  >
+    <div
+      class="settings-panel"
+      role="dialog"
+      tabindex="-1"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      on:click|stopPropagation
+      on:keydown|stopPropagation
+    >
+      <div class="panel-heading">
+        <div>
+          <div class="eyebrow">Приложение</div>
+          <h2 id="settings-title">Настройки</h2>
+        </div>
+        <button class="icon-button" type="button" aria-label="Закрыть" on:click={() => (settingsOpen = false)}>
+          ×
+        </button>
+      </div>
 
-	.header {
-		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
-		flex-wrap: wrap;
-	}
+      <div class="settings-section">
+        <h3>Синхронизация с GitHub</h3>
+        <p>
+          Необязательно. Без токена данные продолжают храниться локально в браузере. Для подключения
+          нужен токен с доступом к содержимому репозитория.
+        </p>
+        <label>
+          Токен
+          <input bind:value={token} type="password" autocomplete="off" placeholder="github_pat_..." />
+        </label>
+        {#if workoutStore.sync.message}
+          <p class="settings-success">{workoutStore.sync.message}</p>
+        {/if}
+        {#if workoutStore.sync.error}
+          <p class="settings-error">{workoutStore.sync.error}</p>
+        {/if}
+      </div>
 
-	.header-side {
-		display: grid;
-		gap: 0.75rem;
-		justify-items: end;
-	}
+      <div class="settings-links">
+        <a href="/schema" on:click={() => (settingsOpen = false)}>Структура данных</a>
+        <a href="/body" on:click={() => (settingsOpen = false)}>Карта нагрузки</a>
+      </div>
 
-	.eyebrow {
-		margin: 0 0 0.25rem;
-		color: var(--muted);
-		font-size: 0.85rem;
-	}
-
-	.sync-note {
-		margin: 0.35rem 0 0;
-		color: var(--accent-2);
-		font-size: 0.9rem;
-	}
-
-	h1 {
-		margin: 0;
-		font-size: clamp(1.8rem, 4vw, 2.4rem);
-	}
-
-	.tabs {
-		display: flex;
-		gap: 0.5rem;
-		flex-wrap: wrap;
-	}
-
-	.tabs a,
-	button.ghost {
-		text-decoration: none;
-		color: var(--text);
-		padding: 0.55rem 0.9rem;
-		border-radius: 999px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-	}
-
-	.tabs a.active {
-		border-color: rgba(110, 231, 168, 0.45);
-		background: rgba(110, 231, 168, 0.12);
-		color: var(--accent);
-	}
-
-	.settings h2 {
-		margin: 0 0 0.5rem;
-	}
-
-	.settings-row {
-		display: flex;
-		gap: 0.5rem;
-		flex-wrap: wrap;
-		margin-top: 1rem;
-	}
-
-	.settings-row input {
-		flex: 1;
-		min-width: 220px;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		color: var(--text);
-		padding: 0.55rem 0.75rem;
-	}
-
-	button.primary {
-		border-radius: 10px;
-		padding: 0.55rem 0.9rem;
-		border: 1px solid rgba(110, 231, 168, 0.45);
-		background: rgba(110, 231, 168, 0.16);
-		color: var(--accent);
-	}
-
-	.success {
-		color: var(--accent);
-		margin: 0.75rem 0 0;
-	}
-
-	.error {
-		color: var(--danger);
-		margin: 0.75rem 0 0;
-	}
-
-	.main {
-		display: grid;
-		gap: 1rem;
-	}
-</style>
+      <div class="panel-actions">
+        <button class="button button-danger" type="button" on:click={() => resetToBundled(data.bundled)}>
+          Сбросить локальные
+        </button>
+        {#if token.trim()}
+          <button
+            class="button button-secondary"
+            type="button"
+            disabled={workoutStore.sync.syncing}
+            on:click={syncNow}
+          >
+            Отправить в GitHub
+          </button>
+        {/if}
+        <button
+          class="button button-primary"
+          type="button"
+          disabled={workoutStore.sync.syncing}
+          on:click={saveSettings}
+        >
+          {workoutStore.sync.syncing ? 'Подключение...' : 'Сохранить'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

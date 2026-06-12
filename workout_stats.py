@@ -1,6 +1,7 @@
 import argparse
 import datetime as dt
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
@@ -111,6 +112,7 @@ def aggregate_by_exercise(entries: list[dict]) -> list[dict]:
     grouped: dict[str, dict] = defaultdict(
         lambda: {
             "exercise": "",
+            "kind": "strength",
             "sessions": 0,
             "sets": 0,
             "reps": 0,
@@ -128,6 +130,7 @@ def aggregate_by_exercise(entries: list[dict]) -> list[dict]:
     for entry in entries:
         g = grouped[entry["exercise"]]
         g["exercise"] = entry["exercise"]
+        g["kind"] = entry.get("kind", _exercise_chart_kind(entry["exercise"]))
         g["sessions"] += 1
         metrics = compute_entry_metrics(entry)
         g["sets"] += metrics["sets"]
@@ -179,7 +182,7 @@ def print_summary(groups: list[dict]) -> None:
     for g in groups:
         period = f"{min(g['dates'])} — {max(g['dates'])}" if g["dates"] else "-"
         avg_intensity = g["avg_intensity_sum"] / g["sessions"] if g["sessions"] else 0.0
-        chart_kind = _exercise_chart_kind(g["exercise"])
+        chart_kind = g["kind"]
         best_1rm_val, best_1rm_set, best_1rm_date = g["best_1rm"]
         print(g["exercise"])
         print(
@@ -276,7 +279,7 @@ def save_summary_plots(
         aux_value = [p["max_set"][1] for p in points]
         volume = [p["max_set"][0] * p["max_set"][1] for p in points]
         avg_intensity = [p["avg_intensity"] for p in points]
-        chart_kind = _exercise_chart_kind(exercise)
+        chart_kind = g["kind"]
 
         fig, ax = plt.subplots(figsize=(10, 5))
         if chart_kind == "run":
@@ -325,11 +328,21 @@ def print_day(entries: list[dict], target_date: str) -> None:
     for entry in sorted(entries, key=lambda e: e["exercise"].lower()):
         metrics = compute_entry_metrics(entry)
         set_desc = ", ".join(_fmt_set(w, r) for w, r in entry["sets"])
+        kind = entry.get("kind", _exercise_chart_kind(entry["exercise"]))
         print(entry["exercise"])
-        print(f"  подходы: {set_desc}")
-        print(
-            f"  тоннаж: {metrics['tonnage']:.1f} кг, пик: {metrics['max_weight']:.1f} кг, 1ПМ (Эпли): {metrics['est_1rm']:.1f} кг"
-        )
+        if kind == "run":
+            duration, speed = metrics["max_weight_set"]
+            print(f"  интервалы (мин × км/ч): {set_desc}")
+            print(f"  пик: {duration:.1f} мин при {speed:.1f} км/ч")
+        elif kind == "jumps":
+            set_count, reps = metrics["max_weight_set"]
+            print(f"  объём (подходы × повторы): {set_desc}")
+            print(f"  лучший блок: {set_count:.0f} × {reps:.0f}")
+        else:
+            print(f"  подходы: {set_desc}")
+            print(
+                f"  тоннаж: {metrics['tonnage']:.1f} кг, пик: {metrics['max_weight']:.1f} кг, 1ПМ (Эпли): {metrics['est_1rm']:.1f} кг"
+            )
         print()
 
 
@@ -427,6 +440,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     args = parse_args()
 
     if args.date_from:

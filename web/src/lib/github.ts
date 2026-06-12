@@ -41,6 +41,9 @@ async function fetchRepoFile(token: string, path: string): Promise<{ content: st
 	if (response.status === 404) return null;
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({}));
+		if (response.status === 409) {
+			throw new Error('Конфликт синхронизации: файл в GitHub уже изменён. Обновите данные и повторите сохранение.');
+		}
 		throw new Error((error as { message?: string }).message ?? `GitHub API error ${response.status}`);
 	}
 

@@ -1,16 +1,23 @@
 <script lang="ts">
 	import { emptySetInput } from '$lib/database';
-	import type { RowInput } from '$lib/types';
+	import type { ExerciseKind, RowInput } from '$lib/types';
 
 	let {
 		row = $bindable(),
 		label = 'Подходы',
+		kind = 'strength',
 		onremove = undefined
 	}: {
 		row: RowInput;
 		label?: string;
+		kind?: ExerciseKind;
 		onremove?: (() => void) | undefined;
 	} = $props();
+
+	const firstLabel = $derived(kind === 'run' ? 'Время, мин' : kind === 'jumps' ? 'Подходов' : 'Вес, кг');
+	const secondLabel = $derived(kind === 'run' ? 'Скорость, км/ч' : kind === 'jumps' ? 'Повторов' : 'Повт');
+	const firstPlaceholder = $derived(kind === 'run' ? '20' : kind === 'jumps' ? '10' : '100');
+	const secondPlaceholder = $derived(kind === 'run' ? '8,5' : kind === 'jumps' ? '5' : '5');
 
 	function addSet() {
 		row.sets = [...row.sets, emptySetInput()];
@@ -37,12 +44,12 @@
 		{#each row.sets as set, index (index)}
 			<div class="set-item">
 				<label>
-					<span>Вес</span>
-					<input bind:value={set.weight} inputmode="decimal" placeholder="100" />
+					<span>{firstLabel}</span>
+					<input bind:value={set.weight} inputmode="decimal" placeholder={firstPlaceholder} />
 				</label>
 				<label>
-					<span>Повт</span>
-					<input bind:value={set.reps} inputmode="numeric" placeholder="5" />
+					<span>{secondLabel}</span>
+					<input bind:value={set.reps} inputmode="decimal" placeholder={secondPlaceholder} />
 				</label>
 				<button type="button" class="ghost danger" onclick={() => removeSet(index)} aria-label="Удалить подход">
 					×

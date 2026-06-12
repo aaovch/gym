@@ -19,7 +19,8 @@ export function loadLocalDatabase(): WorkoutDatabase | null {
 		const raw = localStorage.getItem(DB_KEY);
 		if (!raw) return null;
 		return normalizeWorkoutDatabase(JSON.parse(raw));
-	} catch {
+	} catch (error) {
+		console.error('Не удалось загрузить локальную базу тренировок:', error);
 		return null;
 	}
 }
@@ -42,7 +43,8 @@ export function loadCyclePlan(): CyclePlan | null {
 		const plan = normalizeStoredCyclePlan(JSON.parse(raw));
 		if (!plan) return null;
 		return normalizeCyclePlan(plan);
-	} catch {
+	} catch (error) {
+		console.error('Не удалось загрузить локальный план циклов:', error);
 		return null;
 	}
 }
@@ -62,6 +64,7 @@ export function pickNewerCyclePlan(a: CyclePlan, b: CyclePlan | null): CyclePlan
 	if (!b) return a;
 	const aTime = Date.parse(a.updatedAt || '0');
 	const bTime = Date.parse(b.updatedAt || '0');
+	if (bTime === aTime && b.revision !== a.revision) return b.revision > a.revision ? b : a;
 	return bTime > aTime ? b : a;
 }
 
@@ -73,6 +76,7 @@ export function pickNewerDatabase(a: WorkoutDatabase, b: WorkoutDatabase | null)
 	if (!b) return a;
 	const aTime = Date.parse(a.updatedAt || '0');
 	const bTime = Date.parse(b.updatedAt || '0');
+	if (bTime === aTime && b.revision !== a.revision) return b.revision > a.revision ? b : a;
 	return bTime > aTime ? b : a;
 }
 

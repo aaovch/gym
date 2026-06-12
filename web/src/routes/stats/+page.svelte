@@ -1,189 +1,368 @@
 <script lang="ts">
-	import { base } from '$app/paths';
-	import TrendChart from '$lib/components/TrendChart.svelte';
-	import { fmtNum, fmtSet, formatDateRu } from '$lib/format';
-	import { workoutStore } from '$lib/workout-store';
-	import type { StrengthSummary, TrendPoint } from '$lib/types';
+  import { base } from '$app/paths';
+  import { browser } from '$app/environment';
+  import { page } from '$app/state';
+  import TrendChart from '$lib/components/TrendChart.svelte';
+  import { fmtNum, fmtSet, formatDateRu, todayIso } from '$lib/format';
+  import { workoutStore } from '$lib/workout-store';
+  import type { StrengthSummary, TrendPoint } from '$lib/types';
 
-	let query = $state('');
-	let selectedExercise = $state<string | null>(null);
+  let query = $state('');
+  let selectedLocal = $state<string | null>(null);
 
-	const view = $derived(workoutStore.view);
+  const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
+  const selectedExercise = $derived(selectedLocal ?? urlExercise ?? null);
+  const view = $derived(workoutStore.view);
+  const strengthSummary = $derived(
+    view.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
+  );
+  const filtered = $derived(
+    strengthSummary
+      .filter((item) => item.exercise.toLowerCase().includes(query.trim().toLowerCase()))
+      .sort((a, b) => b.sessions - a.sessions)
+  );
+  const trendPoints = $derived<TrendPoint[]>(
+    selectedExercise ? (view.trend[selectedExercise] ?? []) : []
+  );
+  const selectedSummary = $derived(
+    selectedExercise
+      ? strengthSummary.find((item) => item.exercise === selectedExercise) ?? null
+      : null
+  );
+  const trainingDays = $derived(new Set(view.sessions.map((session) => session.date)).size);
+  const last30Start = $derived.by(() => {
+    const date = new Date(`${todayIso()}T12:00:00`);
+    date.setDate(date.getDate() - 29);
+    return date.toISOString().slice(0, 10);
+  });
+  const recentDays = $derived(
+    new Set(
+      view.sessions.filter((session) => session.date >= last30Start).map((session) => session.date)
+    ).size
+  );
+  const totalSets = $derived(
+    view.sessions.reduce(
+      (total, session) =>
+        total + session.rows.reduce((rowTotal, row) => rowTotal + row.sets.length, 0),
+      0
+    )
+  );
+  const strongest = $derived(
+    [...strengthSummary].sort((a, b) => b.best1rm.value - a.best1rm.value).slice(0, 5)
+  );
+  const mostPracticed = $derived([...strengthSummary].sort((a, b) => b.sessions - a.sessions).slice(0, 5));
 
-	const strengthSummary = $derived(
-		view.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
-	);
-
-	const filtered = $derived(
-		strengthSummary.filter((item) => item.exercise.toLowerCase().includes(query.trim().toLowerCase()))
-	);
-
-	const trendPoints = $derived<TrendPoint[]>(
-		selectedExercise ? (view.trend[selectedExercise] ?? []) : []
-	);
-
-	function selectExercise(name: string) {
-		selectedExercise = selectedExercise === name ? null : name;
-	}
+  function selectExercise(name: string) {
+    selectedLocal = selectedExercise === name ? null : name;
+  }
 </script>
 
-<section class="card">
-	<div class="toolbar">
-		<div>
-			<h2>Статистика по упражнениям</h2>
-			<p class="muted">Считается автоматически из JSON-базы.</p>
-		</div>
-		<input class="search" type="search" placeholder="Фильтр..." bind:value={query} />
-	</div>
+<div class="container">
+  <header class="page-header">
+    <div>
+      <div class="eyebrow">Прогресс и закономерности</div>
+      <h1>Аналитика</h1>
+      <p>
+        Регулярность тренировок, силовые показатели и динамика упражнений на основе вашего журнала.
+      </p>
+    </div>
+    <a class="button button-secondary" href="{base}/body">Карта нагрузки</a>
+  </header>
 
-	<div class="table-wrap">
-		<table class="stack-table">
-			<thead>
-				<tr>
-					<th>Упражнение</th>
-					<th>Сессий</th>
-					<th>1ПМ (Эпли)</th>
-					<th>Лучший сет</th>
-					<th>~5RM</th>
-					<th>Период</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each filtered as item}
-					<tr class:selected={selectedExercise === item.exercise}>
-						<td data-label="Упражнение">
-							<div class="name-cell">
-								<button class="linkish" onclick={() => selectExercise(item.exercise)}>
-									{item.exercise}
-								</button>
-								<a class="history-link" href="{base}/history?exercise={encodeURIComponent(item.exercise)}">
-									история
-								</a>
-							</div>
-						</td>
-						<td data-label="Сессий">{item.sessions}</td>
-						<td data-label="1ПМ (Эпли)">
-							{#if item.best1rm.date}
-								<strong>{fmtNum(item.best1rm.value)} кг</strong>
-								<div class="sub">
-									{fmtSet(item.best1rm.weight, item.best1rm.reps)} · {formatDateRu(item.best1rm.date)}
-								</div>
-							{:else}
-								—
-							{/if}
-						</td>
-						<td data-label="Лучший сет">
-							{#if item.bestWeight.date}
-								{fmtSet(item.bestWeight.weight, item.bestWeight.reps)}
-								<div class="sub">{formatDateRu(item.bestWeight.date)}</div>
-							{:else}
-								—
-							{/if}
-						</td>
-						<td data-label="~5RM">
-							{#if item.best5}
-								{fmtSet(item.best5.weight, item.best5.reps)}
-								<div class="sub">{formatDateRu(item.best5.date!)}</div>
-							{:else}
-								—
-							{/if}
-						</td>
-						<td data-label="Период">
-							{#if item.periodStart && item.periodEnd}
-								{formatDateRu(item.periodStart)} — {formatDateRu(item.periodEnd)}
-							{:else}
-								—
-							{/if}
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-</section>
+  <section class="metric-grid">
+    <article class="metric-card">
+      <span>Тренировочных дней</span>
+      <strong>{trainingDays}</strong>
+      <small>за всё время</small>
+    </article>
+    <article class="metric-card">
+      <span>За последние 30 дней</span>
+      <strong>{recentDays}</strong>
+      <small>{recentDays >= 12 ? 'стабильный ритм' : 'можно добавить регулярности'}</small>
+    </article>
+    <article class="metric-card">
+      <span>Всего подходов</span>
+      <strong>{totalSets}</strong>
+      <small>во всех типах нагрузок</small>
+    </article>
+    <article class="metric-card">
+      <span>Силовых упражнений</span>
+      <strong>{strengthSummary.length}</strong>
+      <small>с рассчитанным прогрессом</small>
+    </article>
+  </section>
 
-{#if selectedExercise}
-	<section class="card">
-		<div class="toolbar">
-			<div>
-				<h2>Динамика 1ПМ</h2>
-				<p class="muted">{selectedExercise}</p>
-			</div>
-			<button class="ghost" onclick={() => (selectedExercise = null)}>Закрыть</button>
-		</div>
+  <section class="insight-grid">
+    <article class="card insight-card">
+      <div class="insight-heading">
+        <div>
+          <div class="eyebrow">По расчётному 1ПМ</div>
+          <h2>Самые сильные движения</h2>
+        </div>
+      </div>
+      <div class="ranking">
+        {#each strongest as item, index (item.exercise)}
+          <button type="button" onclick={() => selectExercise(item.exercise)}>
+            <span class="rank">{index + 1}</span>
+            <span class="rank-name">{item.exercise}</span>
+            <strong>{fmtNum(item.best1rm.value)} кг</strong>
+          </button>
+        {/each}
+      </div>
+    </article>
 
-		<TrendChart title="1ПМ по датам" points={trendPoints} />
-	</section>
-{/if}
+    <article class="card insight-card">
+      <div class="insight-heading">
+        <div>
+          <div class="eyebrow">По числу сессий</div>
+          <h2>Основа программы</h2>
+        </div>
+      </div>
+      <div class="ranking">
+        {#each mostPracticed as item, index (item.exercise)}
+          <button type="button" onclick={() => selectExercise(item.exercise)}>
+            <span class="rank">{index + 1}</span>
+            <span class="rank-name">{item.exercise}</span>
+            <strong>{item.sessions}</strong>
+          </button>
+        {/each}
+      </div>
+    </article>
+  </section>
+
+  {#if selectedExercise && selectedSummary}
+    <div class="section-heading">
+      <div>
+        <h2>{selectedExercise}</h2>
+        <p>Динамика расчётного максимума по тренировочным датам</p>
+      </div>
+      <div class="chart-actions">
+        <a class="button button-ghost" href="{base}/history?exercise={encodeURIComponent(selectedExercise)}">
+          История
+        </a>
+        <button class="button button-ghost" type="button" onclick={() => (selectedLocal = null)}>
+          Закрыть
+        </button>
+      </div>
+    </div>
+    <section class="card chart-card">
+      <div class="selected-summary">
+        <div>
+          <span>Лучший 1ПМ</span>
+          <strong>{fmtNum(selectedSummary.best1rm.value)} кг</strong>
+        </div>
+        <div>
+          <span>Лучший подход</span>
+          <strong>{fmtSet(selectedSummary.bestWeight.weight, selectedSummary.bestWeight.reps)}</strong>
+        </div>
+        <div>
+          <span>Сессий</span>
+          <strong>{selectedSummary.sessions}</strong>
+        </div>
+        <div>
+          <span>Последний результат</span>
+          <strong>{selectedSummary.periodEnd ? formatDateRu(selectedSummary.periodEnd) : '—'}</strong>
+        </div>
+      </div>
+      <TrendChart title="Расчётный 1ПМ" points={trendPoints} />
+    </section>
+  {/if}
+
+  <div class="section-heading">
+    <div>
+      <h2>Все силовые упражнения</h2>
+      <p>Выберите строку, чтобы открыть график</p>
+    </div>
+    <input class="search" type="search" placeholder="Найти упражнение" bind:value={query} />
+  </div>
+
+  <section class="card table-card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Упражнение</th>
+            <th>Сессий</th>
+            <th>Расчётный 1ПМ</th>
+            <th>Лучший подход</th>
+            <th>Средняя интенсивность</th>
+            <th>Последняя запись</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filtered as item (item.exercise)}
+            <tr class:selected={selectedExercise === item.exercise} onclick={() => selectExercise(item.exercise)}>
+              <td><strong>{item.exercise}</strong></td>
+              <td>{item.sessions}</td>
+              <td>
+                <strong>{fmtNum(item.best1rm.value)} кг</strong>
+                <span>{item.best1rm.date ? formatDateRu(item.best1rm.date) : '—'}</span>
+              </td>
+              <td>
+                {fmtSet(item.bestWeight.weight, item.bestWeight.reps)}
+                <span>{item.bestWeight.date ? formatDateRu(item.bestWeight.date) : '—'}</span>
+              </td>
+              <td>{fmtNum(item.avgIntensity)} кг</td>
+              <td>{item.periodEnd ? formatDateRu(item.periodEnd) : '—'}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
 
 <style>
-	.toolbar {
-		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		align-items: end;
-		flex-wrap: wrap;
-		margin-bottom: 1rem;
-	}
+  .insight-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 16px;
+  }
 
-	h2 {
-		margin: 0 0 0.25rem;
-	}
+  .insight-card {
+    padding: 20px;
+  }
 
-	.search {
-		min-width: 220px;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		color: var(--text);
-		padding: 0.55rem 0.75rem;
-	}
+  .insight-heading h2 {
+    margin: 5px 0 15px;
+    font-size: 18px;
+  }
 
-	.table-wrap {
-		overflow-x: auto;
-	}
+  .ranking {
+    display: grid;
+  }
 
-	.sub {
-		color: var(--muted);
-		font-size: 0.85rem;
-		margin-top: 0.15rem;
-	}
+  .ranking button {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: center;
+    padding: 10px 0;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    text-align: left;
+  }
 
-	tr.selected {
-		background: rgba(91, 157, 255, 0.08);
-	}
+  .ranking button:last-child {
+    border-bottom: 0;
+  }
 
-	.linkish {
-		background: none;
-		border: none;
-		color: var(--text);
-		padding: 0;
-		text-align: left;
-		text-decoration: underline;
-		text-decoration-color: rgba(110, 231, 168, 0.35);
-	}
+  .rank {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    color: var(--muted);
+    background: var(--surface-soft);
+    border-radius: 8px;
+    font-size: 9px;
+  }
 
-	.name-cell {
-		display: grid;
-		gap: 0.2rem;
-	}
+  .rank-name {
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-	.history-link {
-		font-size: 0.8rem;
-		color: var(--muted);
-		text-decoration: none;
-	}
+  .ranking strong {
+    color: var(--accent);
+    font-size: 12px;
+  }
 
-	.history-link:hover {
-		color: var(--accent-2);
-	}
+  .chart-actions {
+    display: flex;
+    gap: 7px;
+  }
 
-	.ghost {
-		background: transparent;
-		border: 1px solid var(--border);
-		color: var(--text);
-		border-radius: 10px;
-		padding: 0.45rem 0.75rem;
-	}
+  .chart-card {
+    padding: 20px;
+  }
 
+  .selected-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .selected-summary div {
+    padding: 12px;
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+  }
+
+  .selected-summary span,
+  .selected-summary strong {
+    display: block;
+  }
+
+  .selected-summary span {
+    color: var(--muted);
+    font-size: 9px;
+  }
+
+  .selected-summary strong {
+    margin-top: 6px;
+    font-size: 14px;
+  }
+
+  .search {
+    width: 230px;
+  }
+
+  .table-card {
+    overflow: hidden;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  tbody tr {
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+
+  tbody tr:hover,
+  tbody tr.selected {
+    background: rgb(185 243 90 / 5%);
+  }
+
+  td span {
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 9px;
+  }
+
+  @media (max-width: 850px) {
+    .insight-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .selected-summary {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .search {
+      width: 100%;
+    }
+
+    .chart-actions {
+      width: 100%;
+    }
+
+    .chart-actions .button {
+      flex: 1;
+    }
+  }
 </style>

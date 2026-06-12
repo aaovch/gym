@@ -6,6 +6,8 @@
   "scripts": {
     "sync:data": "python ../scripts/sync_static_data.py",
     "repair:data": "tsx scripts/repair-data.ts",
+    "migrate:v4": "tsx scripts/migrate-v4.ts",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
     "dev": "npm run sync:data && vite dev",
     "build": "npm run sync:data && vite build",
     "preview": "vite preview"
@@ -14,7 +16,9 @@
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.21.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@types/node": "^25.9.3",
     "svelte": "^5.28.0",
+    "svelte-check": "^4.6.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.5"
