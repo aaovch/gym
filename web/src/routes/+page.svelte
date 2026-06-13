@@ -171,7 +171,19 @@
   );
   const outOfPlanEntries = $derived.by(() => {
     if (!sessionReady) return [];
-    const sessionDate = plannedSessionDate ?? workoutDate;
+    const msId = activeMicroSessionId;
+
+    if (msId) {
+      return view.entries
+        .filter(
+          (entry) => entry.microSessionId === msId && !slotExercises.includes(entry.exercise)
+        )
+        .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
+    }
+
+    const sessionDate = plannedSessionDate;
+    if (!sessionDate) return [];
+
     return view.entries
       .filter(
         (entry) =>
@@ -203,7 +215,7 @@
     slotPick = slot;
     if (!microcycle) return;
     const planned = sessionDateForIndex(microcycle, slot === 'B' ? 1 : 0);
-    if (planned) datePick = planned;
+    datePick = planned ?? todayIso();
   }
 
   function exerciseKind(name: string): ExerciseKind {
@@ -396,7 +408,7 @@
         .find((meso) => meso.plan.id === pick.mesoId)
         ?.microcycles.find((item) => item.plan.id === pick.microId);
       const plannedDate = micro ? sessionDateForIndex(micro, pick.slot === 'B' ? 1 : 0) : null;
-      if (plannedDate) datePick = plannedDate;
+      datePick = plannedDate ?? todayIso();
       autoPicked = true;
     }
     autoSelected = true;
