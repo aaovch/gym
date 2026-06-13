@@ -68,7 +68,7 @@
 	</div>
 
 	<div class="sets-grid">
-		{#each row.sets as set, index (index)}
+		{#each row.sets as set, index (set.id)}
       <div class="set-item">
         <span class="set-no" aria-hidden="true">{index + 1}</span>
         <label>

@@ -148,6 +148,7 @@
 	function sessionRowToInput(row: WorkoutSession['rows'][number]): RowInput {
 		return {
 			sets: row.sets.map(([weight, reps]) => ({
+				id: crypto.randomUUID(),
 				weight: String(weight).replace('.', ','),
 				reps: String(reps)
 			})),

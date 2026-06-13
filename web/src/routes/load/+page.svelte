@@ -7,6 +7,7 @@
 		filterWeeksFrom,
 		formatMetric,
 		metricLabel,
+		metricLabelGenitive,
 		unmappedStrengthExercises,
 		weeksAgoIso,
 		type LoadMetric
@@ -104,7 +105,11 @@
 		</div>
 	</section>
 
-	{#if summaries.length === 0}
+	{#if !workoutStore.bootstrapped}
+		<section class="card empty-state">
+			<p>Загрузка журнала…</p>
+		</section>
+	{:else if summaries.length === 0}
 		<section class="card empty-state">
 			<h2>Пока нет силовых записей с блоками</h2>
 			<p>Запишите тренировки — здесь появится распределение нагрузки по паттернам движения.</p>
@@ -115,7 +120,7 @@
 			<div class="panel-head">
 				<div>
 					<h2>Параллельная нагрузка</h2>
-					<p>Доля {metricLabel(metric).toLowerCase()} по блокам за выбранный период</p>
+					<p>Доля {metricLabelGenitive(metric)} по блокам за выбранный период</p>
 				</div>
 				<strong class="parallel-total">{formatMetric(parallelTotal, metric)}</strong>
 			</div>
@@ -169,7 +174,11 @@
 											: item.totals.sets,
 									metric
 								)}
-								· {metric === 'tonnage' ? item.shareTonnage : item.shareReps}%
+								· {metric === 'tonnage'
+									? item.shareTonnage
+									: metric === 'reps'
+										? item.shareReps
+										: item.shareSets}%
 							</span>
 						</div>
 						<div class="legend-trend">
@@ -187,7 +196,7 @@
 			<div class="panel-head">
 				<div>
 					<h2>Динамика по неделям</h2>
-					<p>Столбец = сумма {metricLabel(metric).toLowerCase()} за неделю, цвета = блоки одновременно</p>
+					<p>Столбец = сумма {metricLabelGenitive(metric)} за неделю, цвета = блоки одновременно</p>
 				</div>
 			</div>
 			<BlockLoadChart weeks={visibleWeeks} {blockIds} {metric} />

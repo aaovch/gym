@@ -101,6 +101,8 @@ const EXERCISE_BLOCK_MAP: Record<string, MovementBlockId> = {
 	'Сгибание рук со штангой': 'arms',
 	'Сгибание запястий со штангой': 'arms',
 	'Разгибание предплечья на блочном тренажёре': 'arms',
+	Подтягивания: 'vertical_pull',
+	'Ротация корпуса': 'core',
 	Бег: 'conditioning'
 };
 
@@ -118,8 +120,11 @@ export function getMovementBlock(exercise: string): MovementBlockId | null {
 	if (lower.includes('румын') || lower.includes('станов') || lower.includes('мертв')) {
 		return 'hip_dominant';
 	}
-	if (lower.includes('пресс') || lower.includes('скруч') || lower.includes('планк')) {
+	if (lower.includes('пресс') || lower.includes('скруч') || lower.includes('планк') || lower.includes('ротац')) {
 		return 'core';
+	}
+	if (lower.includes('подтяг')) {
+		return 'vertical_pull';
 	}
 	if (
 		lower.includes('бицеп') ||

@@ -85,6 +85,7 @@ export type TrendPoint = {
 };
 
 export type SetInput = {
+	id: string;
 	weight: string;
 	reps: string;
 };

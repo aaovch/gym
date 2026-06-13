@@ -109,6 +109,7 @@ export function suggestPlannedSets(input: PlannedSetsInput): ExerciseSet[] {
 export function setsToRowInput(sets: ExerciseSet[]): RowInput {
 	return {
 		sets: sets.map(([weight, reps]) => ({
+			id: crypto.randomUUID(),
 			weight: formatWeight(weight),
 			reps: formatWeight(reps)
 		})),

@@ -27,6 +27,7 @@ export type BlockLoadSummary = {
 	totals: BlockLoadTotals;
 	shareTonnage: number;
 	shareReps: number;
+	shareSets: number;
 	trendTonnage: number | null;
 	trendReps: number | null;
 	weekly: { weekStart: string; tonnage: number; reps: number; sets: number }[];
@@ -177,6 +178,7 @@ export function buildBlockSummaries(
 	const parallel = aggregateAllBlocks(activeWeeks);
 	const totalTonnage = Object.values(parallel).reduce((sum, row) => sum + (row?.tonnage ?? 0), 0);
 	const totalReps = Object.values(parallel).reduce((sum, row) => sum + (row?.reps ?? 0), 0);
+	const totalSets = Object.values(parallel).reduce((sum, row) => sum + (row?.sets ?? 0), 0);
 
 	return blocksWithLoad(allWeeks).map((blockId) => {
 		const block = MOVEMENT_BLOCKS.find((item) => item.id === blockId)!;
@@ -196,6 +198,7 @@ export function buildBlockSummaries(
 			totals,
 			shareTonnage: totalTonnage ? Math.round((totals.tonnage / totalTonnage) * 1000) / 10 : 0,
 			shareReps: totalReps ? Math.round((totals.reps / totalReps) * 1000) / 10 : 0,
+			shareSets: totalSets ? Math.round((totals.sets / totalSets) * 1000) / 10 : 0,
 			trendTonnage: pctChange(currentTrend.tonnage, priorTrend.tonnage),
 			trendReps: pctChange(currentTrend.reps, priorTrend.reps),
 			weekly
@@ -216,6 +219,12 @@ export function metricLabel(metric: LoadMetric): string {
 	if (metric === 'tonnage') return 'Тоннаж';
 	if (metric === 'reps') return 'Повторы';
 	return 'Подходы';
+}
+
+export function metricLabelGenitive(metric: LoadMetric): string {
+	if (metric === 'tonnage') return 'тоннажа';
+	if (metric === 'reps') return 'повторов';
+	return 'подходов';
 }
 
 export function weeksAgoIso(weeks: number): string {

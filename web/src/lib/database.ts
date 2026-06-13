@@ -77,8 +77,12 @@ export function uniqueExercisesFromDb(db: WorkoutDatabase): string[] {
 	return db.exercises.map((item) => item.name).sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
+function newSetInputId(): string {
+	return crypto.randomUUID();
+}
+
 export function emptySetInput(): SetInput {
-	return { weight: '', reps: '' };
+	return { id: newSetInputId(), weight: '', reps: '' };
 }
 
 export function emptyRowInput(): RowInput {
