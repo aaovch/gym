@@ -4,6 +4,8 @@ export type MicroSessionPlan = {
 	id: string;
 	indexInMicro: 0 | 1;
 	date?: string;
+	/** Тренировка осознанно пропущена: не считается незаполненной и не выбирается автоматически. */
+	skipped?: boolean;
 };
 
 export type MicrocyclePlan = {

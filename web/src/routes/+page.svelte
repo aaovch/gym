@@ -5,6 +5,7 @@
   import {
     exerciseTargetOnMicro,
     exercisesForMicroSession,
+    setSessionSkipped,
     sortExercisesByAnchorDesc,
     type EnrichedMicrocycle
   } from '$lib/cycle-plan';
@@ -28,7 +29,7 @@
   import { thesesStore } from '$lib/training-theses';
   import type { ExerciseKind, ExerciseLog, ExerciseSet } from '$lib/types';
   import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
-  import { deleteSession, saveLog, workoutStore } from '$lib/workout-store';
+  import { deleteSession, saveCyclePlanState, saveLog, workoutStore } from '$lib/workout-store';
   import { toasts } from '$lib/toast.svelte';
 
   let datePick = $state(todayIso());
@@ -122,6 +123,18 @@
       )
       .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
   });
+  const usingManualPlan = $derived(view.cyclePlanView.usingManualPlan);
+  const activeSessionPlan = $derived.by(() => {
+    if (!microcycle || activeIndex == null) return null;
+    return sessionPlanByIndex(microcycle.plan, activeIndex) ?? null;
+  });
+  const sessionSkipped = $derived(Boolean(activeSessionPlan?.skipped));
+  let skipBusy = $state(false);
+
+  function sessionSkippedFor(micro: EnrichedMicrocycle, index: 0 | 1): boolean {
+    return Boolean(sessionPlanByIndex(micro.plan, index)?.skipped);
+  }
+
   const entryByExercise = $derived(new Map(entriesForSession.map((entry) => [entry.exercise, entry])));
   const loggedPlanned = $derived(slotExercises.filter((exercise) => entryByExercise.has(exercise)).length);
   const sessionProgress = $derived(
@@ -350,6 +363,7 @@
       for (const micro of meso.microcycles) {
         for (const index of [0, 1] as const) {
           order += 1;
+          if (sessionSkippedFor(micro, index)) continue;
           const { progress, hasExercises } = sessionProgressOf(meso, micro, index);
           if (!hasExercises || progress >= 100) continue;
           candidates.push({
@@ -402,6 +416,43 @@
     }
     autoSelected = true;
   });
+
+  async function setSkip(skip: boolean) {
+    if (!mesocycle || !microcycle || activeIndex == null) return;
+    if (!usingManualPlan) {
+      toasts.error('Сначала откройте и сохраните план в разделе «План».');
+      return;
+    }
+    const basePlan = workoutStore.view.cyclePlanView.plan;
+    if (!basePlan) {
+      toasts.error('Сначала откройте и сохраните план в разделе «План».');
+      return;
+    }
+    const mesoId = mesocycle.plan.id;
+    const microId = microcycle.plan.id;
+    const idx = activeIndex;
+    skipBusy = true;
+    error = '';
+    try {
+      saveCyclePlanState(setSessionSkipped(basePlan, mesoId, microId, idx, skip));
+      if (skip) {
+        toasts.undo('Тренировка пропущена', () => {
+          const current = workoutStore.view.cyclePlanView.plan;
+          if (!current) return;
+          saveCyclePlanState(setSessionSkipped(current, mesoId, microId, idx, false));
+          toasts.success('Тренировка возвращена в план');
+        });
+      } else {
+        toasts.success('Тренировка возвращена в план');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось обновить план';
+      error = message;
+      toasts.error(message);
+    } finally {
+      skipBusy = false;
+    }
+  }
 
   async function removeEntry(id: string | undefined) {
     if (!id) return;
@@ -518,6 +569,9 @@
               {:else}
                 · дата не назначена
               {/if}
+              {#if sessionSkipped}
+                · <span class="skip-flag">пропущена</span>
+              {/if}
             </p>
           {:else if mesocycle && microcycle}
             <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
@@ -526,8 +580,12 @@
           {/if}
         </div>
         {#if sessionReady}
-          <div class="session-ring" style={`--progress: ${sessionProgress * 3.6}deg`}>
-            <span>{sessionProgress}%</span>
+          <div
+            class="session-ring"
+            class:skipped={sessionSkipped}
+            style={`--progress: ${sessionProgress * 3.6}deg`}
+          >
+            <span>{sessionSkipped ? 'skip' : `${sessionProgress}%`}</span>
           </div>
         {/if}
       </div>
@@ -589,6 +647,7 @@
               {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
               {@const slotDate = microcycle ? sessionDateForIndex(microcycle, slotIndex) : null}
               {@const slotProgress = microcycle ? sessionProgressFor(microcycle, slotIndex) : 0}
+              {@const slotSkipped = microcycle ? sessionSkippedFor(microcycle, slotIndex) : false}
               <button
                 type="button"
                 class="slot-choice"
@@ -604,7 +663,9 @@
                   {#if microcycle}
                     <small>
                       {slotDate ? formatDateRu(slotDate) : 'без даты'}
-                      {#if slotProgress > 0}
+                      {#if slotSkipped}
+                        · пропущена
+                      {:else if slotProgress > 0}
                         · {slotProgress}%
                       {/if}
                     </small>
@@ -630,7 +691,9 @@
         <div>
           <h2>План сессии {activeSlot}</h2>
           <p>
-            {#if sessionProgress === 100}
+            {#if sessionSkipped}
+              Тренировка отмечена пропущенной — она не учитывается в незаполненных.
+            {:else if sessionProgress === 100}
               Сессия записана — можно отредактировать отдельные упражнения.
             {:else if loggedPlanned > 0}
               Часть упражнений уже записана — дозаполните остальные или измените факт.
@@ -639,15 +702,45 @@
             {/if}
           </p>
         </div>
-        <a
-          class="button button-secondary"
-          href="{base}/add?date={workoutDate}&meso={mesocycle?.plan.id}&micro={microcycle?.plan.id}&session={activeIndex}"
-        >
-          Добавить вне плана
-        </a>
+        <div class="heading-actions">
+          {#if !sessionSkipped && slotExercises.length > 0 && loggedPlanned === 0}
+            <button
+              type="button"
+              class="button button-ghost"
+              disabled={skipBusy}
+              title="Не делал эту тренировку — убрать из незаполненных"
+              onclick={() => setSkip(true)}
+            >
+              {skipBusy ? '…' : 'Пропустить'}
+            </button>
+          {/if}
+          <a
+            class="button button-secondary"
+            href="{base}/add?date={workoutDate}&meso={mesocycle?.plan.id}&micro={microcycle?.plan.id}&session={activeIndex}"
+          >
+            Добавить вне плана
+          </a>
+        </div>
       </div>
 
-      {#if slotExercises.length > 0}
+      {#if sessionSkipped}
+        <section class="card empty-state skipped-state">
+          <div class="eyebrow">Сессия {activeSlot} пропущена</div>
+          <h2>Тренировка не выполнялась</h2>
+          <p>
+            Эта сессия не считается незаполненной и не выбирается автоматически. Можно вернуть её
+            в план в любой момент.
+          </p>
+          <button
+            type="button"
+            class="button button-primary"
+            disabled={skipBusy}
+            onclick={() => setSkip(false)}
+          >
+            {skipBusy ? '…' : 'Вернуть в план'}
+          </button>
+        </section>
+      {:else if slotExercises.length > 0}
       <section class="exercise-grid">
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
@@ -878,6 +971,34 @@
     font-family: var(--font-mono);
     font-size: 13px;
     font-weight: 800;
+  }
+
+  .session-ring.skipped {
+    background:
+      radial-gradient(circle closest-side, #15171c 76%, transparent 78% 100%),
+      conic-gradient(var(--muted) 360deg, #2a313d 0);
+  }
+
+  .session-ring.skipped span {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  .heading-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .skip-flag {
+    color: var(--hazard, #f5a524);
+    font-weight: 700;
+  }
+
+  .skipped-state {
+    border-left: 3px solid var(--hazard, #f5a524);
   }
 
   .context-picker {

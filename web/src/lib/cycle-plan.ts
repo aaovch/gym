@@ -1177,6 +1177,36 @@ export function assignSessionDate(
 	});
 }
 
+/** Помечает/снимает пометку «пропущена» для конкретной сессии микроцикла. */
+export function setSessionSkipped(
+	plan: CyclePlan,
+	mesoId: string,
+	microId: string,
+	indexInMicro: 0 | 1,
+	skipped: boolean
+): CyclePlan {
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			return {
+				...meso,
+				microcycles: meso.microcycles.map((micro) => {
+					if (micro.id !== microId) return micro;
+					return {
+						...micro,
+						sessions: micro.sessions.map((session) =>
+							session.indexInMicro === indexInMicro
+								? { ...session, skipped: skipped || undefined }
+								: session
+						) as MicrocyclePlan['sessions']
+					};
+				})
+			};
+		})
+	});
+}
+
 /** @deprecated используй assignSessionDate */
 export function assignDate(
 	plan: CyclePlan,
