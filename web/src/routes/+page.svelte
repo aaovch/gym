@@ -12,7 +12,7 @@
   import { sessionPlanByIndex } from '$lib/micro-plan';
   import { createLog } from '$lib/database';
   import { mesoProtocolId } from '$lib/exercise-keys';
-  import { formatDateRu, fmtNum, todayIso } from '$lib/format';
+  import { formatDateRu, fmtNum, fmtSet, todayIso } from '$lib/format';
   import {
     indexToSlot,
     mesocycleColor,
@@ -21,7 +21,6 @@
     type WorkoutSlot
   } from '$lib/microcycle';
   import {
-    formatPlannedSets,
     protocolGuideWeek,
     suggestPlannedSets,
     type PlannedSetsInput
@@ -262,6 +261,13 @@
     return `${first} кг × ${second}`;
   }
 
+  function setChipText(kind: ExerciseKind, set: ExerciseSet): string {
+    const [first, second] = set;
+    if (kind === 'run') return `${first}′ · ${second} км/ч`;
+    if (kind === 'jumps') return `${first}×${second}`;
+    return fmtSet(first, second);
+  }
+
   function applyWeightDelta(sets: ExerciseSet[], kind: ExerciseKind, delta: number): ExerciseSet[] {
     if (!delta || kind !== 'strength') return sets;
     return sets.map(([weight, reps]) => [Math.max(0, weight + delta), reps] as ExerciseSet);
@@ -272,7 +278,9 @@
     weightAdjust = { ...weightAdjust, [exerciseName]: current + direction * WEIGHT_STEP };
   }
 
-  function adjustedPreview(exerciseName: string): string | null {
+  function adjustedPreviewSets(
+    exerciseName: string
+  ): { kind: ExerciseKind; sets: ExerciseSet[] } | null {
     const input = plannedInput(exerciseName);
     if (!input) return null;
     const sets = applyWeightDelta(
@@ -280,7 +288,8 @@
       input.kind,
       weightAdjust[exerciseName] ?? 0
     );
-    return formatPlannedSets(sets, input.kind);
+    if (!sets.length) return null;
+    return { kind: input.kind, sets };
   }
 
   async function saveSetsFor(
@@ -742,7 +751,7 @@
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
           {@const hint = protocolHints.get(exercise)}
-            {@const preview = entry ? null : adjustedPreview(exercise)}
+            {@const previewSets = entry ? null : adjustedPreviewSets(exercise)}
           <article class="exercise-item" class:complete={Boolean(entry)}>
             <div class="exercise-index">{entry ? '✓' : index + 1}</div>
             <div class="exercise-content">
@@ -750,20 +759,37 @@
                 <div>
                   <h3>{exercise}</h3>
                   {#if entry}
-                    <div class="set-list compact">
-                      {#each entry.sets as set}
-                        <span>{setLabel(entry.kind, set)}</span>
-                      {/each}
+                    <div class="plan-meta logged">
+                      <div class="plan-sets">
+                        {#each entry.sets as set, setIndex}
+                          <span class="set-chip">
+                            <em>{setIndex + 1}</em>{setChipText(entry.kind, set)}
+                          </span>
+                        {/each}
+                      </div>
                     </div>
-                  {:else if hint || preview}
-                    <p class="plan-line">
+                  {:else if hint || previewSets}
+                    <div class="plan-meta">
                       {#if hint}
-                        {fmtNum(hint.targetWeight)} кг · {hint.targetPct}%
+                        <div class="plan-target">
+                          <span class="target-weight">
+                            {fmtNum(hint.targetWeight)}<small>кг</small>
+                          </span>
+                          <span class="target-pct">
+                            {hint.targetPct}%<small>1ПМ</small>
+                          </span>
+                        </div>
                       {/if}
-                      {#if preview}
-                        {#if hint} · {/if}{preview}
+                      {#if previewSets}
+                        <div class="plan-sets">
+                          {#each previewSets.sets as set, setIndex}
+                            <span class="set-chip">
+                              <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
+                            </span>
+                          {/each}
+                        </div>
                       {/if}
-                    </p>
+                    </div>
                   {/if}
                 </div>
                 <div class="exercise-actions">
@@ -1177,10 +1203,87 @@
     font-size: 11px;
   }
 
-  .plan-line {
-    margin-top: 6px !important;
-    color: var(--muted-strong) !important;
-    font-size: 12px !important;
+  .plan-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .plan-target {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px 14px;
+  }
+
+  .target-weight {
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .target-weight small {
+    margin-left: 3px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .target-pct {
+    padding: 4px 9px;
+    color: var(--accent);
+    background: #0a0c10;
+    border: 1px solid var(--line-strong);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .target-pct small {
+    margin-left: 5px;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .plan-sets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .set-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 9px 5px 7px;
+    color: var(--muted-strong);
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .set-chip em {
+    min-width: 12px;
+    color: var(--muted);
+    font-style: normal;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .exercise-item.complete .set-chip {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
   }
 
   .exercise-actions {
