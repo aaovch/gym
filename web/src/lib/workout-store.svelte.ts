@@ -445,6 +445,51 @@ class WorkoutStore {
 		}
 	}
 
+	/** Загружает данные из репозитория, перезаписывая локальные (явный pull). */
+	async pullFromGitHub(token: string) {
+		if (this.sync.syncing) return;
+
+		const generation = ++this.githubConnectGeneration;
+		this.patchSync({ syncing: true, error: '', message: 'Загрузка из GitHub…' });
+		try {
+			const login = await verifyGitHubToken(token);
+			const [{ db: remote, sha: workoutsSha }, { plan: remotePlan, sha: cyclePlanSha }] =
+				await Promise.all([fetchWorkoutDatabase(token), fetchCyclePlan(token)]);
+			if (generation !== this.githubConnectGeneration) return;
+
+			this.applyDatabase(remote, 'github');
+			saveLocalDatabase(remote);
+
+			if (remotePlan) {
+				const normalized = normalizeLoadedCyclePlan(remotePlan, this.view.microcycles.byDate);
+				if (normalized) {
+					this.cyclePlan = normalized;
+					saveCyclePlan(normalized);
+				}
+			}
+
+			if (generation !== this.githubConnectGeneration) return;
+
+			this.sync = {
+				workoutsSha,
+				cyclePlanSha,
+				githubLogin: login,
+				syncing: false,
+				error: '',
+				message: 'Данные загружены из GitHub.',
+				source: 'github'
+			};
+		} catch (error) {
+			if (generation !== this.githubConnectGeneration) return;
+			this.patchSync({
+				syncing: false,
+				error: error instanceof Error ? error.message : 'Ошибка загрузки из GitHub',
+				message: ''
+			});
+			throw error;
+		}
+	}
+
 	async pushToGitHub(token: string) {
 		if (this.sync.syncing) return;
 
@@ -483,9 +528,13 @@ export function bootstrapWorkoutStore(bundled: WorkoutDatabase, bundledCyclePlan
 	workoutStore.bootstrap(bundled, bundledCyclePlan);
 }
 
-export async function refreshFromGitHub(token = getGitHubToken()) {
+export async function pullFromGitHub(token = getGitHubToken()) {
 	if (!token) throw new Error('Нужен GitHub token');
-	await connectGitHub(token);
+	await workoutStore.pullFromGitHub(token);
+}
+
+export async function refreshFromGitHub(token = getGitHubToken()) {
+	await pullFromGitHub(token);
 }
 
 export async function pushToGitHub(token = getGitHubToken()) {

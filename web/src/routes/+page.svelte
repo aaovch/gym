@@ -255,15 +255,6 @@
     return sets.map(([weight, reps]) => [Math.max(0, weight + delta), reps] as ExerciseSet);
   }
 
-  function lastEntryFor(exerciseName: string) {
-    return (
-      view.entries
-        .filter((entry) => entry.exercise === exerciseName && entry.date < workoutDate)
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .at(-1) ?? null
-    );
-  }
-
   function nudgeWeight(exerciseName: string, direction: 1 | -1) {
     const current = weightAdjust[exerciseName] ?? 0;
     weightAdjust = { ...weightAdjust, [exerciseName]: current + direction * WEIGHT_STEP };
@@ -323,12 +314,6 @@
       weightAdjust[exerciseName] ?? 0
     );
     await saveSetsFor(exerciseName, input.kind, sets, `Записано: ${exerciseName}`);
-  }
-
-  async function repeatLast(exerciseName: string) {
-    const last = lastEntryFor(exerciseName);
-    if (!last) return;
-    await saveSetsFor(exerciseName, last.kind, last.sets, `Повторено как в прошлый раз: ${exerciseName}`);
   }
 
   function sessionProgressOf(meso: (typeof mesocycles)[number], micro: EnrichedMicrocycle, index: 0 | 1) {
@@ -783,7 +768,6 @@
                       </button>
                     {/if}
                   {:else}
-                    {@const last = lastEntryFor(exercise)}
                     {#if exerciseKind(exercise) === 'strength'}
                       <div class="weight-stepper" role="group" aria-label="Поправка веса">
                         <button
@@ -815,17 +799,6 @@
                     >
                       {busyId === exercise ? 'Сохраняем…' : 'Готово'}
                     </button>
-                    {#if last}
-                      <button
-                        type="button"
-                        class="button button-ghost"
-                        disabled={busyId === exercise}
-                        title="Записать веса как в прошлый раз"
-                        onclick={() => repeatLast(exercise)}
-                      >
-                        Как в прошлый раз
-                      </button>
-                    {/if}
                     <a class="button button-secondary" href={addUrl(exercise)}>Изменить</a>
                   {/if}
                 </div>

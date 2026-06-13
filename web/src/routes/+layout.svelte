@@ -6,12 +6,14 @@
   import { getGitHubToken, setGitHubToken } from '$lib/auth';
   import {
     connectGitHub,
+    pullFromGitHub,
     pushToGitHub,
     resetToBundled,
     workoutStore
   } from '$lib/workout-store';
   import { thesesStore } from '$lib/training-theses';
   import Toaster from '$lib/components/Toaster.svelte';
+  import { toasts } from '$lib/toast.svelte';
 
   export let data;
 
@@ -69,8 +71,31 @@
     token = getGitHubToken();
   });
 
+  function closeSettings() {
+    settingsOpen = false;
+  }
+
+  async function runGitHubAction(pendingMessage: string, action: () => Promise<void>) {
+    if (sync.syncing) return;
+    closeSettings();
+    const pendingId = toasts.info(pendingMessage, undefined, 0);
+    try {
+      await action();
+      toasts.dismiss(pendingId);
+      if (workoutStore.sync.error) {
+        toasts.error(workoutStore.sync.error);
+      } else if (workoutStore.sync.message) {
+        toasts.success(workoutStore.sync.message);
+      }
+    } catch {
+      toasts.dismiss(pendingId);
+      toasts.error(workoutStore.sync.error || 'Ошибка синхронизации с GitHub');
+    }
+  }
+
   async function saveSettings() {
     setGitHubToken(token);
+    closeSettings();
     if (!token.trim()) {
       workoutStore.patchSync({
         workoutsSha: null,
@@ -78,20 +103,20 @@
         githubLogin: null,
         syncing: false,
         error: '',
-        message: 'GitHub отключён. Данные остаются в браузере.'
+        message: ''
       });
+      toasts.info('GitHub отключён. Данные остаются в браузере.');
       return;
     }
-    await connectGitHub(token);
+    await runGitHubAction('Подключение к GitHub…', () => connectGitHub(token));
   }
 
   async function syncNow() {
-    if (sync.syncing) return;
-    try {
-      await pushToGitHub(token);
-    } catch {
-      // ошибка уже записана в workoutStore.sync.error
-    }
+    await runGitHubAction('Отправка в GitHub…', () => pushToGitHub(token));
+  }
+
+  async function pullNow() {
+    await runGitHubAction('Загрузка из GitHub…', () => pullFromGitHub(token));
   }
 
   function isActive(route: string) {
@@ -134,11 +159,6 @@
         </a>
       {/each}
     </nav>
-
-    <a class="quick-action" href={`${base}/add`}>
-      <span>+</span>
-      Записать тренировку
-    </a>
 
     {#if activeMeso}
       <section class="cycle-glance">
@@ -212,23 +232,13 @@
         <h3>Синхронизация с GitHub</h3>
         <p>
           Необязательно. Без токена данные хранятся только в браузере. С токеном правки сначала
-          сохраняются локально, а в репозиторий уходят одной кнопкой «Отправить в GitHub» — так не
-          будет лишних деплоев на каждое изменение.
+          сохраняются локально, а в репозиторий уходят кнопкой «Отправить в GitHub». «Подтянуть из
+          GitHub» загружает актуальные данные из репозитория и перезаписывает локальные.
         </p>
         <label>
           Токен
           <input bind:value={token} type="password" autocomplete="off" placeholder="github_pat_..." />
         </label>
-        {#if sync.syncing}
-          <div class="sync-status busy" role="status" aria-live="polite">
-            <span class="sync-spinner" aria-hidden="true"></span>
-            {sync.message || 'Отправка в GitHub…'}
-          </div>
-        {:else if sync.error}
-          <div class="sync-status error" role="alert">{sync.error}</div>
-        {:else if sync.message}
-          <div class="sync-status ok" role="status">{sync.message}</div>
-        {/if}
       </div>
 
       <div class="settings-links">
@@ -237,10 +247,27 @@
       </div>
 
       <div class="panel-actions">
-        <button class="button button-danger" type="button" on:click={() => resetToBundled(data.bundled)}>
+        <button
+          class="button button-danger"
+          type="button"
+          on:click={() => {
+            resetToBundled(data.bundled);
+            closeSettings();
+            toasts.success(workoutStore.sync.message || 'Локальные данные сброшены.');
+          }}
+        >
           Сбросить локальные
         </button>
         {#if token.trim()}
+          <button
+            class="button button-secondary"
+            type="button"
+            disabled={sync.syncing}
+            aria-busy={sync.syncing}
+            on:click={pullNow}
+          >
+            Подтянуть из GitHub
+          </button>
           <button
             class="button {pendingGitHubSync ? 'button-primary' : 'button-secondary'}"
             type="button"

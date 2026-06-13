@@ -5,6 +5,7 @@ export {
 	deleteExercise,
 	deleteSession,
 	importCyclePlanFromAuto,
+	pullFromGitHub,
 	pushToGitHub,
 	refreshFromGitHub,
 	refreshMesoAnchorsFromData,

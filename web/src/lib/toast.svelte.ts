@@ -37,8 +37,8 @@ class ToastStore {
 		return this.push('error', message, action, 6000);
 	}
 
-	info(message: string, action?: ToastAction) {
-		return this.push('info', message, action);
+	info(message: string, action?: ToastAction, timeout = 4000) {
+		return this.push('info', message, action, timeout);
 	}
 
 	/** Toast with an undo action gets a longer lifetime so it can actually be used. */
