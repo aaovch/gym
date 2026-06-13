@@ -1,8 +1,9 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
+  import type { Snippet } from 'svelte';
   import { base } from '$app/paths';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import { getGitHubToken, setGitHubToken } from '$lib/auth';
   import {
     pullFromGitHub,
@@ -13,11 +14,12 @@
   import { thesesStore } from '$lib/training-theses';
   import Toaster from '$lib/components/Toaster.svelte';
   import { toasts } from '$lib/toast.svelte';
+  import type { LayoutData } from './$types';
 
-  export let data;
+  let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
-  let settingsOpen = false;
-  let token = '';
+  let settingsOpen = $state(false);
+  let token = $state('');
 
   const navigation = [
     { href: `${base}/`, route: '/', label: 'Обзор', short: 'Обзор' },
@@ -29,40 +31,46 @@
     { href: `${base}/load`, route: '/load', label: 'Нагрузка', short: 'Нагрузка' }
   ];
 
-  $: path = $page.url.pathname;
-  $: routePath = base && path.startsWith(base) ? path.slice(base.length) || '/' : path;
-  $: view = workoutStore.view;
-  $: macrocycles = view.cyclePlanView.macrocycles;
-  $: mesocycles = view.cyclePlanView.mesocycles;
-  $: activeMeso = mesocycles.length ? mesocycles[mesocycles.length - 1] : null;
-  $: activeMacro = activeMeso
-    ? macrocycles.find((macrocycle) => macrocycle.plan.mesoIds.includes(activeMeso.plan.id)) ?? null
-    : null;
-  $: activeMicro =
+  const path = $derived(page.url.pathname);
+  const routePath = $derived(base && path.startsWith(base) ? path.slice(base.length) || '/' : path);
+  const view = $derived(workoutStore.view);
+  const macrocycles = $derived(view.cyclePlanView.macrocycles);
+  const mesocycles = $derived(view.cyclePlanView.mesocycles);
+  const activeMeso = $derived(mesocycles.length ? mesocycles[mesocycles.length - 1] : null);
+  const activeMacro = $derived(
+    activeMeso
+      ? macrocycles.find((macrocycle) => macrocycle.plan.mesoIds.includes(activeMeso.plan.id)) ?? null
+      : null
+  );
+  const activeMicro = $derived(
     activeMeso?.microcycles.find((microcycle) => !microcycle.complete) ??
-    activeMeso?.microcycles[activeMeso.microcycles.length - 1] ??
-    null;
-  $: completedSessions = activeMeso
-    ? activeMeso.microcycles.reduce(
-        (total, microcycle) =>
-          total + Number(Boolean(microcycle.dayA)) + Number(Boolean(microcycle.dayB)),
-        0
-      )
-    : 0;
-  $: totalSessions = activeMeso
-    ? activeMeso.microcycles.length * 2
-    : 0;
-  $: cycleProgress = totalSessions ? Math.round((completedSessions / totalSessions) * 100) : 0;
-  $: sync = workoutStore.sync;
-  $: sourceLabel =
+      activeMeso?.microcycles[activeMeso.microcycles.length - 1] ??
+      null
+  );
+  const completedSessions = $derived(
+    activeMeso
+      ? activeMeso.microcycles.reduce(
+          (total, microcycle) =>
+            total + Number(Boolean(microcycle.dayA)) + Number(Boolean(microcycle.dayB)),
+          0
+        )
+      : 0
+  );
+  const totalSessions = $derived(activeMeso ? activeMeso.microcycles.length * 2 : 0);
+  const cycleProgress = $derived(
+    totalSessions ? Math.round((completedSessions / totalSessions) * 100) : 0
+  );
+  const sync = $derived(workoutStore.sync);
+  const sourceLabel = $derived(
     sync.source === 'github'
       ? 'GitHub'
       : token.trim() && sync.source === 'local'
         ? 'Локально · не отправлено'
         : sync.source === 'local'
           ? 'Локальные данные'
-          : 'Данные сборки';
-  $: pendingGitHubSync = Boolean(token.trim()) && sync.source === 'local' && !sync.syncing;
+          : 'Данные сборки'
+  );
+  const pendingGitHubSync = $derived(Boolean(token.trim()) && sync.source === 'local' && !sync.syncing);
 
   onMount(() => {
     workoutStore.bootstrap(data.bundled, data.bundledCyclePlan ?? null);
@@ -133,6 +141,10 @@
     if (route === '/') return routePath === '/';
     return routePath.startsWith(route);
   }
+
+  function stopPropagation(event: Event) {
+    event.stopPropagation();
+  }
 </script>
 
 <svelte:head>
@@ -156,13 +168,13 @@
       class="mobile-settings"
       type="button"
       aria-label="Открыть настройки"
-      on:click={() => (settingsOpen = true)}
+      onclick={() => (settingsOpen = true)}
     >
       Настройки
     </button>
 
     <nav class="primary-nav" aria-label="Основная навигация">
-      {#each navigation as item}
+      {#each navigation as item (item.route)}
         <a href={item.href} class:active={isActive(item.route)}>
           <span class="nav-marker"></span>
           {item.label}
@@ -176,7 +188,7 @@
         <strong>{activeMeso.plan.label}</strong>
         <span>{activeMacro?.plan.label ?? 'Вне макроцикла'}</span>
         <div class="progress-track" aria-label={`Выполнено ${cycleProgress}%`}>
-          <span style={`width: ${cycleProgress}%`}></span>
+          <span style:width="{cycleProgress}%"></span>
         </div>
         <div class="cycle-glance-meta">
           <span>{completedSessions} из {totalSessions} тренировок</span>
@@ -189,7 +201,7 @@
     {/if}
 
     <div class="sidebar-footer">
-      <button class="settings-button" type="button" on:click={() => (settingsOpen = true)}>
+      <button class="settings-button" type="button" onclick={() => (settingsOpen = true)}>
         <span>Настройки</span>
         <small>{sourceLabel}</small>
       </button>
@@ -197,11 +209,11 @@
   </aside>
 
   <main class="main-content">
-    <slot />
+    {@render children()}
   </main>
 
   <nav class="mobile-nav" aria-label="Мобильная навигация">
-    {#each navigation as item}
+    {#each navigation as item (item.route)}
       <a href={item.href} class:active={isActive(item.route)}>{item.short}</a>
     {/each}
     <a href={`${base}/add`} class:active={routePath.startsWith('/add')}>Запись</a>
@@ -216,8 +228,8 @@
     role="button"
     tabindex="0"
     aria-label="Закрыть настройки"
-    on:click={() => closeSettings(true)}
-    on:keydown={(event) => event.key === 'Escape' && closeSettings(true)}
+    onclick={() => closeSettings(true)}
+    onkeydown={(event) => event.key === 'Escape' && closeSettings(true)}
   >
     <div
       class="settings-panel"
@@ -225,15 +237,15 @@
       tabindex="-1"
       aria-modal="true"
       aria-labelledby="settings-title"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={stopPropagation}
+      onkeydown={stopPropagation}
     >
       <div class="panel-heading">
         <div>
           <div class="eyebrow">Приложение</div>
           <h2 id="settings-title">Настройки</h2>
         </div>
-        <button class="icon-button" type="button" aria-label="Закрыть" on:click={() => closeSettings(true)}>
+        <button class="icon-button" type="button" aria-label="Закрыть" onclick={() => closeSettings(true)}>
           ×
         </button>
       </div>
@@ -252,15 +264,15 @@
       </div>
 
       <div class="settings-links">
-        <a href={`${base}/schema`} on:click={() => closeSettings()}>Структура данных</a>
-        <a href={`${base}/body`} on:click={() => closeSettings()}>Карта нагрузки</a>
+        <a href={`${base}/schema`} onclick={() => closeSettings()}>Структура данных</a>
+        <a href={`${base}/body`} onclick={() => closeSettings()}>Карта нагрузки</a>
       </div>
 
       <div class="panel-actions">
         <button
           class="button button-danger"
           type="button"
-          on:click={() => {
+          onclick={() => {
             resetToBundled(data.bundled);
             closeSettings();
             toasts.success(workoutStore.sync.message || 'Локальные данные сброшены.');
@@ -274,7 +286,7 @@
             type="button"
             disabled={sync.syncing}
             aria-busy={sync.syncing}
-            on:click={pullNow}
+            onclick={pullNow}
           >
             Подтянуть из GitHub
           </button>
@@ -283,7 +295,7 @@
             type="button"
             disabled={sync.syncing}
             aria-busy={sync.syncing}
-            on:click={syncNow}
+            onclick={syncNow}
           >
             {#if sync.syncing}
               Отправка…

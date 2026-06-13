@@ -34,8 +34,8 @@
 	const width = 640;
 	const padding = { left: 48, right: 12, top: 14, bottom: 32 };
 	const plotWidth = width - padding.left - padding.right;
-	const plotHeight = height - padding.top - padding.bottom;
-	const plotBottom = padding.top + plotHeight;
+	const plotHeight = $derived(height - padding.top - padding.bottom);
+	const plotBottom = $derived(padding.top + plotHeight);
 
 	const blockMeta = $derived(
 		new Map(MOVEMENT_BLOCKS.filter((block) => blockIds.includes(block.id)).map((block) => [block.id, block]))

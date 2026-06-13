@@ -75,7 +75,7 @@
 		<div class="control-group">
 			<span class="control-label">Период</span>
 			<div class="pill-row">
-				{#each windowOptions as option}
+				{#each windowOptions as option (option.weeks)}
 					<button
 						type="button"
 						class="pill"
@@ -90,7 +90,7 @@
 		<div class="control-group">
 			<span class="control-label">Метрика</span>
 			<div class="pill-row">
-				{#each ['tonnage', 'reps', 'sets'] as key}
+				{#each ['tonnage', 'reps', 'sets'] as key (key)}
 					<button
 						type="button"
 						class="pill"
@@ -134,7 +134,8 @@
 							type="button"
 							class="parallel-segment"
 							class:active={selectedBlock === item.block.id}
-							style={`width: ${share}%; --block-color: ${item.block.color}`}
+							style:--block-color={item.block.color}
+							style:width="{share}%"
 							title="{item.block.label}: {formatMetric(value, metric)}"
 							onclick={() => toggleBlock(item.block.id)}
 						>
@@ -153,7 +154,7 @@
 						type="button"
 						class="legend-card"
 						class:active={selectedBlock === item.block.id}
-						style={`--block-color: ${item.block.color}`}
+						style:--block-color={item.block.color}
 						onclick={() => toggleBlock(item.block.id)}
 					>
 						<span class="legend-swatch"></span>
@@ -193,7 +194,7 @@
 		</section>
 
 		{#if selectedSummary}
-			<section class="card detail-panel" style={`--block-color: ${selectedSummary.block.color}`}>
+			<section class="card detail-panel" style:--block-color={selectedSummary.block.color}>
 				<div class="panel-head">
 					<div>
 						<p class="detail-kicker">Выбранный блок</p>
