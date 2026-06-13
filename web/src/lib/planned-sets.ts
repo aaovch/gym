@@ -66,6 +66,8 @@ export function suggestPlannedSets(input: PlannedSetsInput): ExerciseSet[] {
 		input.keyMaps
 	);
 
+	if (pct != null && pct <= 0) return [];
+
 	if (input.anchor1rm && phase?.scheme?.length) {
 		const scheme = schemeToSets(phase.scheme, input.anchor1rm);
 		if (scheme.length) return scheme;

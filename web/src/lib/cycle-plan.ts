@@ -471,6 +471,21 @@ export function targetPctForExercise(
 	return { pct, phase, template };
 }
 
+/** Протокол явно без силовой на этом μ (например supporting-effort, intensityPct: 0). */
+export function exerciseProtocolSkipOnMicro(
+	plan: CyclePlan,
+	meso: MesocyclePlan,
+	micro: MicrocyclePlan,
+	exercise: string,
+	keyMaps: ExerciseKeyMaps
+): { skipped: boolean; phaseLabel: string | null } {
+	const { pct, phase } = targetPctForExercise(plan, meso, micro, exercise, keyMaps);
+	if (pct != null && pct <= 0) {
+		return { skipped: true, phaseLabel: phase?.label ?? null };
+	}
+	return { skipped: false, phaseLabel: null };
+}
+
 export function exercisesInMicro(
 	micro: MicrocyclePlan,
 	dayA: TrainingDay | null,

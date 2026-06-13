@@ -3,6 +3,7 @@
   import { browser } from '$app/environment';
   import { page } from '$app/state';
   import {
+    exerciseProtocolSkipOnMicro,
     exerciseTargetOnMicro,
     exercisesForMicroSession,
     setSessionSkipped,
@@ -135,9 +136,33 @@
   }
 
   const entryByExercise = $derived(new Map(entriesForSession.map((entry) => [entry.exercise, entry])));
-  const loggedPlanned = $derived(slotExercises.filter((exercise) => entryByExercise.has(exercise)).length);
+  const protocolSkips = $derived.by(() => {
+    if (!mesocycle || !microcycle) return new Map<string, string | null>();
+    const map = new Map<string, string | null>();
+    for (const exercise of slotExercises) {
+      const skip = exerciseProtocolSkipOnMicro(
+        view.cyclePlanForCalc,
+        mesocycle.plan,
+        microcycle.plan,
+        exercise,
+        view.keyMaps
+      );
+      if (skip.skipped) map.set(exercise, skip.phaseLabel);
+    }
+    return map;
+  });
+  const requiredSlotExercises = $derived(
+    slotExercises.filter((exercise) => !protocolSkips.has(exercise))
+  );
+  const loggedPlanned = $derived(
+    requiredSlotExercises.filter((exercise) => entryByExercise.has(exercise)).length
+  );
   const sessionProgress = $derived(
-    slotExercises.length ? Math.round((loggedPlanned / slotExercises.length) * 100) : 0
+    requiredSlotExercises.length
+      ? Math.round((loggedPlanned / requiredSlotExercises.length) * 100)
+      : slotExercises.length && protocolSkips.size === slotExercises.length
+        ? 100
+        : 0
   );
   const availableDates = $derived([...new Set(view.entries.map((entry) => entry.date))].sort().reverse());
   const lastTrainingDate = $derived(availableDates.find((date) => date < workoutDate) ?? null);
@@ -281,6 +306,7 @@
   function adjustedPreviewSets(
     exerciseName: string
   ): { kind: ExerciseKind; sets: ExerciseSet[] } | null {
+    if (protocolSkips.has(exerciseName)) return null;
     const input = plannedInput(exerciseName);
     if (!input) return null;
     const sets = applyWeightDelta(
@@ -327,6 +353,7 @@
   }
 
   async function confirmPlanned(exerciseName: string) {
+    if (protocolSkips.has(exerciseName)) return;
     const input = plannedInput(exerciseName);
     if (!input) return;
     const sets = applyWeightDelta(
@@ -340,12 +367,25 @@
   function sessionProgressOf(meso: (typeof mesocycles)[number], micro: EnrichedMicrocycle, index: 0 | 1) {
     const exercises = exercisesForMicroSession(meso, view.workoutTemplates, index, view.keyMaps);
     if (!exercises.length) return { progress: 0, hasExercises: false };
+    const required = exercises.filter((exercise) => {
+      const skip = exerciseProtocolSkipOnMicro(
+        view.cyclePlanForCalc,
+        meso.plan,
+        micro.plan,
+        exercise,
+        view.keyMaps
+      );
+      return !skip.skipped;
+    });
+    if (!required.length) {
+      return { progress: 100, hasExercises: true };
+    }
     const date = sessionDateForIndex(micro, index);
     if (!date) return { progress: 0, hasExercises: true };
-    const logged = exercises.filter((exercise) =>
+    const logged = required.filter((exercise) =>
       view.entries.some((entry) => entry.date === date && entry.exercise === exercise)
     ).length;
-    return { progress: Math.round((logged / exercises.length) * 100), hasExercises: true };
+    return { progress: Math.round((logged / required.length) * 100), hasExercises: true };
   }
 
   function daysFromToday(date: string): number {
@@ -536,7 +576,7 @@
       <article class="metric-card">
         <span>Готовность сессии</span>
         <strong>{sessionProgress}%</strong>
-        <small>{loggedPlanned} из {slotExercises.length} записано</small>
+        <small>{loggedPlanned} из {requiredSlotExercises.length} записано</small>
       </article>
       <article class="metric-card">
         <span>Всего тренировок</span>
@@ -709,7 +749,7 @@
           </p>
         </div>
         <div class="heading-actions">
-          {#if !sessionSkipped && slotExercises.length > 0 && loggedPlanned === 0}
+          {#if !sessionSkipped && requiredSlotExercises.length > 0 && loggedPlanned === 0}
             <button
               type="button"
               class="button button-ghost"
@@ -751,9 +791,14 @@
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
           {@const hint = protocolHints.get(exercise)}
-            {@const previewSets = entry ? null : adjustedPreviewSets(exercise)}
-          <article class="exercise-item" class:complete={Boolean(entry)}>
-            <div class="exercise-index">{entry ? '✓' : index + 1}</div>
+          {@const protocolSkip = protocolSkips.get(exercise)}
+          {@const previewSets = entry ? null : adjustedPreviewSets(exercise)}
+          <article
+            class="exercise-item"
+            class:complete={Boolean(entry)}
+            class:protocol-skipped={Boolean(protocolSkip) && !entry}
+          >
+            <div class="exercise-index">{entry ? '✓' : protocolSkip ? '—' : index + 1}</div>
             <div class="exercise-content">
               <div class="exercise-heading">
                 <div>
@@ -767,6 +812,11 @@
                           </span>
                         {/each}
                       </div>
+                    </div>
+                  {:else if protocolSkip}
+                    <div class="plan-meta protocol-skip">
+                      <span class="protocol-skip-badge">Пропускаем в этом μ</span>
+                      <span class="protocol-skip-note">По протоколу без силовой нагрузки</span>
                     </div>
                   {:else if hint || previewSets}
                     <div class="plan-meta">
@@ -805,6 +855,8 @@
                         {busyId === entry.id ? '…' : 'Удалить'}
                       </button>
                     {/if}
+                  {:else if protocolSkip}
+                    <!-- actions hidden: protocol skip -->
                   {:else}
                     {#if exerciseKind(exercise) === 'strength'}
                       <div class="weight-stepper" role="group" aria-label="Поправка веса">
@@ -1284,6 +1336,34 @@
   .exercise-item.complete .set-chip {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+
+  .exercise-item.protocol-skipped {
+    opacity: 0.72;
+  }
+
+  .exercise-item.protocol-skipped .exercise-index {
+    color: var(--muted);
+    border-color: var(--line);
+  }
+
+  .protocol-skip-badge {
+    display: inline-block;
+    padding: 5px 10px;
+    color: var(--muted-strong);
+    background: #0a0c10;
+    border: 1px dashed var(--line-strong);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .protocol-skip-note {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 11px;
   }
 
   .exercise-actions {
