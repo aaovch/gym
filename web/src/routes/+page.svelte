@@ -26,9 +26,10 @@
     type PlannedSetsInput
   } from '$lib/planned-sets';
   import { thesesStore } from '$lib/training-theses';
-  import type { ExerciseKind, ExerciseSet } from '$lib/types';
+  import type { ExerciseKind, ExerciseLog, ExerciseSet } from '$lib/types';
   import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
   import { deleteSession, saveLog, workoutStore } from '$lib/workout-store';
+  import { toasts } from '$lib/toast.svelte';
 
   let datePick = $state(todayIso());
   let mesoPick = $state<string | null>(null);
@@ -36,6 +37,25 @@
   let slotPick = $state<WorkoutSlot | null>(null);
   let busyId = $state<string | null>(null);
   let error = $state('');
+  let weightAdjust = $state<Record<string, number>>({});
+
+  const WEIGHT_STEP = 2.5;
+
+  function scrollIntoCenter(node: HTMLElement, selectedId: string | null) {
+    const run = (id: string | null) => {
+      const target =
+        (id ? node.querySelector<HTMLElement>(`[data-meso-id="${id}"]`) : null) ??
+        node.querySelector<HTMLElement>('.choice.active') ??
+        (node.lastElementChild as HTMLElement | null);
+      target?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+    };
+    requestAnimationFrame(() => run(selectedId));
+    return {
+      update(id: string | null) {
+        requestAnimationFrame(() => run(id));
+      }
+    };
+  }
 
   const urlDate = $derived.by(() => (browser ? page.url.searchParams.get('date') : null));
   const urlMeso = $derived.by(() => (browser ? page.url.searchParams.get('meso') : null));
@@ -166,6 +186,7 @@
   }
 
   function pickSession(slot: WorkoutSlot) {
+    autoPicked = false;
     slotPick = slot;
     if (!microcycle) return;
     const planned = sessionDateForIndex(microcycle, slot === 'B' ? 1 : 0);
@@ -198,12 +219,6 @@
     };
   }
 
-  function plannedPreview(exerciseName: string): string | null {
-    const input = plannedInput(exerciseName);
-    if (!input) return null;
-    return formatPlannedSets(suggestPlannedSets(input), input.kind);
-  }
-
   function addUrl(exercise: string, entryId?: string): string {
     const params = new URLSearchParams();
     if (entryId) params.set('id', entryId);
@@ -222,18 +237,51 @@
     return `${first} кг × ${second}`;
   }
 
-  async function confirmPlanned(exerciseName: string) {
+  function applyWeightDelta(sets: ExerciseSet[], kind: ExerciseKind, delta: number): ExerciseSet[] {
+    if (!delta || kind !== 'strength') return sets;
+    return sets.map(([weight, reps]) => [Math.max(0, weight + delta), reps] as ExerciseSet);
+  }
+
+  function lastEntryFor(exerciseName: string) {
+    return (
+      view.entries
+        .filter((entry) => entry.exercise === exerciseName && entry.date < workoutDate)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .at(-1) ?? null
+    );
+  }
+
+  function nudgeWeight(exerciseName: string, direction: 1 | -1) {
+    const current = weightAdjust[exerciseName] ?? 0;
+    weightAdjust = { ...weightAdjust, [exerciseName]: current + direction * WEIGHT_STEP };
+  }
+
+  function adjustedPreview(exerciseName: string): string | null {
     const input = plannedInput(exerciseName);
-    if (!input || !mesocycle || !microcycle || activeIndex == null) return;
+    if (!input) return null;
+    const sets = applyWeightDelta(
+      suggestPlannedSets(input),
+      input.kind,
+      weightAdjust[exerciseName] ?? 0
+    );
+    return formatPlannedSets(sets, input.kind);
+  }
+
+  async function saveSetsFor(
+    exerciseName: string,
+    kind: ExerciseKind,
+    sets: ExerciseSet[],
+    successMessage: string
+  ) {
+    if (!mesocycle || !microcycle || activeIndex == null) return;
     busyId = exerciseName;
     error = '';
     try {
-      const sets = suggestPlannedSets(input);
       const { db, log } = createLog(
         workoutStore.database,
         exerciseName,
         workoutDate,
-        [{ kind: input.kind, sets, comment: null }],
+        [{ kind, sets, comment: null }],
         crypto.randomUUID()
       );
       workoutStore.database = db;
@@ -242,21 +290,136 @@
         microId: microcycle.plan.id,
         indexInMicro: activeIndex
       });
+      weightAdjust = { ...weightAdjust, [exerciseName]: 0 };
+      toasts.success(successMessage);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Не удалось сохранить';
+      const message = err instanceof Error ? err.message : 'Не удалось сохранить';
+      error = message;
+      toasts.error(message);
     } finally {
       busyId = null;
     }
   }
 
+  async function confirmPlanned(exerciseName: string) {
+    const input = plannedInput(exerciseName);
+    if (!input) return;
+    const sets = applyWeightDelta(
+      suggestPlannedSets(input),
+      input.kind,
+      weightAdjust[exerciseName] ?? 0
+    );
+    await saveSetsFor(exerciseName, input.kind, sets, `Записано: ${exerciseName}`);
+  }
+
+  async function repeatLast(exerciseName: string) {
+    const last = lastEntryFor(exerciseName);
+    if (!last) return;
+    await saveSetsFor(exerciseName, last.kind, last.sets, `Повторено как в прошлый раз: ${exerciseName}`);
+  }
+
+  function sessionProgressOf(meso: (typeof mesocycles)[number], micro: EnrichedMicrocycle, index: 0 | 1) {
+    const exercises = exercisesForMicroSession(meso, view.workoutTemplates, index, view.keyMaps);
+    if (!exercises.length) return { progress: 0, hasExercises: false };
+    const date = sessionDateForIndex(micro, index);
+    if (!date) return { progress: 0, hasExercises: true };
+    const logged = exercises.filter((exercise) =>
+      view.entries.some((entry) => entry.date === date && entry.exercise === exercise)
+    ).length;
+    return { progress: Math.round((logged / exercises.length) * 100), hasExercises: true };
+  }
+
+  function daysFromToday(date: string): number {
+    const day = 86_400_000;
+    return Math.round((Date.parse(date) - Date.parse(todayIso())) / day);
+  }
+
+  // «Ближайшая незаполненная»: среди всех сессий плана с упражнениями и прогрессом < 100%
+  // берём ту, что ближе всего к сегодня по дате; сессии без даты — по порядку плана, в конце.
+  function findNearestIncomplete(): { mesoId: string; microId: string; slot: WorkoutSlot } | null {
+    type Candidate = {
+      mesoId: string;
+      microId: string;
+      index: 0 | 1;
+      date: string | null;
+      order: number;
+    };
+    const candidates: Candidate[] = [];
+    let order = 0;
+    for (const meso of mesocycles) {
+      for (const micro of meso.microcycles) {
+        for (const index of [0, 1] as const) {
+          order += 1;
+          const { progress, hasExercises } = sessionProgressOf(meso, micro, index);
+          if (!hasExercises || progress >= 100) continue;
+          candidates.push({
+            mesoId: meso.plan.id,
+            microId: micro.plan.id,
+            index,
+            date: sessionDateForIndex(micro, index),
+            order
+          });
+        }
+      }
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => {
+      if (a.date && b.date) {
+        const diff = Math.abs(daysFromToday(a.date)) - Math.abs(daysFromToday(b.date));
+        return diff !== 0 ? diff : a.date.localeCompare(b.date);
+      }
+      if (a.date) return -1;
+      if (b.date) return 1;
+      return a.order - b.order;
+    });
+    const best = candidates[0];
+    return { mesoId: best.mesoId, microId: best.microId, slot: best.index === 1 ? 'B' : 'A' };
+  }
+
+  let autoSelected = $state(false);
+  let autoPicked = $state(false);
+  $effect(() => {
+    if (autoSelected) return;
+    // Уважаем явный выбор: через URL (со страницы «План») или вручную кликом.
+    if (urlMeso || urlMicro || urlSession !== null || mesoPick || microPick || slotPick) {
+      autoSelected = true;
+      return;
+    }
+    // Ждём, пока стор поднимет журнал — иначе все сессии выглядят пустыми
+    // и «ближайшей» окажется уже закрытая тренировка.
+    if (!workoutStore.bootstrapped || !mesocycles.length) return;
+    const pick = findNearestIncomplete();
+    if (pick) {
+      mesoPick = pick.mesoId;
+      microPick = pick.microId;
+      slotPick = pick.slot;
+      const micro = mesocycles
+        .find((meso) => meso.plan.id === pick.mesoId)
+        ?.microcycles.find((item) => item.plan.id === pick.microId);
+      const plannedDate = micro ? sessionDateForIndex(micro, pick.slot === 'B' ? 1 : 0) : null;
+      if (plannedDate) datePick = plannedDate;
+      autoPicked = true;
+    }
+    autoSelected = true;
+  });
+
   async function removeEntry(id: string | undefined) {
     if (!id) return;
+    const snapshot: ExerciseLog | undefined = workoutStore.database.logs.find((item) => item.id === id);
     busyId = id;
     error = '';
     try {
       await deleteSession(id);
+      if (snapshot) {
+        toasts.undo('Запись удалена', async () => {
+          await saveLog(snapshot);
+          toasts.success('Запись восстановлена');
+        });
+      }
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Не удалось удалить запись';
+      const message = err instanceof Error ? err.message : 'Не удалось удалить запись';
+      error = message;
+      toasts.error(message);
     } finally {
       busyId = null;
     }
@@ -266,7 +429,12 @@
 <div class="container dashboard">
   <header class="page-header">
     <div>
-      <div class="eyebrow">{sessionReady ? 'Тренировка' : 'Обзор'}</div>
+      <div class="eyebrow">
+        {sessionReady ? 'Тренировка' : 'Обзор'}
+        {#if autoPicked && sessionReady}
+          <span class="auto-badge">авто · ближайшая незаполненная</span>
+        {/if}
+      </div>
       <h1>
         {#if sessionReady && workoutDate}
           {workoutDate === todayIso() ? 'Тренировка сегодня' : formatDateRu(workoutDate)}
@@ -367,14 +535,16 @@
       <div class="context-picker">
         <div>
           <span class="control-label">Мезоцикл</span>
-          <div class="choice-row">
+          <div class="choice-row" use:scrollIntoCenter={selectedMesoId}>
             {#each mesocycles as meso (meso.plan.id)}
               <button
                 type="button"
                 class="choice"
                 class:active={selectedMesoId === meso.plan.id}
+                data-meso-id={meso.plan.id}
                 style={`--choice-color: ${mesocycleColor(meso.index)}`}
                 onclick={() => {
+                  autoPicked = false;
                   mesoPick = meso.plan.id;
                   microPick = null;
                   slotPick = null;
@@ -398,6 +568,7 @@
                   class:active={selectedMicroId === micro.plan.id}
                   class:complete={micro.complete}
                   onclick={() => {
+                    autoPicked = false;
                     microPick = micro.plan.id;
                     slotPick = null;
                   }}
@@ -481,7 +652,7 @@
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
           {@const hint = protocolHints.get(exercise)}
-          {@const preview = entry ? null : plannedPreview(exercise)}
+            {@const preview = entry ? null : adjustedPreview(exercise)}
           <article class="exercise-item" class:complete={Boolean(entry)}>
             <div class="exercise-index">{entry ? '✓' : index + 1}</div>
             <div class="exercise-content">
@@ -519,6 +690,30 @@
                       </button>
                     {/if}
                   {:else}
+                    {@const last = lastEntryFor(exercise)}
+                    {#if exerciseKind(exercise) === 'strength'}
+                      <div class="weight-stepper" role="group" aria-label="Поправка веса">
+                        <button
+                          type="button"
+                          aria-label="Меньше на {WEIGHT_STEP} кг"
+                          disabled={busyId === exercise}
+                          onclick={() => nudgeWeight(exercise, -1)}
+                        >
+                          −
+                        </button>
+                        <span class:dim={!(weightAdjust[exercise] ?? 0)}>
+                          {(weightAdjust[exercise] ?? 0) > 0 ? '+' : ''}{fmtNum(weightAdjust[exercise] ?? 0)}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Больше на {WEIGHT_STEP} кг"
+                          disabled={busyId === exercise}
+                          onclick={() => nudgeWeight(exercise, 1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    {/if}
                     <button
                       type="button"
                       class="button button-primary"
@@ -527,6 +722,17 @@
                     >
                       {busyId === exercise ? 'Сохраняем…' : 'Готово'}
                     </button>
+                    {#if last}
+                      <button
+                        type="button"
+                        class="button button-ghost"
+                        disabled={busyId === exercise}
+                        title="Записать веса как в прошлый раз"
+                        onclick={() => repeatLast(exercise)}
+                      >
+                        Как в прошлый раз
+                      </button>
+                    {/if}
                     <a class="button button-secondary" href={addUrl(exercise)}>Изменить</a>
                   {/if}
                 </div>
@@ -586,6 +792,19 @@
     padding-bottom: 30px;
   }
 
+  .auto-badge {
+    margin-left: 8px;
+    padding: 2px 7px;
+    color: var(--accent-ink);
+    background: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+
   .date-control {
     width: 176px;
   }
@@ -595,8 +814,11 @@
     display: block;
     margin-bottom: 7px;
     color: var(--muted);
-    font-size: 11px;
-    font-weight: 750;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .overview-metrics {
@@ -628,30 +850,34 @@
 
   .training-top h2 {
     margin: 6px 0 6px;
-    font-size: 27px;
+    font-size: 30px;
+    letter-spacing: 0.01em;
   }
 
   .training-top p {
     margin: 0;
     color: var(--muted);
-    font-size: 12px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
   }
 
   .session-ring {
     display: grid;
-    width: 68px;
-    height: 68px;
+    width: 70px;
+    height: 70px;
     flex: 0 0 auto;
     place-items: center;
     background:
-      radial-gradient(circle closest-side, #151b27 78%, transparent 80% 100%),
-      conic-gradient(var(--accent) var(--progress), #2a3242 0);
+      radial-gradient(circle closest-side, #15171c 76%, transparent 78% 100%),
+      conic-gradient(var(--accent) var(--progress), #2a313d 0);
     border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--line-strong);
   }
 
   .session-ring span {
-    font-size: 12px;
-    font-weight: 850;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 800;
   }
 
   .context-picker {
@@ -672,10 +898,18 @@
   .micro-choice,
   .slot-choice {
     color: var(--muted-strong);
-    background: #0d121b;
+    background: #0e1014;
     border: 1px solid var(--line);
     border-radius: 0;
+    font-family: var(--font-mono);
     cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .choice:hover,
+  .micro-choice:hover,
+  .slot-choice:hover {
+    border-color: var(--line-strong);
   }
 
   .choice {
@@ -727,8 +961,8 @@
 
   .micro-choice.active {
     color: var(--accent);
-    background: rgb(185 243 90 / 8%);
-    border-color: rgb(185 243 90 / 36%);
+    background: rgb(204 255 51 / 8%);
+    border-color: rgb(204 255 51 / 40%);
   }
 
   .micro-choice.complete small {
@@ -748,9 +982,10 @@
     width: 24px;
     height: 24px;
     place-items: center;
-    color: #0b1016;
+    color: #0b0c0f;
     background: var(--choice-color);
     border-radius: 0;
+    font-weight: 800;
   }
 
   .slot-choice span {
@@ -781,13 +1016,20 @@
     grid-template-columns: 38px minmax(0, 1fr);
     gap: 14px;
     padding: 18px;
-    background: linear-gradient(145deg, #131925, #0e131d);
+    background: linear-gradient(150deg, #1a1d24, #121419);
     border: 1px solid var(--line);
+    border-left: 2px solid var(--line-strong);
     border-radius: var(--radius);
+    transition: border-color 130ms ease;
+  }
+
+  .exercise-item:hover {
+    border-left-color: var(--accent);
   }
 
   .exercise-item.complete {
-    border-color: rgb(185 243 90 / 22%);
+    border-color: rgb(204 255 51 / 22%);
+    border-left-color: var(--accent);
   }
 
   .exercise-index {
@@ -796,11 +1038,12 @@
     height: 34px;
     place-items: center;
     color: var(--muted);
-    background: #0a0e16;
-    border: 1px solid var(--line);
+    background: #0a0c10;
+    border: 1px solid var(--line-strong);
     border-radius: 0;
-    font-size: 12px;
-    font-weight: 850;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 800;
   }
 
   .exercise-item.complete .exercise-index {
@@ -818,7 +1061,8 @@
 
   .exercise-heading h3 {
     margin: 1px 0 4px;
-    font-size: 16px;
+    font-size: 18px;
+    letter-spacing: 0.01em;
   }
 
   .exercise-heading p {
@@ -850,6 +1094,50 @@
     font-size: 10px;
   }
 
+  .weight-stepper {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    border: 1px solid var(--line-strong);
+    background: #0a0c10;
+  }
+
+  .weight-stepper button {
+    width: 38px;
+    height: 100%;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .weight-stepper button:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--surface-raised);
+  }
+
+  .weight-stepper button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .weight-stepper span {
+    min-width: 44px;
+    padding: 0 4px;
+    border-inline: 1px solid var(--line);
+    color: var(--accent);
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .weight-stepper span.dim {
+    color: var(--muted);
+  }
+
   .set-list.compact {
     margin-top: 8px;
   }
@@ -874,11 +1162,12 @@
   .inline-sets span {
     padding: 6px 9px;
     color: var(--muted-strong);
-    background: #0a0f17;
+    background: #0a0c10;
     border: 1px solid var(--line);
     border-radius: 0;
+    font-family: var(--font-mono);
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 500;
   }
 
   .day-log {
@@ -931,9 +1220,12 @@
     margin-top: 14px;
     padding: 13px 16px;
     color: #ffd3d3;
-    background: rgb(255 114 114 / 10%);
-    border: 1px solid rgb(255 114 114 / 24%);
+    background: rgb(255 92 82 / 12%);
+    border: 1px solid rgb(255 92 82 / 30%);
+    border-left: 3px solid var(--danger);
     border-radius: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
   }
 
   @media (max-width: 1050px) {

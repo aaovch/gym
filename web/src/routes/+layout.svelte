@@ -11,6 +11,7 @@
     workoutStore
   } from '$lib/workout-store';
   import { thesesStore } from '$lib/training-theses';
+  import Toaster from '$lib/components/Toaster.svelte';
 
   export let data;
 
@@ -176,6 +177,8 @@
     <a href={`${base}/add`} class:active={routePath.startsWith('/add')}>Запись</a>
   </nav>
 </div>
+
+<Toaster />
 
 {#if settingsOpen}
   <div

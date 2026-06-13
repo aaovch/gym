@@ -2366,20 +2366,24 @@
 	}
 
 	.planning-tab {
-		padding: 0.5rem 0.9rem;
+		padding: 0.5rem 0.95rem;
 		border: 1px solid var(--line);
 		border-radius: 0;
 		background: transparent;
 		color: var(--muted);
-		font-size: 0.85rem;
+		font-family: var(--font-mono);
+		font-size: 0.78rem;
 		font-weight: 700;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
 		cursor: pointer;
 	}
 
 	.planning-tab.active {
-		color: var(--text);
+		color: var(--accent);
 		background: var(--surface-2);
 		border-color: var(--line-strong);
+		box-shadow: inset 0 -2px 0 var(--accent);
 	}
 
 	.planning-head {
@@ -2424,30 +2428,53 @@
 	.btn {
 		border-radius: 0;
 		padding: 0.5rem 0.85rem;
-		border: none;
+		border: 1px solid var(--line-strong);
 		background: var(--surface-2);
 		color: var(--text);
+		font-family: var(--font-mono);
+		font-size: 0.78rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		cursor: pointer;
+		transition: border-color 120ms ease, background 120ms ease;
+	}
+
+	.btn:hover {
+		border-color: var(--accent);
 	}
 
 	.btn.primary {
-		background: rgba(110, 231, 168, 0.14);
-		color: var(--accent);
+		background: var(--accent);
+		border-color: var(--accent);
+		color: var(--accent-ink);
+	}
+
+	.btn.primary:hover {
+		background: var(--accent-strong);
 	}
 
 	.btn.small {
 		padding: 0.3rem 0.55rem;
-		font-size: 0.78rem;
+		font-size: 0.72rem;
 	}
 
 	.btn.danger,
 	.btn.small.danger {
 		color: var(--danger);
-		background: rgba(255, 143, 143, 0.08);
+		background: rgba(255, 92, 82, 0.1);
+		border-color: rgba(255, 92, 82, 0.28);
 	}
 
 	.btn.ghost-link {
 		background: transparent;
+		border-color: transparent;
 		color: var(--muted);
+	}
+
+	.btn.ghost-link:hover {
+		color: var(--accent);
+		border-color: transparent;
 	}
 
 	.ab-grid {

@@ -1,7 +1,7 @@
 import { targetPctForExercise, type CyclePlan, type MesocyclePlan, type MicrocyclePlan } from './cycle-plan';
 import { formatSet, formatWeight } from './database';
 import { mesoProtocolId, type ExerciseKeyMaps } from './exercise-keys';
-import { targetWeight } from './protocol';
+import { schemeToSets, targetWeight } from './protocol';
 import type { ProtocolGuideWeek, VolumeGuideRow } from './training-theses';
 import { volumeGuideRowForPct } from './volume-guide';
 import type { ExerciseKind, ExerciseSet, RowInput, WorkoutEntry } from './types';
@@ -58,13 +58,19 @@ export type PlannedSetsInput = {
 };
 
 export function suggestPlannedSets(input: PlannedSetsInput): ExerciseSet[] {
-	const { pct } = targetPctForExercise(
+	const { pct, phase } = targetPctForExercise(
 		input.cyclePlan,
 		input.meso,
 		input.micro,
 		input.exercise,
 		input.keyMaps
 	);
+
+	if (input.anchor1rm && phase?.scheme?.length) {
+		const scheme = schemeToSets(phase.scheme, input.anchor1rm);
+		if (scheme.length) return scheme;
+	}
+
 	const plannedWeight =
 		input.anchor1rm && pct ? targetWeight(input.anchor1rm, pct) : null;
 

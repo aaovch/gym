@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import SetEditor from '$lib/components/SetEditor.svelte';
+	import { toasts } from '$lib/toast.svelte';
 	import { resolveMesoMicroSelection, targetPctForExercise } from '$lib/cycle-plan';
 	import {
 		createLog,
@@ -31,6 +33,7 @@
 	let status = $state('');
 	let error = $state('');
 	let busy = $state(false);
+	let exerciseInput = $state<HTMLInputElement | null>(null);
 
 	const view = $derived(workoutStore.view);
 	const exercises = $derived(uniqueExercisesFromDb(workoutStore.database));
@@ -205,16 +208,37 @@
 							indexInMicro: Number.isFinite(sessionIndex) ? sessionIndex : undefined
 						}
 					: undefined;
+			const savedName = exercise.trim();
 			await saveLog(log, context);
 			status = editingId ? 'Тренировка обновлена.' : 'Тренировка сохранена.';
-			if (!editingId) resetForm();
+			toasts.success(editingId ? `Обновлено: ${savedName}` : `Сохранено: ${savedName}`);
+			if (!editingId) {
+				resetForm();
+				await tick();
+				exerciseInput?.focus();
+			}
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Не удалось сохранить';
+			const message = err instanceof Error ? err.message : 'Не удалось сохранить';
+			error = message;
+			toasts.error(message);
 		} finally {
 			busy = false;
 		}
 	}
+
+	function onShortcut(event: KeyboardEvent) {
+		if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'Enter')) {
+			event.preventDefault();
+			if (previewLog && !busy && !workoutStore.sync.syncing) submit();
+		}
+	}
+
+	onMount(() => {
+		if (!editId && !exercise.trim()) exerciseInput?.focus();
+	});
 </script>
+
+<svelte:window onkeydown={onShortcut} />
 
 <section class="card">
 	<div class="toolbar">
@@ -238,7 +262,12 @@
 	<form class="form" onsubmit={(event) => { event.preventDefault(); submit(); }}>
 		<label>
 			<span>Упражнение</span>
-			<input bind:value={exercise} list="exercise-list" placeholder="Приседания со штангой на спине" />
+			<input
+				bind:this={exerciseInput}
+				bind:value={exercise}
+				list="exercise-list"
+				placeholder="Приседания со штангой на спине"
+			/>
 			<datalist id="exercise-list">
 				{#each exercises as name (name)}
 					<option value={name}></option>
@@ -264,7 +293,12 @@
 
 		<div class="form-actions">
 			<button type="button" class="ghost" onclick={addExtraRow}>+ блок</button>
-			<button type="submit" class="primary" disabled={!previewLog || busy || workoutStore.sync.syncing}>
+			<button
+				type="submit"
+				class="primary"
+				title="Ctrl/⌘ + S"
+				disabled={!previewLog || busy || workoutStore.sync.syncing}
+			>
 				{busy ? 'Сохраняем...' : editingId ? 'Обновить' : 'Сохранить'}
 			</button>
 		</div>

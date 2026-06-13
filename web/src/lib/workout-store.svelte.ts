@@ -114,6 +114,7 @@ class WorkoutStore {
 	});
 
 	view = $derived.by(() => buildView(this.database, this.cyclePlan));
+	bootstrapped = $state(false);
 
 	private githubInitStarted = false;
 	private githubConnectGeneration = 0;
@@ -134,6 +135,8 @@ class WorkoutStore {
 		if (mergedPlan.mesocycles.length > 0 || localPlan || bundledCyclePlan) {
 			this.cyclePlan = normalizeLoadedCyclePlan(mergedPlan, this.view.microcycles.byDate);
 		}
+
+		this.bootstrapped = true;
 	}
 
 	connectIfTokenSaved() {

@@ -1,4 +1,4 @@
-import type { WorkoutEntry } from './types';
+import type { ExerciseSet, WorkoutEntry } from './types';
 
 export function epley1rm(weight: number, reps: number): number {
 	return weight * (1 + reps / 30);
@@ -93,16 +93,55 @@ export function resolveMesoAnchor1rm(
 	return null;
 }
 
+/** Группа одинаковых подходов внутри фазы (одна «ступень» раскладки). */
+export type ProtocolSetStep = {
+	id: string;
+	/** Сколько одинаковых подходов. */
+	sets: number;
+	/** Повторений в подходе. */
+	reps: number;
+	/** Целевая интенсивность в % от 1ПМ именно для этих подходов. */
+	intensityPct: number;
+	/** Заметка: «кластер», «RIR-2», темп 11X1 и т.п. */
+	note?: string;
+};
+
 export type ProtocolPhase = {
 	id: string;
 	label: string;
-	/** Целевая интенсивность в % от 1ПМ (80 = 80% от 1ПМ). */
+	/** «Рабочая» интенсивность фазы в % от 1ПМ (для кривой/бейджей). При наличии scheme = верхняя ступень. */
 	intensityPct: number;
 	/** Первый микроцикл фазы (1-based). */
 	microFrom: number;
 	/** Последний микроцикл фазы (1-based). */
 	microTo: number;
+	/** Детальная раскладка по подходам с переменной интенсивностью. Пусто → один рабочий % из intensityPct. */
+	scheme?: ProtocolSetStep[];
 };
+
+export function newStepId(): string {
+	return `step-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/** Разворачивает раскладку фазы в список подходов под конкретный 1ПМ. */
+export function schemeToSets(scheme: ProtocolSetStep[], anchor1rm: number): ExerciseSet[] {
+	const sets: ExerciseSet[] = [];
+	for (const step of scheme) {
+		const count = Math.max(0, Math.round(step.sets));
+		if (!count || step.intensityPct <= 0 || step.reps <= 0) continue;
+		const weight = targetWeight(anchor1rm, step.intensityPct);
+		for (let i = 0; i < count; i += 1) sets.push([weight, step.reps]);
+	}
+	return sets;
+}
+
+/** «Рабочая» интенсивность фазы: верхняя ступень раскладки либо единичный %. */
+export function phaseTopPct(phase: ProtocolPhase): number {
+	if (phase.scheme?.length) {
+		return Math.max(0, ...phase.scheme.map((step) => step.intensityPct));
+	}
+	return phase.intensityPct;
+}
 
 export type ProtocolTemplate = {
 	id: string;
