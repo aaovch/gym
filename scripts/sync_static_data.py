@@ -10,12 +10,41 @@ DATA_DIR = ROOT / "data"
 STATIC_DIR = ROOT / "web" / "static" / "data"
 
 
+def _check_unique_ids(name: str, label: str, items: object) -> None:
+    if not isinstance(items, list):
+        return
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_id = item.get("id")
+        if not isinstance(item_id, str):
+            continue
+        if item_id in seen:
+            raise SystemExit(f"{name}: дубликат {label}: {item_id}")
+        seen.add(item_id)
+
+
+def validate_theses(name: str, raw: dict) -> None:
+    """Ранняя проверка уникальности id групп и тезисов (защита от регресса дублей)."""
+    groups = raw.get("groups")
+    _check_unique_ids(name, "group id", groups)
+    all_theses: list[dict] = []
+    if isinstance(groups, list):
+        for group in groups:
+            if isinstance(group, dict) and isinstance(group.get("theses"), list):
+                all_theses.extend(t for t in group["theses"] if isinstance(t, dict))
+    _check_unique_ids(name, "thesis id", all_theses)
+
+
 def minify_json(path: Path) -> dict:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if path.name == "workouts.json" and raw.get("version") != 4:
         raise SystemExit(f"{path.name}: expected version 4, got {raw.get('version')!r}")
     if path.name == "cycle-plan.json" and raw.get("version") != 4:
         raise SystemExit(f"{path.name}: expected version 4, got {raw.get('version')!r}")
+    if path.name == "training-theses.json":
+        validate_theses(path.name, raw)
     text = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
     path.write_text(text, encoding="utf-8")
     STATIC_DIR.mkdir(parents=True, exist_ok=True)

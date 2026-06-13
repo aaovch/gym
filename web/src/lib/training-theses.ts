@@ -2,6 +2,8 @@ export {
 	bootstrapTheses,
 	formatAdaptationStars,
 	thesesStore,
+	validateTrainingThesesDoc,
+	ThesesValidationError,
 	type AdaptationIntensityRow,
 	type IntensityAdaptationMatrix,
 	type IntensityBand,

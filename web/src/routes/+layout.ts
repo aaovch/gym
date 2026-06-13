@@ -4,7 +4,7 @@ import { base } from '$app/paths';
 import type { CyclePlan } from '$lib/cycle-plan';
 import { normalizeWorkoutDatabase } from '$lib/json-store';
 import { parseCyclePlan } from '$lib/storage';
-import type { TrainingThesesDoc } from '$lib/training-theses';
+import { validateTrainingThesesDoc, type TrainingThesesDoc } from '$lib/training-theses';
 import type { WorkoutDatabase } from '$lib/types';
 import type { LayoutLoad } from './$types';
 
@@ -20,7 +20,7 @@ export const load: LayoutLoad = async ({ fetch }) => {
 	);
 
 	const theses: TrainingThesesDoc = thesesRes.ok
-		? await thesesRes.json()
+		? validateTrainingThesesDoc(await thesesRes.json())
 		: { version: 1, updatedAt: '', groups: [], matrices: [], volumeGuides: [], protocolGuides: [] };
 
 	let bundledCyclePlan: CyclePlan | null = null;

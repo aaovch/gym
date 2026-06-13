@@ -172,9 +172,104 @@ def compact_workout_v4(db: dict) -> dict:
     }
 
 
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_VALID_KINDS = {"strength", "run", "jumps"}
+_SET_KEYS = {
+    "strength": ("weightKg", "reps"),
+    "run": ("durationMin", "speedKmh"),
+    "jumps": ("setCount", "repsPerSet"),
+}
+
+
+def _is_positive_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
+def validate_workout_v4(raw: dict) -> dict:
+    """Проверяет stored-форму v4: уникальность id, ссылки, kind и числа.
+
+    Только читает — при проблеме бросает ValueError, данные не трогает.
+    """
+    issues: list[str] = []
+    exercises = raw.get("exercises")
+    logs = raw.get("logs")
+    if not isinstance(exercises, list):
+        issues.append("exercises должен быть массивом")
+        exercises = []
+    if not isinstance(logs, list):
+        issues.append("logs должен быть массивом")
+        logs = []
+
+    exercise_ids: set[str] = set()
+    kind_by_id: dict[str, str] = {}
+    for index, item in enumerate(exercises):
+        if not isinstance(item, dict):
+            issues.append(f"exercises[{index}] должен быть объектом")
+            continue
+        ex_id = item.get("id")
+        if not isinstance(ex_id, str) or not ex_id:
+            issues.append(f"exercises[{index}].id обязателен")
+        elif ex_id in exercise_ids:
+            issues.append(f"дубликат Exercise.id: {ex_id}")
+        else:
+            exercise_ids.add(ex_id)
+        if not isinstance(item.get("n"), str) or not item["n"].strip():
+            issues.append(f"exercises[{index}].n обязателен")
+        kind = item.get("k")
+        if kind not in _VALID_KINDS:
+            issues.append(f"exercises[{index}].k имеет неизвестный тип")
+        elif isinstance(ex_id, str):
+            kind_by_id[ex_id] = kind
+
+    log_ids: set[str] = set()
+    for index, log in enumerate(logs):
+        if not isinstance(log, dict):
+            issues.append(f"logs[{index}] должен быть объектом")
+            continue
+        log_id = log.get("id")
+        if not isinstance(log_id, str) or not log_id:
+            issues.append(f"logs[{index}].id обязателен")
+        elif log_id in log_ids:
+            issues.append(f"дубликат ExerciseLog.id: {log_id}")
+        else:
+            log_ids.add(log_id)
+        ex_id = log.get("exerciseId")
+        if not isinstance(ex_id, str) or ex_id not in exercise_ids:
+            issues.append(f"logs[{index}].exerciseId ссылается на отсутствующее упражнение")
+        if not isinstance(log.get("date"), str) or not _ISO_DATE_RE.match(log["date"] or ""):
+            issues.append(f"logs[{index}].date должен быть YYYY-MM-DD")
+        blocks = log.get("blocks")
+        if not isinstance(blocks, list) or not blocks:
+            issues.append(f"logs[{index}].blocks должен содержать хотя бы один блок")
+            continue
+        expected_kind = kind_by_id.get(ex_id) if isinstance(ex_id, str) else None
+        for block_index, block in enumerate(blocks):
+            sets = block.get("sets") if isinstance(block, dict) else None
+            kind = block.get("kind") if isinstance(block, dict) else None
+            if not isinstance(block, dict) or kind not in _VALID_KINDS or not isinstance(sets, list):
+                issues.append(f"logs[{index}].blocks[{block_index}] имеет неверную структуру")
+                continue
+            if expected_kind and kind != expected_kind:
+                issues.append(f"logs[{index}].blocks[{block_index}].kind не совпадает с Exercise.kind")
+            if not sets:
+                issues.append(f"logs[{index}].blocks[{block_index}].sets пуст")
+            first_key, second_key = _SET_KEYS[kind]
+            for set_index, item in enumerate(sets):
+                if not isinstance(item, dict) or not _is_positive_number(
+                    item.get(first_key)
+                ) or not _is_positive_number(item.get(second_key)):
+                    issues.append(
+                        f"logs[{index}].blocks[{block_index}].sets[{set_index}] содержит невалидные числа"
+                    )
+
+    if issues:
+        raise ValueError("workouts.json: " + "; ".join(issues))
+    return raw
+
+
 def normalize_workout(raw: dict) -> dict:
     if raw.get("version") == 4 and "logs" in raw:
-        return expand_workout_v4(raw)
+        return expand_workout_v4(validate_workout_v4(raw))
     if raw.get("version") == 3 and "logs" in raw:
         return expand_workout_v3(raw)
     raise ValueError(f"Expected workouts.json v3/v4 with logs, got version={raw.get('version')!r}")

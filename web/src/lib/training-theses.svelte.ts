@@ -94,6 +94,90 @@ export type VolumeGuideTable = {
 	rows: VolumeGuideRow[];
 };
 
+export class ThesesValidationError extends Error {
+	constructor(public readonly issues: string[]) {
+		super(`training-theses.json: ${issues.join('; ')}`);
+		this.name = 'ThesesValidationError';
+	}
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Регистрирует id и пишет issue при дубликате или пустом значении. */
+function trackId(seen: Set<string>, id: unknown, label: string, issues: string[]): void {
+	if (typeof id !== 'string' || !id.trim()) {
+		issues.push(`${label}: id обязателен`);
+		return;
+	}
+	if (seen.has(id)) issues.push(`дубликат ${label}: ${id}`);
+	else seen.add(id);
+}
+
+/**
+ * Проверяет структуру и уникальность всех id (групп, тезисов, матриц, объёмов,
+ * протоколов). Бросает ThesesValidationError при проблемах — данные при этом не
+ * меняются, так что повреждение исключено: либо документ валиден, либо ошибка.
+ */
+export function validateTrainingThesesDoc(raw: unknown): TrainingThesesDoc {
+	const issues: string[] = [];
+	if (!isObject(raw)) throw new ThesesValidationError(['корень должен быть объектом']);
+	if (raw.version !== 1) issues.push(`неподдерживаемая версия: ${String(raw.version)}`);
+
+	const groups = Array.isArray(raw.groups) ? raw.groups : [];
+	if (!Array.isArray(raw.groups)) issues.push('groups должен быть массивом');
+
+	const groupIds = new Set<string>();
+	const thesisIds = new Set<string>();
+	for (const [groupIndex, group] of groups.entries()) {
+		if (!isObject(group)) {
+			issues.push(`groups[${groupIndex}] должен быть объектом`);
+			continue;
+		}
+		trackId(groupIds, group.id, `TrainingThesisGroup`, issues);
+		if (typeof group.title !== 'string' || !group.title.trim()) {
+			issues.push(`groups[${groupIndex}].title обязателен`);
+		}
+		const theses = Array.isArray(group.theses) ? group.theses : [];
+		if (!Array.isArray(group.theses)) issues.push(`groups[${groupIndex}].theses должен быть массивом`);
+		for (const [thesisIndex, thesis] of theses.entries()) {
+			if (!isObject(thesis)) {
+				issues.push(`groups[${groupIndex}].theses[${thesisIndex}] должен быть объектом`);
+				continue;
+			}
+			trackId(thesisIds, thesis.id, `TrainingThesis`, issues);
+			if (typeof thesis.text !== 'string' || !thesis.text.trim()) {
+				issues.push(`groups[${groupIndex}].theses[${thesisIndex}].text обязателен`);
+			}
+		}
+	}
+
+	for (const [key, label] of [
+		['matrices', 'IntensityAdaptationMatrix'],
+		['volumeGuides', 'VolumeGuideTable'],
+		['protocolGuides', 'ProtocolGuide']
+	] as const) {
+		const list = raw[key];
+		if (list == null) continue;
+		if (!Array.isArray(list)) {
+			issues.push(`${key} должен быть массивом`);
+			continue;
+		}
+		const ids = new Set<string>();
+		for (const [index, item] of list.entries()) {
+			if (!isObject(item)) {
+				issues.push(`${key}[${index}] должен быть объектом`);
+				continue;
+			}
+			trackId(ids, item.id, label, issues);
+		}
+	}
+
+	if (issues.length) throw new ThesesValidationError(issues);
+	return raw as TrainingThesesDoc;
+}
+
 type ThesesLocalOverlay = {
 	disabledIds: string[];
 	customGroups: TrainingThesisGroup[];
