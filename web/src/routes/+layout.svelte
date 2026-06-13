@@ -5,7 +5,6 @@
   import { page } from '$app/stores';
   import { getGitHubToken, setGitHubToken } from '$lib/auth';
   import {
-    connectGitHub,
     pullFromGitHub,
     pushToGitHub,
     resetToBundled,
@@ -71,12 +70,40 @@
     token = getGitHubToken();
   });
 
-  function closeSettings() {
+  function persistToken(): boolean {
+    const trimmed = token.trim();
+    setGitHubToken(trimmed);
+    if (!trimmed) {
+      workoutStore.patchSync({
+        workoutsSha: null,
+        cyclePlanSha: null,
+        githubLogin: null,
+        syncing: false,
+        error: '',
+        message: ''
+      });
+      return false;
+    }
+    return true;
+  }
+
+  function closeSettings(notifyDisconnect = false) {
+    const hadToken = Boolean(getGitHubToken());
+    persistToken();
     settingsOpen = false;
+    if (notifyDisconnect && hadToken && !token.trim()) {
+      toasts.info('GitHub отключён. Данные остаются в браузере.');
+    }
   }
 
   async function runGitHubAction(pendingMessage: string, action: () => Promise<void>) {
     if (sync.syncing) return;
+    if (!token.trim()) {
+      closeSettings(true);
+      toasts.error('Введите токен GitHub');
+      return;
+    }
+    persistToken();
     closeSettings();
     const pendingId = toasts.info(pendingMessage, undefined, 0);
     try {
@@ -93,30 +120,12 @@
     }
   }
 
-  async function saveSettings() {
-    setGitHubToken(token);
-    closeSettings();
-    if (!token.trim()) {
-      workoutStore.patchSync({
-        workoutsSha: null,
-        cyclePlanSha: null,
-        githubLogin: null,
-        syncing: false,
-        error: '',
-        message: ''
-      });
-      toasts.info('GitHub отключён. Данные остаются в браузере.');
-      return;
-    }
-    await runGitHubAction('Подключение к GitHub…', () => connectGitHub(token));
-  }
-
   async function syncNow() {
-    await runGitHubAction('Отправка в GitHub…', () => pushToGitHub(token));
+    await runGitHubAction('Отправка в GitHub…', () => pushToGitHub(token.trim()));
   }
 
   async function pullNow() {
-    await runGitHubAction('Загрузка из GitHub…', () => pullFromGitHub(token));
+    await runGitHubAction('Загрузка из GitHub…', () => pullFromGitHub(token.trim()));
   }
 
   function isActive(route: string) {
@@ -206,8 +215,8 @@
     role="button"
     tabindex="0"
     aria-label="Закрыть настройки"
-    on:click={() => (settingsOpen = false)}
-    on:keydown={(event) => event.key === 'Escape' && (settingsOpen = false)}
+    on:click={() => closeSettings(true)}
+    on:keydown={(event) => event.key === 'Escape' && closeSettings(true)}
   >
     <div
       class="settings-panel"
@@ -223,7 +232,7 @@
           <div class="eyebrow">Приложение</div>
           <h2 id="settings-title">Настройки</h2>
         </div>
-        <button class="icon-button" type="button" aria-label="Закрыть" on:click={() => (settingsOpen = false)}>
+        <button class="icon-button" type="button" aria-label="Закрыть" on:click={() => closeSettings(true)}>
           ×
         </button>
       </div>
@@ -231,9 +240,9 @@
       <div class="settings-section">
         <h3>Синхронизация с GitHub</h3>
         <p>
-          Необязательно. Без токена данные хранятся только в браузере. С токеном правки сначала
-          сохраняются локально, а в репозиторий уходят кнопкой «Отправить в GitHub». «Подтянуть из
-          GitHub» загружает актуальные данные из репозитория и перезаписывает локальные.
+          Необязательно. Без токена данные хранятся только в браузере. Токен сохраняется при
+          закрытии настроек. «Подтянуть из GitHub» загружает данные из репозитория, «Отправить в
+          GitHub» — отправляет локальные правки.
         </p>
         <label>
           Токен
@@ -242,8 +251,8 @@
       </div>
 
       <div class="settings-links">
-        <a href={`${base}/schema`} on:click={() => (settingsOpen = false)}>Структура данных</a>
-        <a href={`${base}/body`} on:click={() => (settingsOpen = false)}>Карта нагрузки</a>
+        <a href={`${base}/schema`} on:click={() => closeSettings()}>Структура данных</a>
+        <a href={`${base}/body`} on:click={() => closeSettings()}>Карта нагрузки</a>
       </div>
 
       <div class="panel-actions">
@@ -282,14 +291,6 @@
             {/if}
           </button>
         {/if}
-        <button
-          class="button button-primary"
-          type="button"
-          disabled={sync.syncing}
-          on:click={saveSettings}
-        >
-          {sync.syncing ? 'Подключение...' : 'Сохранить'}
-        </button>
       </div>
     </div>
   </div>
