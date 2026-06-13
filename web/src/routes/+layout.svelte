@@ -25,7 +25,8 @@
     { href: `${base}/protocols`, route: '/protocols', label: 'Протоколы', short: 'Прот.' },
     { href: `${base}/exercises`, route: '/exercises', label: 'Упражнения', short: 'Упр.' },
     { href: `${base}/history`, route: '/history', label: 'Журнал', short: 'Журнал' },
-    { href: `${base}/stats`, route: '/stats', label: 'Аналитика', short: 'Аналитика' }
+    { href: `${base}/stats`, route: '/stats', label: 'Аналитика', short: 'Аналитика' },
+    { href: `${base}/load`, route: '/load', label: 'Нагрузка', short: 'Нагрузка' }
   ];
 
   $: path = $page.url.pathname;

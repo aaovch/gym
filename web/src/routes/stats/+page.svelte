@@ -66,7 +66,7 @@
         Регулярность тренировок, силовые показатели и динамика упражнений на основе вашего журнала.
       </p>
     </div>
-    <a class="button button-secondary" href="{base}/body">Карта нагрузки</a>
+    <a class="button button-secondary" href="{base}/load">Нагрузка по блокам</a>
   </header>
 
   <section class="metric-grid">
