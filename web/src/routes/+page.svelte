@@ -38,6 +38,7 @@
   let slotPick = $state<WorkoutSlot | null>(null);
   let busyId = $state<string | null>(null);
   let bulkBusy = $state(false);
+  let pickerOpen = $state(false);
   let error = $state('');
   let weightAdjust = $state<Record<string, number>>({});
 
@@ -241,6 +242,7 @@
   function pickSession(slot: WorkoutSlot) {
     autoPicked = false;
     slotPick = slot;
+    pickerOpen = false;
     if (!microcycle) return;
     const planned = sessionDateForIndex(microcycle, slot === 'B' ? 1 : 0);
     datePick = planned ?? todayIso();
@@ -644,7 +646,7 @@
     </section>
   {:else}
     <section class="card training-card">
-      <div class="training-top">
+      <div class="training-top" class:collapsed={sessionReady && !pickerOpen}>
         <div>
           <div class="eyebrow">Контекст тренировки</div>
           <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
@@ -667,16 +669,27 @@
           {/if}
         </div>
         {#if sessionReady}
-          <div
-            class="session-ring"
-            class:skipped={sessionSkipped}
-            style={`--progress: ${sessionProgress * 3.6}deg`}
-          >
-            <span>{sessionSkipped ? 'skip' : `${sessionProgress}%`}</span>
+          <div class="training-top-aside">
+            <button
+              type="button"
+              class="button button-ghost picker-toggle"
+              aria-expanded={pickerOpen}
+              onclick={() => (pickerOpen = !pickerOpen)}
+            >
+              {pickerOpen ? 'Свернуть' : 'Сменить'}
+            </button>
+            <div
+              class="session-ring"
+              class:skipped={sessionSkipped}
+              style={`--progress: ${sessionProgress * 3.6}deg`}
+            >
+              <span>{sessionSkipped ? 'skip' : `${sessionProgress}%`}</span>
+            </div>
           </div>
         {/if}
       </div>
 
+      {#if !sessionReady || pickerOpen}
       <div class="context-picker">
         <div>
           <span class="control-label">Мезоцикл</span>
@@ -763,6 +776,7 @@
           </div>
         </div>
       </div>
+      {/if}
     </section>
 
     {#if !sessionReady}
@@ -1079,6 +1093,21 @@
     gap: 24px;
     padding-bottom: 22px;
     border-bottom: 1px solid var(--line);
+  }
+
+  .training-top.collapsed {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  .training-top-aside {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .picker-toggle {
+    white-space: nowrap;
   }
 
   .training-top h2 {
