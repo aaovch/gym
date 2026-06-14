@@ -47,15 +47,25 @@
 	function toggleBlock(id: MovementBlockId) {
 		selectedBlock = selectedBlock === id ? null : id;
 	}
+
+	function sessionWord(n: number): string {
+		const mod10 = n % 10;
+		const mod100 = n % 100;
+		if (mod10 === 1 && mod100 !== 11) return 'сессия';
+		if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'сессии';
+		return 'сессий';
+	}
 </script>
 
 <section class="card intro">
 	<div>
-		<h2>Карта блоков</h2>
+		<h2>Карта блоков движения</h2>
 		<p class="muted">
-			Кликни на зону тела или пункт легенды — увидишь упражнения блока и динамику 1ПМ.
+			Это карта паттернов движения (жимы, тяги, присед, таз и т.д.), а не анатомическая карта мышц.
+			Выбери зону или пункт легенды — увидишь упражнения блока и динамику 1ПМ.
 		</p>
 	</div>
+	<a class="button button-secondary" href="{base}/load">Нагрузка по блокам</a>
 </section>
 
 <section class="body-layout">
@@ -68,7 +78,9 @@
 	</div>
 
 	<div class="details-panel">
-		{#if selectedOverview}
+		{#if !workoutStore.bootstrapped}
+			<section class="card"><p class="muted">Загрузка журнала…</p></section>
+		{:else if selectedOverview}
 			<section class="card block-detail" style="--block-color: {selectedOverview.block.color}">
 				<div class="block-head">
 					<div>
@@ -86,7 +98,7 @@
 								<div>
 									<h4>{item.exercise}</h4>
 									<p class="muted meta">
-										{item.sessions} сессий
+										{item.sessions} {sessionWord(item.sessions)}
 										{#if item.summary?.best1rm.date}
 											· 1ПМ {fmtNum(item.summary.best1rm.value)} кг
 											({fmtSet(item.summary.best1rm.weight, item.summary.best1rm.reps)})
@@ -98,21 +110,33 @@
 								</a>
 							</div>
 
-							{#if item.summary && item.trend.length > 0}
+							{#if item.summary && item.trend.length >= 2}
 								<TrendChart
 									title="Динамика 1ПМ"
 									points={item.trend}
 									color={selectedOverview.block.color}
 									compact
 								/>
+							{:else if item.summary && item.trend.length === 1}
+								<p class="muted note">Одна тренировка — для динамики 1ПМ нужно минимум две.</p>
 							{:else if item.sessions > 0}
-								<p class="muted note">{item.sessions} сессий — график 1ПМ не применим.</p>
+								<p class="muted note">
+									{item.sessions} {sessionWord(item.sessions)} — график 1ПМ не применим.
+								</p>
 							{:else}
 								<p class="muted note">Нет записей.</p>
 							{/if}
 						</article>
 					{/each}
 				</div>
+			</section>
+		{:else if overview.length === 0}
+			<section class="card overview">
+				<h3>Пока нет данных</h3>
+				<p class="muted">
+					Запишите силовые тренировки — здесь появятся блоки движения и динамика 1ПМ.
+				</p>
+				<a class="button button-primary intro-cta" href="{base}/add">Записать тренировку</a>
 			</section>
 		{:else}
 			<section class="card overview">
@@ -156,8 +180,20 @@
 </section>
 
 <style>
+	.intro {
+		display: flex;
+		justify-content: space-between;
+		align-items: start;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
 	.intro h2 {
 		margin: 0 0 0.25rem;
+	}
+
+	.intro-cta {
+		margin-top: 0.85rem;
 	}
 
 	.body-layout {

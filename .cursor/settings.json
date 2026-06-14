@@ -1,0 +1,10 @@
+{
+  "plugins": {
+    "claude-plugins-official/frontend-design": {
+      "enabled": true
+    },
+    "browse": {
+      "enabled": true
+    }
+  }
+}

@@ -37,6 +37,7 @@
   let microPick = $state<string | null>(null);
   let slotPick = $state<WorkoutSlot | null>(null);
   let busyId = $state<string | null>(null);
+  let bulkBusy = $state(false);
   let error = $state('');
   let weightAdjust = $state<Record<string, number>>({});
 
@@ -157,6 +158,11 @@
   const loggedPlanned = $derived(
     requiredSlotExercises.filter((exercise) => entryByExercise.has(exercise)).length
   );
+  const pendingPlanned = $derived(
+    requiredSlotExercises.filter(
+      (exercise) => !entryByExercise.has(exercise) && Boolean(adjustedPreviewSets(exercise))
+    )
+  );
   const sessionProgress = $derived(
     requiredSlotExercises.length
       ? Math.round((loggedPlanned / requiredSlotExercises.length) * 100)
@@ -165,8 +171,6 @@
         : 0
   );
   const availableDates = $derived([...new Set(view.entries.map((entry) => entry.date))].sort().reverse());
-  const lastTrainingDate = $derived(availableDates.find((date) => date < workoutDate) ?? null);
-  const totalTrainingDays = $derived(new Set(view.entries.map((entry) => entry.date)).size);
 
   const protocolHints = $derived.by(() => {
     if (!mesocycle || !microcycle) {
@@ -322,7 +326,8 @@
     exerciseName: string,
     kind: ExerciseKind,
     sets: ExerciseSet[],
-    successMessage: string
+    successMessage: string,
+    silent = false
   ) {
     if (!mesocycle || !microcycle || activeIndex == null) return;
     busyId = exerciseName;
@@ -342,7 +347,7 @@
         indexInMicro: activeIndex
       });
       weightAdjust = { ...weightAdjust, [exerciseName]: 0 };
-      toasts.success(successMessage);
+      if (!silent) toasts.success(successMessage);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось сохранить';
       error = message;
@@ -362,6 +367,35 @@
       weightAdjust[exerciseName] ?? 0
     );
     await saveSetsFor(exerciseName, input.kind, sets, `Записано: ${exerciseName}`);
+  }
+
+  async function confirmAllPlanned() {
+    if (bulkBusy) return;
+    const targets = pendingPlanned.slice();
+    if (!targets.length) return;
+    bulkBusy = true;
+    error = '';
+    let saved = 0;
+    try {
+      for (const exerciseName of targets) {
+        const input = plannedInput(exerciseName);
+        if (!input) continue;
+        const sets = applyWeightDelta(
+          suggestPlannedSets(input),
+          input.kind,
+          weightAdjust[exerciseName] ?? 0
+        );
+        if (!sets.length) continue;
+        await saveSetsFor(exerciseName, input.kind, sets, '', true);
+        if (!error) saved += 1;
+        if (error) break;
+      }
+      if (saved > 0 && !error) {
+        toasts.success(saved === 1 ? 'Записано 1 упражнение' : `Записано упражнений: ${saved}`);
+      }
+    } finally {
+      bulkBusy = false;
+    }
   }
 
   function sessionProgressOf(meso: (typeof mesocycles)[number], micro: EnrichedMicrocycle, index: 0 | 1) {
@@ -566,31 +600,6 @@
     {/if}
   </header>
 
-  {#if sessionReady}
-    <section class="metric-grid overview-metrics">
-      <article class="metric-card">
-        <span>План на тренировку</span>
-        <strong>{slotExercises.length}</strong>
-        <small>упражнений в сессии {activeSlot}</small>
-      </article>
-      <article class="metric-card">
-        <span>Готовность сессии</span>
-        <strong>{sessionProgress}%</strong>
-        <small>{loggedPlanned} из {requiredSlotExercises.length} записано</small>
-      </article>
-      <article class="metric-card">
-        <span>Всего тренировок</span>
-        <strong>{totalTrainingDays}</strong>
-        <small>дней в журнале</small>
-      </article>
-      <article class="metric-card">
-        <span>Предыдущая тренировка</span>
-        <strong class="date-value">{lastTrainingDate ? formatDateRu(lastTrainingDate) : '—'}</strong>
-        <small>{lastTrainingDate ? 'последняя запись до этой даты' : 'история пока пуста'}</small>
-      </article>
-    </section>
-  {/if}
-
   {#if mesocycles.length === 0}
     <section class="card empty-state onboarding">
       <div class="eyebrow">Первый шаг</div>
@@ -749,6 +758,17 @@
           </p>
         </div>
         <div class="heading-actions">
+          {#if !sessionSkipped && pendingPlanned.length > 0}
+            <button
+              type="button"
+              class="button button-primary"
+              disabled={bulkBusy || busyId !== null}
+              title="Записать все плановые упражнения по целевым весам"
+              onclick={confirmAllPlanned}
+            >
+              {bulkBusy ? 'Записываем…' : `Записать всё (${pendingPlanned.length})`}
+            </button>
+          {/if}
           {#if !sessionSkipped && requiredSlotExercises.length > 0 && loggedPlanned === 0}
             <button
               type="button"
@@ -768,6 +788,20 @@
           </a>
         </div>
       </div>
+
+      {#if !sessionSkipped && sessionProgress === 100 && requiredSlotExercises.length > 0}
+        <section class="card session-done">
+          <div class="session-done-main">
+            <div class="eyebrow">Готово</div>
+            <h2>Сессия {activeSlot} записана</h2>
+            <p>Все запланированные упражнения внесены в журнал. Отдельные подходы можно поправить ниже.</p>
+          </div>
+          <div class="session-done-actions">
+            <a class="button button-secondary" href="{base}/history">Открыть журнал</a>
+            <a class="button button-secondary" href="{base}/stats">Аналитика</a>
+          </div>
+        </section>
+      {/if}
 
       {#if sessionSkipped}
         <section class="card empty-state skipped-state">
@@ -869,7 +903,12 @@
                           −
                         </button>
                         <span class:dim={!(weightAdjust[exercise] ?? 0)}>
-                          {(weightAdjust[exercise] ?? 0) > 0 ? '+' : ''}{fmtNum(weightAdjust[exercise] ?? 0)}
+                          {#if (weightAdjust[exercise] ?? 0) === 0}
+                            ±0
+                          {:else}
+                            {(weightAdjust[exercise] ?? 0) > 0 ? '+' : '−'}{fmtNum(Math.abs(weightAdjust[exercise] ?? 0))}
+                          {/if}
+                          <small>кг</small>
                         </span>
                         <button
                           type="button"
@@ -977,15 +1016,6 @@
     text-transform: uppercase;
   }
 
-  .overview-metrics {
-    margin-bottom: 16px;
-  }
-
-  .date-value {
-    font-size: 17px;
-    line-height: 1.15;
-  }
-
   .onboarding,
   .picker-empty {
     margin-top: 16px;
@@ -1062,6 +1092,33 @@
 
   .skipped-state {
     border-left: 3px solid var(--hazard, #f5a524);
+  }
+
+  .session-done {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    border-left: 3px solid var(--accent);
+  }
+
+  .session-done-main h2 {
+    margin: 4px 0 4px;
+    font-size: 20px;
+  }
+
+  .session-done-main p {
+    margin: 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+
+  .session-done-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .context-picker {
@@ -1413,7 +1470,7 @@
   }
 
   .weight-stepper span {
-    min-width: 44px;
+    min-width: 56px;
     padding: 0 4px;
     border-inline: 1px solid var(--line);
     color: var(--accent);
@@ -1421,6 +1478,13 @@
     font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 700;
+  }
+
+  .weight-stepper span small {
+    margin-left: 3px;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 600;
   }
 
   .weight-stepper span.dim {
