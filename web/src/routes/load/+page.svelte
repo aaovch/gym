@@ -6,6 +6,7 @@
 		blockExerciseNames,
 		buildBlockSummaries,
 		buildBlockWeeklyLoad,
+		buildLoadInsights,
 		filterWeeksFrom,
 		formatMetric,
 		metricDefinition,
@@ -42,6 +43,7 @@
 		selectedBlock ? (summaries.find((item) => item.block.id === selectedBlock) ?? null) : null
 	);
 	const unmapped = $derived(unmappedStrengthExercises(view.entries));
+	const insights = $derived(buildLoadInsights(summaries, metric));
 	const selectedExercises = $derived(
 		selectedBlock ? blockExerciseNames(view.entries, selectedBlock) : []
 	);
@@ -202,6 +204,28 @@
 			<a class="button button-primary" href="{base}/add">Записать тренировку</a>
 		</section>
 	{:else}
+		{#if insights.length > 0}
+			<section class="card insights">
+				<div class="panel-head">
+					<div>
+						<h2>Выводы</h2>
+						<p>Автоматическая интерпретация по {metricLabelGenitive(metric)} {periodLabel}</p>
+					</div>
+				</div>
+				<ul class="insight-list">
+					{#each insights as item (item.id)}
+						<li class="insight insight-{item.tone}">
+							<span class="insight-dot"></span>
+							<div>
+								<strong>{item.title}</strong>
+								<p>{item.detail}</p>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
 		<section class="card parallel-panel">
 			<div class="panel-head">
 				<div>
@@ -726,6 +750,74 @@
 		padding-left: 18px;
 		color: var(--muted-strong);
 		font-size: 12px;
+	}
+
+	.insights {
+		padding: 20px;
+		margin-bottom: 14px;
+	}
+
+	.insight-list {
+		display: grid;
+		gap: 10px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.insight {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 10px;
+		align-items: start;
+		padding: 10px 12px;
+		background: #0a0c10;
+		border: 1px solid var(--line);
+		border-left: 3px solid var(--muted);
+	}
+
+	.insight-warn {
+		border-left-color: var(--danger);
+	}
+
+	.insight-ok {
+		border-left-color: var(--accent);
+	}
+
+	.insight-info {
+		border-left-color: var(--muted-strong);
+	}
+
+	.insight-dot {
+		width: 8px;
+		height: 8px;
+		margin-top: 6px;
+		border-radius: 50%;
+		background: var(--muted);
+	}
+
+	.insight-warn .insight-dot {
+		background: var(--danger);
+	}
+
+	.insight-ok .insight-dot {
+		background: var(--accent);
+	}
+
+	.insight-info .insight-dot {
+		background: var(--muted-strong);
+	}
+
+	.insight strong {
+		display: block;
+		font-size: 13px;
+	}
+
+	.insight p {
+		margin: 2px 0 0;
+		color: var(--muted);
+		font-size: 12px;
+		line-height: 1.4;
 	}
 
 	.detail-section-label {

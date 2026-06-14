@@ -1,3 +1,4 @@
+import { fmtNum } from './format';
 import {
 	getMovementBlock,
 	MOVEMENT_BLOCKS,
@@ -263,4 +264,131 @@ export function unmappedStrengthExercises(entries: WorkoutEntry[]): string[] {
 		if (!getMovementBlock(entry.exercise)) names.add(entry.exercise);
 	}
 	return [...names].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+export type LoadInsightTone = 'warn' | 'ok' | 'info';
+
+export type LoadInsight = {
+	id: string;
+	tone: LoadInsightTone;
+	title: string;
+	detail: string;
+};
+
+const PUSH_BLOCKS: MovementBlockId[] = ['horizontal_push', 'vertical_push'];
+const PULL_BLOCKS: MovementBlockId[] = ['horizontal_pull', 'vertical_pull'];
+
+function summaryShare(summary: BlockLoadSummary, metric: LoadMetric): number {
+	if (metric === 'tonnage') return summary.shareTonnage;
+	if (metric === 'reps') return summary.shareReps;
+	return summary.shareSets;
+}
+
+function summaryTrend(summary: BlockLoadSummary, metric: LoadMetric): number | null {
+	if (metric === 'tonnage') return summary.trendTonnage;
+	if (metric === 'reps') return summary.trendReps;
+	return summary.trendSets;
+}
+
+function round1(value: number): number {
+	return Math.round(value * 10) / 10;
+}
+
+/**
+ * Простая интерпретация нагрузки по правилам: баланс жимов/тяг, выпавшие
+ * паттерны, разброс долей и заметные спады. Без выдуманных метрик.
+ */
+export function buildLoadInsights(summaries: BlockLoadSummary[], metric: LoadMetric): LoadInsight[] {
+	const insights: LoadInsight[] = [];
+	const active = summaries.filter((item) => metricValue(item.totals, metric) > 0);
+	if (active.length === 0) return insights;
+
+	const unit = metricLabelGenitive(metric);
+
+	const push = summaries
+		.filter((item) => PUSH_BLOCKS.includes(item.block.id))
+		.reduce((sum, item) => sum + metricValue(item.totals, metric), 0);
+	const pull = summaries
+		.filter((item) => PULL_BLOCKS.includes(item.block.id))
+		.reduce((sum, item) => sum + metricValue(item.totals, metric), 0);
+
+	if (push > 0 && pull === 0) {
+		insights.push({
+			id: 'push-pull',
+			tone: 'warn',
+			title: 'Есть жимы, но нет тяг',
+			detail: 'Жимы без тяг перекашивают плечевой пояс. Добавьте тяговые движения.'
+		});
+	} else if (pull > 0 && push === 0) {
+		insights.push({
+			id: 'push-pull',
+			tone: 'warn',
+			title: 'Есть тяги, но нет жимов',
+			detail: 'Добавьте жимовые движения, чтобы выровнять баланс плечевого пояса.'
+		});
+	} else if (push > 0 && pull > 0) {
+		const ratio = push / pull;
+		if (ratio >= 1.5) {
+			insights.push({
+				id: 'push-pull',
+				tone: 'warn',
+				title: `Жимов больше тяг в ${fmtNum(round1(ratio))}×`,
+				detail: 'Для баланса плечевого пояса добавьте тяги — горизонтальные и вертикальные.'
+			});
+		} else if (ratio <= 1 / 1.5) {
+			insights.push({
+				id: 'push-pull',
+				tone: 'warn',
+				title: `Тяг больше жимов в ${fmtNum(round1(1 / ratio))}×`,
+				detail: 'Добавьте жимы, чтобы выровнять баланс плечевого пояса.'
+			});
+		} else {
+			insights.push({
+				id: 'push-pull',
+				tone: 'ok',
+				title: 'Баланс жимов и тяг в норме',
+				detail: `Соотношение близко к 1:1 по ${unit}.`
+			});
+		}
+	}
+
+	const missing = summaries.filter((item) => metricValue(item.totals, metric) === 0);
+	if (missing.length > 0) {
+		insights.push({
+			id: 'missing',
+			tone: 'warn',
+			title: `В этом периоде нет нагрузки: ${missing.map((item) => item.block.label).join(', ')}`,
+			detail:
+				'Раньше эти паттерны встречались, но в выбранном окне их нет — возможно, выпали из плана.'
+		});
+	}
+
+	const ranked = [...active].sort(
+		(a, b) => metricValue(b.totals, metric) - metricValue(a.totals, metric)
+	);
+	if (ranked.length >= 2) {
+		const top = ranked[0];
+		const bottom = ranked[ranked.length - 1];
+		insights.push({
+			id: 'spread',
+			tone: 'info',
+			title: `Больше всего — ${top.block.label} (${fmtNum(summaryShare(top, metric))}%), меньше — ${bottom.block.label} (${fmtNum(summaryShare(bottom, metric))}%)`,
+			detail: `Доли по ${unit} за выбранный период.`
+		});
+	}
+
+	const biggestDrop = ranked
+		.filter((item) => (summaryTrend(item, metric) ?? 0) <= -40)
+		.sort((a, b) => (summaryTrend(a, metric) ?? 0) - (summaryTrend(b, metric) ?? 0))[0];
+	if (biggestDrop) {
+		insights.push({
+			id: 'drop',
+			tone: 'warn',
+			title: `${biggestDrop.block.label}: спад ${fmtNum(summaryTrend(biggestDrop, metric) ?? 0)}%`,
+			detail: 'Нагрузка на блок заметно снизилась за последние 4 недели — проверьте, так ли задумано.'
+		});
+	}
+
+	const order: Record<LoadInsightTone, number> = { warn: 0, ok: 1, info: 2 };
+	return insights.sort((a, b) => order[a.tone] - order[b.tone]);
 }
