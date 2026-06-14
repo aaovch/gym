@@ -652,7 +652,7 @@
           <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
           {#if sessionReady && mesocycle && microcycle && activeSlot}
             <p>
-              Микроцикл {microcycle.plan.indexInMeso} · сессия {activeSlot}
+              Микроцикл {microcycle.plan.indexInMeso}
               {#if plannedSessionDate}
                 · {formatDateRu(plannedSessionDate)}
               {:else}
@@ -662,6 +662,26 @@
                 · <span class="skip-flag">пропущена</span>
               {/if}
             </p>
+            {#if !pickerOpen}
+              <div class="session-tabs">
+                {#each ['A', 'B'] as slot (slot)}
+                  {@const slotKey = slot as WorkoutSlot}
+                  {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
+                  {@const tabProgress = sessionProgressFor(microcycle, slotIndex)}
+                  {@const tabSkipped = sessionSkippedFor(microcycle, slotIndex)}
+                  <button
+                    type="button"
+                    class="session-tab"
+                    class:active={activeSlot === slotKey}
+                    style={`--slot-color: ${slotColor(slotKey)}`}
+                    onclick={() => pickSession(slotKey)}
+                  >
+                    <b>{slot}</b>
+                    <span>{tabSkipped ? 'пропущена' : `${tabProgress}%`}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
           {:else if mesocycle && microcycle}
             <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
           {:else if mesocycle}
@@ -1111,6 +1131,42 @@
 
   .picker-toggle {
     white-space: nowrap;
+  }
+
+  .session-tabs {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .session-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 10px;
+    color: var(--muted-strong);
+    background: #0e1014;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .session-tab:hover {
+    border-color: var(--line-strong);
+  }
+
+  .session-tab b {
+    color: var(--slot-color);
+    font-size: 11px;
+  }
+
+  .session-tab.active {
+    color: var(--text);
+    background: color-mix(in srgb, var(--slot-color) 12%, #111722);
+    border-color: color-mix(in srgb, var(--slot-color) 45%, var(--line));
   }
 
   .ring-wrap {
