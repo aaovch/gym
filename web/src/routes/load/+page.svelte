@@ -4,6 +4,7 @@
 	import BlockLoadChart from '$lib/components/BlockLoadChart.svelte';
 	import {
 		blockExerciseNames,
+		buildBalancePairs,
 		buildBlockSummaries,
 		buildBlockWeeklyLoad,
 		buildLoadInsights,
@@ -37,13 +38,14 @@
 	const allWeeks = $derived(buildBlockWeeklyLoad(view.entries));
 	const fromDate = $derived(windowWeeks > 0 ? weeksAgoIso(windowWeeks) : null);
 	const visibleWeeks = $derived(filterWeeksFrom(allWeeks, fromDate));
-	const summaries = $derived(buildBlockSummaries(allWeeks, windowWeeks || allWeeks.length, 4));
+	const summaries = $derived(buildBlockSummaries(allWeeks, windowWeeks || allWeeks.length));
 	const blockIds = $derived(summaries.map((item) => item.block.id));
 	const selectedSummary = $derived(
 		selectedBlock ? (summaries.find((item) => item.block.id === selectedBlock) ?? null) : null
 	);
 	const unmapped = $derived(unmappedStrengthExercises(view.entries));
 	const insights = $derived(buildLoadInsights(summaries, metric));
+	const balancePairs = $derived(buildBalancePairs(summaries, metric));
 	const selectedExercises = $derived(
 		selectedBlock ? blockExerciseNames(view.entries, selectedBlock) : []
 	);
@@ -80,6 +82,12 @@
 	});
 
 	const periodLabel = $derived(windowWeeks > 0 ? `за ${windowWeeks} нед.` : 'за всё время');
+	const trendCaption = $derived(windowWeeks > 0 ? `к пред. ${windowWeeks} нед.` : 'к пред. периоду');
+	const trendTooltip = $derived(
+		windowWeeks > 0
+			? `Выбранные ${windowWeeks} нед. против предыдущих ${windowWeeks} нед.`
+			: 'Для «Всё время» предыдущего периода для сравнения нет'
+	);
 
 	function shortDate(iso: string): string {
 		const [, m, d] = iso.split('-');
@@ -226,6 +234,44 @@
 			</section>
 		{/if}
 
+		{#if balancePairs.length > 0}
+			<section class="card balance">
+				<div class="panel-head">
+					<div>
+						<h2>Баланс</h2>
+						<p>Сопоставление групп по {metricLabelGenitive(metric)} {periodLabel}</p>
+					</div>
+				</div>
+				<div class="balance-list">
+					{#each balancePairs as pair (pair.id)}
+						<div class="balance-pair">
+							<div class="balance-row">
+								<span class="balance-side">
+									<span class="balance-swatch" style:background={pair.leftColor}></span>
+									{pair.leftLabel} · {formatMetric(pair.left, metric)} · {fmtNum(pair.leftShare)}%
+								</span>
+								<span class="balance-side balance-side-right">
+									{pair.rightLabel} · {formatMetric(pair.right, metric)} · {fmtNum(pair.rightShare)}%
+									<span class="balance-swatch" style:background={pair.rightColor}></span>
+								</span>
+							</div>
+							<div
+								class="balance-bar"
+								role="img"
+								aria-label="{pair.leftLabel} {fmtNum(pair.leftShare)}% против {pair.rightLabel} {fmtNum(
+									pair.rightShare
+								)}%"
+							>
+								<span style:width="{pair.leftShare}%" style:background={pair.leftColor}></span>
+								<span style:width="{pair.rightShare}%" style:background={pair.rightColor}></span>
+							</div>
+							<p class="balance-note balance-note-{pair.tone}">{pair.note}</p>
+						</div>
+					{/each}
+				</div>
+			</section>
+		{/if}
+
 		<section class="card parallel-panel">
 			<div class="panel-head">
 				<div>
@@ -307,11 +353,11 @@
 										: item.shareSets}%
 							</span>
 						</div>
-						<div class="legend-trend" title="Последние 4 недели против предыдущих 4 недель">
+						<div class="legend-trend" title={trendTooltip}>
 							<span class:up={(trend ?? 0) > 0} class:down={(trend ?? 0) < 0}>
 								{trendLabel(trend)}
 							</span>
-							<small>посл. 4 нед. к пред. 4</small>
+							<small>{trendCaption}</small>
 						</div>
 					</button>
 				{/each}
@@ -818,6 +864,69 @@
 		color: var(--muted);
 		font-size: 12px;
 		line-height: 1.4;
+	}
+
+	.balance {
+		padding: 20px;
+		margin-bottom: 14px;
+	}
+
+	.balance-list {
+		display: grid;
+		gap: 18px;
+	}
+
+	.balance-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 6px;
+		font-size: 12px;
+		color: var(--text);
+	}
+
+	.balance-side {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.balance-side-right {
+		text-align: right;
+	}
+
+	.balance-swatch {
+		width: 10px;
+		height: 10px;
+		border-radius: 2px;
+		flex-shrink: 0;
+	}
+
+	.balance-bar {
+		display: flex;
+		height: 14px;
+		overflow: hidden;
+		border: 1px solid var(--line-strong);
+		background: #0a0c10;
+	}
+
+	.balance-bar span {
+		display: block;
+		height: 100%;
+	}
+
+	.balance-note {
+		margin: 6px 0 0;
+		font-size: 11px;
+		color: var(--muted);
+	}
+
+	.balance-note-warn {
+		color: var(--danger);
+	}
+
+	.balance-note-ok {
+		color: var(--accent);
 	}
 
 	.detail-section-label {

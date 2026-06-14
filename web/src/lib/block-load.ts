@@ -168,9 +168,9 @@ export function pctChange(current: number, previous: number): number | null {
 
 export function buildBlockSummaries(
 	allWeeks: BlockLoadWeek[],
-	windowWeeks: number,
-	trendWeeks: number
+	windowWeeks: number
 ): BlockLoadSummary[] {
+	// Тренд: выбранное окно против равного по длине предыдущего окна.
 	const activeWeeks = windowWeeks > 0 ? allWeeks.slice(-windowWeeks) : allWeeks;
 	const priorWeeks =
 		windowWeeks > 0 && allWeeks.length > windowWeeks
@@ -185,8 +185,7 @@ export function buildBlockSummaries(
 	return blocksWithLoad(allWeeks).map((blockId) => {
 		const block = MOVEMENT_BLOCKS.find((item) => item.id === blockId)!;
 		const totals = parallel[blockId] ?? EMPTY_TOTALS();
-		const currentTrend = aggregateBlockTotals(activeWeeks.slice(-trendWeeks), blockId);
-		const priorTrend = aggregateBlockTotals(priorWeeks.slice(-trendWeeks), blockId);
+		const priorTotals = aggregateBlockTotals(priorWeeks, blockId);
 
 		const weekly = activeWeeks.map((week) => ({
 			weekStart: week.weekStart,
@@ -201,9 +200,9 @@ export function buildBlockSummaries(
 			shareTonnage: totalTonnage ? Math.round((totals.tonnage / totalTonnage) * 1000) / 10 : 0,
 			shareReps: totalReps ? Math.round((totals.reps / totalReps) * 1000) / 10 : 0,
 			shareSets: totalSets ? Math.round((totals.sets / totalSets) * 1000) / 10 : 0,
-			trendTonnage: pctChange(currentTrend.tonnage, priorTrend.tonnage),
-			trendReps: pctChange(currentTrend.reps, priorTrend.reps),
-			trendSets: pctChange(currentTrend.sets, priorTrend.sets),
+			trendTonnage: pctChange(totals.tonnage, priorTotals.tonnage),
+			trendReps: pctChange(totals.reps, priorTotals.reps),
+			trendSets: pctChange(totals.sets, priorTotals.sets),
 			weekly
 		};
 	});
@@ -385,10 +384,125 @@ export function buildLoadInsights(summaries: BlockLoadSummary[], metric: LoadMet
 			id: 'drop',
 			tone: 'warn',
 			title: `${biggestDrop.block.label}: спад ${fmtNum(summaryTrend(biggestDrop, metric) ?? 0)}%`,
-			detail: 'Нагрузка на блок заметно снизилась за последние 4 недели — проверьте, так ли задумано.'
+			detail: 'Нагрузка на блок заметно снизилась относительно предыдущего периода — проверьте, так ли задумано.'
 		});
 	}
 
 	const order: Record<LoadInsightTone, number> = { warn: 0, ok: 1, info: 2 };
 	return insights.sort((a, b) => order[a.tone] - order[b.tone]);
+}
+
+export type BalancePair = {
+	id: string;
+	label: string;
+	leftLabel: string;
+	rightLabel: string;
+	left: number;
+	right: number;
+	leftShare: number;
+	rightShare: number;
+	leftColor: string;
+	rightColor: string;
+	tone: LoadInsightTone;
+	note: string;
+};
+
+type BalanceDef = {
+	id: string;
+	label: string;
+	leftLabel: string;
+	rightLabel: string;
+	leftIds: MovementBlockId[];
+	rightIds: MovementBlockId[];
+	leftColor: string;
+	rightColor: string;
+	judge: boolean;
+};
+
+const BALANCE_DEFS: BalanceDef[] = [
+	{
+		id: 'push-pull',
+		label: 'Жимы и тяги',
+		leftLabel: 'Жимы',
+		rightLabel: 'Тяги',
+		leftIds: ['horizontal_push', 'vertical_push'],
+		rightIds: ['horizontal_pull', 'vertical_pull'],
+		leftColor: '#5b9dff',
+		rightColor: '#f472b6',
+		judge: true
+	},
+	{
+		id: 'lower-upper',
+		label: 'Ноги и верх тела',
+		leftLabel: 'Ноги',
+		rightLabel: 'Верх',
+		leftIds: ['knee_dominant', 'hip_dominant'],
+		rightIds: ['horizontal_push', 'vertical_push', 'horizontal_pull', 'vertical_pull', 'arms'],
+		leftColor: '#6ee7a8',
+		rightColor: '#a78bfa',
+		judge: false
+	}
+];
+
+export function buildBalancePairs(summaries: BlockLoadSummary[], metric: LoadMetric): BalancePair[] {
+	const byId = new Map(summaries.map((item) => [item.block.id, item]));
+	const sumIds = (ids: MovementBlockId[]) =>
+		ids.reduce((sum, id) => {
+			const item = byId.get(id);
+			return sum + (item ? metricValue(item.totals, metric) : 0);
+		}, 0);
+
+	const pairs: BalancePair[] = [];
+
+	for (const def of BALANCE_DEFS) {
+		const left = sumIds(def.leftIds);
+		const right = sumIds(def.rightIds);
+		const total = left + right;
+		if (total <= 0) continue;
+
+		const leftShare = Math.round((left / total) * 1000) / 10;
+		const rightShare = Math.round((right / total) * 1000) / 10;
+
+		let tone: LoadInsightTone = 'info';
+		let note = 'Соотношение зависит от целей и фазы — здесь просто факт.';
+
+		if (def.judge) {
+			if (right === 0) {
+				tone = 'warn';
+				note = `Нет нагрузки на «${def.rightLabel.toLowerCase()}» — добавьте эти движения.`;
+			} else if (left === 0) {
+				tone = 'warn';
+				note = `Нет нагрузки на «${def.leftLabel.toLowerCase()}» — добавьте эти движения.`;
+			} else {
+				const ratio = left / right;
+				if (ratio >= 1.5) {
+					tone = 'warn';
+					note = `${def.leftLabel} больше ${def.rightLabel.toLowerCase()} в ${fmtNum(round1(ratio))}× — добавьте «${def.rightLabel.toLowerCase()}».`;
+				} else if (ratio <= 1 / 1.5) {
+					tone = 'warn';
+					note = `${def.rightLabel} больше ${def.leftLabel.toLowerCase()} в ${fmtNum(round1(1 / ratio))}× — добавьте «${def.leftLabel.toLowerCase()}».`;
+				} else {
+					tone = 'ok';
+					note = 'Баланс близок к 1:1.';
+				}
+			}
+		}
+
+		pairs.push({
+			id: def.id,
+			label: def.label,
+			leftLabel: def.leftLabel,
+			rightLabel: def.rightLabel,
+			left,
+			right,
+			leftShare,
+			rightShare,
+			leftColor: def.leftColor,
+			rightColor: def.rightColor,
+			tone,
+			note
+		});
+	}
+
+	return pairs;
 }
