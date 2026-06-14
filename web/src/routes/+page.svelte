@@ -678,12 +678,15 @@
             >
               {pickerOpen ? 'Свернуть' : 'Сменить'}
             </button>
-            <div
-              class="session-ring"
-              class:skipped={sessionSkipped}
-              style={`--progress: ${sessionProgress * 3.6}deg`}
-            >
-              <span>{sessionSkipped ? 'skip' : `${sessionProgress}%`}</span>
+            <div class="ring-wrap">
+              <div
+                class="session-ring"
+                class:skipped={sessionSkipped}
+                style={`--progress: ${sessionProgress * 3.6}deg`}
+              >
+                <span>{sessionSkipped ? 'skip' : `${sessionProgress}%`}</span>
+              </div>
+              <span class="ring-cap">готовность {activeSlot}</span>
             </div>
           </div>
         {/if}
@@ -1107,6 +1110,23 @@
   }
 
   .picker-toggle {
+    white-space: nowrap;
+  }
+
+  .ring-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .ring-cap {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
     white-space: nowrap;
   }
 
