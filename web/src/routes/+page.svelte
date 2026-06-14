@@ -302,11 +302,17 @@
     const totalReps = sets.reduce((sum, [, reps]) => sum + reps, 0);
     const tonnage = sets.reduce((sum, [weight, reps]) => sum + weight * reps, 0);
     const repsList = sets.map(([, reps]) => reps);
+    const weightList = sets.map(([weight]) => weight);
     const uniformReps = repsList.length > 0 && repsList.every((reps) => reps === repsList[0]);
+    const uniformWeight = weightList.length > 0 && weightList.every((w) => w === weightList[0]);
     return {
       count,
       totalReps,
       tonnage,
+      maxWeight: weightList.length ? Math.max(...weightList) : 0,
+      uniform: count > 0 && uniformReps && uniformWeight,
+      weight: weightList[0] ?? 0,
+      reps: repsList[0] ?? 0,
       repScheme: uniformReps ? String(repsList[0]) : null
     };
   }
@@ -571,35 +577,15 @@
   }
 </script>
 
-{#snippet specStrip(kind: ExerciseKind, sets: ExerciseSet[], anchor1rm: number | null, targetPct: number | null)}
+{#snippet specSub(kind: ExerciseKind, sets: ExerciseSet[], anchor1rm: number | null, pct: number | null, pctLabel: string)}
   {#if kind === 'strength' && sets.length}
     {@const st = planStats(sets)}
-    <dl class="plan-spec">
-      <div>
-        <dt>Подходы</dt>
-        <dd>{st.count}{#if st.repScheme}<span class="spec-x">×</span>{st.repScheme}{/if}</dd>
-      </div>
-      <div>
-        <dt>Повторы</dt>
-        <dd>{st.totalReps}</dd>
-      </div>
-      {#if anchor1rm}
-        <div>
-          <dt>1ПМ</dt>
-          <dd>{fmtNum(anchor1rm)}<small>кг</small></dd>
-        </div>
-      {/if}
-      {#if targetPct}
-        <div>
-          <dt>% от 1ПМ</dt>
-          <dd>{targetPct}<small>%</small></dd>
-        </div>
-      {/if}
-      <div>
-        <dt>Объём</dt>
-        <dd>{fmtNum(st.tonnage)}<small>кг</small></dd>
-      </div>
-    </dl>
+    <p class="rx-sub">
+      {#if anchor1rm}<span>1ПМ {fmtNum(anchor1rm)} кг</span>{/if}
+      {#if pct}<span>{pct}% {pctLabel}</span>{/if}
+      <span>Σ {st.totalReps} повт</span>
+      <span>объём {fmtNum(st.tonnage)} кг</span>
+    </p>
   {/if}
 {/snippet}
 
@@ -892,7 +878,7 @@
                           </span>
                         {/each}
                       </div>
-                      {@render specStrip(entry.kind, entry.sets, hint?.anchor1rm ?? null, hint?.maxPct ?? null)}
+                      {@render specSub(entry.kind, entry.sets, hint?.anchor1rm ?? null, hint?.maxPct ?? null, 'макс')}
                     </div>
                   {:else if protocolSkip}
                     <div class="plan-meta protocol-skip">
@@ -900,26 +886,39 @@
                       <span class="protocol-skip-note">По протоколу без силовой нагрузки</span>
                     </div>
                   {:else if hint || previewSets}
+                    {@const ps = previewSets ? planStats(previewSets.sets) : null}
                     <div class="plan-meta">
-                      {#if hint}
-                        <div class="plan-target">
-                          <span class="target-weight">
-                            {fmtNum(hint.targetWeight)}<small>кг</small>
-                          </span>
-                          <span class="target-pct">
-                            {hint.targetPct}%<small>1ПМ</small>
-                          </span>
+                      {#if previewSets && previewSets.kind === 'strength' && ps?.uniform}
+                        <div class="rx">
+                          <span class="rx-weight">{fmtNum(ps.weight)}<small>кг</small></span>
+                          <span class="rx-scheme">{ps.count} × {ps.reps}</span>
+                          {#if hint}
+                            <span class="target-pct">{hint.targetPct}%<small>1ПМ</small></span>
+                          {/if}
                         </div>
+                      {:else}
+                        {#if hint}
+                          <div class="plan-target">
+                            <span class="target-weight">
+                              {fmtNum(hint.targetWeight)}<small>кг</small>
+                            </span>
+                            <span class="target-pct">
+                              {hint.targetPct}%<small>1ПМ</small>
+                            </span>
+                          </div>
+                        {/if}
+                        {#if previewSets}
+                          <div class="plan-sets">
+                            {#each previewSets.sets as set, setIndex}
+                              <span class="set-chip">
+                                <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
+                              </span>
+                            {/each}
+                          </div>
+                        {/if}
                       {/if}
                       {#if previewSets}
-                        <div class="plan-sets">
-                          {#each previewSets.sets as set, setIndex}
-                            <span class="set-chip">
-                              <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
-                            </span>
-                          {/each}
-                        </div>
-                        {@render specStrip(previewSets.kind, previewSets.sets, hint?.anchor1rm ?? null, null)}
+                        {@render specSub(previewSets.kind, previewSets.sets, hint?.anchor1rm ?? null, null, '')}
                       {/if}
                     </div>
                   {/if}
@@ -1443,51 +1442,60 @@
     border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
   }
 
-  .plan-spec {
+  .rx {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px 26px;
-    margin: 2px 0 0;
-    padding-top: 10px;
-    border-top: 1px solid var(--line);
+    align-items: baseline;
+    gap: 10px 12px;
   }
 
-  .plan-spec div {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .plan-spec dt {
-    margin: 0;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-  }
-
-  .plan-spec dd {
-    margin: 0;
+  .rx-weight {
     color: var(--text);
     font-family: var(--font-mono);
-    font-size: 15px;
+    font-size: 24px;
     font-weight: 700;
     line-height: 1;
   }
 
-  .plan-spec dd small {
-    margin-left: 2px;
+  .rx-weight small {
+    margin-left: 3px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 500;
   }
 
-  .plan-spec .spec-x {
-    margin: 0 2px;
+  .rx-scheme {
+    align-self: center;
+    padding: 4px 10px;
+    color: var(--text);
+    background: #0a0c10;
+    border: 1px solid var(--line-strong);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .rx-sub {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin: 2px 0 0;
     color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
     font-weight: 500;
+  }
+
+  .rx-sub span {
+    position: relative;
+  }
+
+  .rx-sub span + span::before {
+    content: '·';
+    position: absolute;
+    left: -8px;
+    color: var(--line-strong);
   }
 
   .exercise-item.protocol-skipped {
