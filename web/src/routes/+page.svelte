@@ -297,6 +297,20 @@
     return fmtSet(first, second);
   }
 
+  function planStats(sets: ExerciseSet[]) {
+    const count = sets.length;
+    const totalReps = sets.reduce((sum, [, reps]) => sum + reps, 0);
+    const tonnage = sets.reduce((sum, [weight, reps]) => sum + weight * reps, 0);
+    const repsList = sets.map(([, reps]) => reps);
+    const uniformReps = repsList.length > 0 && repsList.every((reps) => reps === repsList[0]);
+    return {
+      count,
+      totalReps,
+      tonnage,
+      repScheme: uniformReps ? String(repsList[0]) : null
+    };
+  }
+
   function applyWeightDelta(sets: ExerciseSet[], kind: ExerciseKind, delta: number): ExerciseSet[] {
     if (!delta || kind !== 'strength') return sets;
     return sets.map(([weight, reps]) => [Math.max(0, weight + delta), reps] as ExerciseSet);
@@ -556,6 +570,38 @@
     }
   }
 </script>
+
+{#snippet specStrip(kind: ExerciseKind, sets: ExerciseSet[], anchor1rm: number | null, targetPct: number | null)}
+  {#if kind === 'strength' && sets.length}
+    {@const st = planStats(sets)}
+    <dl class="plan-spec">
+      <div>
+        <dt>Подходы</dt>
+        <dd>{st.count}{#if st.repScheme}<span class="spec-x">×</span>{st.repScheme}{/if}</dd>
+      </div>
+      <div>
+        <dt>Повторы</dt>
+        <dd>{st.totalReps}</dd>
+      </div>
+      {#if anchor1rm}
+        <div>
+          <dt>1ПМ</dt>
+          <dd>{fmtNum(anchor1rm)}<small>кг</small></dd>
+        </div>
+      {/if}
+      {#if targetPct}
+        <div>
+          <dt>% от 1ПМ</dt>
+          <dd>{targetPct}<small>%</small></dd>
+        </div>
+      {/if}
+      <div>
+        <dt>Объём</dt>
+        <dd>{fmtNum(st.tonnage)}<small>кг</small></dd>
+      </div>
+    </dl>
+  {/if}
+{/snippet}
 
 <div class="container dashboard">
   <header class="page-header">
@@ -846,6 +892,7 @@
                           </span>
                         {/each}
                       </div>
+                      {@render specStrip(entry.kind, entry.sets, hint?.anchor1rm ?? null, hint?.maxPct ?? null)}
                     </div>
                   {:else if protocolSkip}
                     <div class="plan-meta protocol-skip">
@@ -872,6 +919,7 @@
                             </span>
                           {/each}
                         </div>
+                        {@render specStrip(previewSets.kind, previewSets.sets, hint?.anchor1rm ?? null, null)}
                       {/if}
                     </div>
                   {/if}
@@ -1393,6 +1441,53 @@
   .exercise-item.complete .set-chip {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+
+  .plan-spec {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    margin: 2px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+
+  .plan-spec div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .plan-spec dt {
+    margin: 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .plan-spec dd {
+    margin: 0;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .plan-spec dd small {
+    margin-left: 2px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .plan-spec .spec-x {
+    margin: 0 2px;
+    color: var(--muted);
+    font-weight: 500;
   }
 
   .exercise-item.protocol-skipped {
