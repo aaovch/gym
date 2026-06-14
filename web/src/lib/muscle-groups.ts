@@ -60,7 +60,7 @@ export const MOVEMENT_BLOCKS: MovementBlock[] = [
 		label: 'Вертикальная тяга',
 		shortLabel: 'Тяга в',
 		description: 'Тяга сверху — широчайшие и верх спины.',
-		color: '#34d399'
+		color: '#2dd4bf'
 	},
 	{
 		id: 'core',

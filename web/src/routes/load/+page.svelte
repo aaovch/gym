@@ -1,11 +1,14 @@
 <script lang="ts">
+	import { onMount, tick } from 'svelte';
 	import { base } from '$app/paths';
 	import BlockLoadChart from '$lib/components/BlockLoadChart.svelte';
 	import {
+		blockExerciseNames,
 		buildBlockSummaries,
 		buildBlockWeeklyLoad,
 		filterWeeksFrom,
 		formatMetric,
+		metricDefinition,
 		metricLabel,
 		metricLabelGenitive,
 		unmappedStrengthExercises,
@@ -39,6 +42,53 @@
 		selectedBlock ? (summaries.find((item) => item.block.id === selectedBlock) ?? null) : null
 	);
 	const unmapped = $derived(unmappedStrengthExercises(view.entries));
+	const selectedExercises = $derived(
+		selectedBlock ? blockExerciseNames(view.entries, selectedBlock) : []
+	);
+
+	let detailEl = $state<HTMLElement | null>(null);
+
+	const PREFS_KEY = 'gym:load:prefs';
+	let prefsLoaded = $state(false);
+
+	onMount(() => {
+		try {
+			const raw = localStorage.getItem(PREFS_KEY);
+			if (raw) {
+				const saved = JSON.parse(raw) as { windowWeeks?: number; metric?: LoadMetric };
+				if (typeof saved.windowWeeks === 'number') windowWeeks = saved.windowWeeks;
+				if (saved.metric === 'tonnage' || saved.metric === 'reps' || saved.metric === 'sets') {
+					metric = saved.metric;
+				}
+			}
+		} catch {
+			// ignore corrupt prefs
+		}
+		prefsLoaded = true;
+	});
+
+	$effect(() => {
+		const payload = JSON.stringify({ windowWeeks, metric });
+		if (!prefsLoaded) return;
+		try {
+			localStorage.setItem(PREFS_KEY, payload);
+		} catch {
+			// storage unavailable
+		}
+	});
+
+	const periodLabel = $derived(windowWeeks > 0 ? `за ${windowWeeks} нед.` : 'за всё время');
+
+	function shortDate(iso: string): string {
+		const [, m, d] = iso.split('-');
+		return `${d}.${m}`;
+	}
+
+	const rangeLabel = $derived(
+		visibleWeeks.length
+			? `${shortDate(visibleWeeks[0].weekStart)} – ${shortDate(visibleWeeks[visibleWeeks.length - 1].weekStart)}`
+			: ''
+	);
 
 	const parallelTotal = $derived(
 		summaries.reduce(
@@ -54,8 +104,13 @@
 		return `${fmtNum(value)}%`;
 	}
 
-	function toggleBlock(id: MovementBlockId) {
-		selectedBlock = selectedBlock === id ? null : id;
+	async function toggleBlock(id: MovementBlockId) {
+		const opening = selectedBlock !== id;
+		selectedBlock = opening ? id : null;
+		if (opening) {
+			await tick();
+			detailEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
 	}
 </script>
 
@@ -65,7 +120,7 @@
 			<div class="eyebrow">Распределение объёма</div>
 			<h1>Нагрузка по блокам</h1>
 			<p>
-				Коленодоминантные, тазодоминантные, тяги и жимы — параллельная нагрузка и динамика
+				Сколько работы пришлось на каждый паттерн движения и как нагрузка менялась
 				по неделям.
 			</p>
 		</div>
@@ -87,6 +142,9 @@
 					</button>
 				{/each}
 			</div>
+			{#if rangeLabel}
+				<span class="control-hint">{rangeLabel}</span>
+			{/if}
 		</div>
 		<div class="control-group">
 			<span class="control-label">Метрика</span>
@@ -102,27 +160,58 @@
 					</button>
 				{/each}
 			</div>
+			<span class="control-hint">{metricDefinition(metric)}</span>
 		</div>
 	</section>
 
 	{#if !workoutStore.bootstrapped}
+		<section class="card skeleton-panel" aria-busy="true" aria-label="Загрузка данных">
+			<div class="skeleton-head">
+				<span class="skeleton skeleton-title"></span>
+				<span class="skeleton skeleton-total"></span>
+			</div>
+			<span class="skeleton skeleton-bar"></span>
+			<div class="skeleton-grid">
+				{#each Array.from({ length: 6 }) as _, i (i)}
+					<span class="skeleton skeleton-card"></span>
+				{/each}
+			</div>
+			<span class="skeleton skeleton-chart"></span>
+		</section>
+	{:else if summaries.length === 0 && unmapped.length > 0}
 		<section class="card empty-state">
-			<p>Загрузка журнала…</p>
+			<h2>Записи есть, но не привязаны к блокам</h2>
+			<p>
+				Эти упражнения не попали в классификацию паттернов движения, поэтому нагрузка по ним
+				не считается. Привяжите их к блокам — и здесь появится распределение.
+			</p>
+			<ul class="empty-unmapped">
+				{#each unmapped as exercise}
+					<li>{exercise}</li>
+				{/each}
+			</ul>
+			<a class="button button-primary" href="{base}/exercises">Настроить упражнения</a>
 		</section>
 	{:else if summaries.length === 0}
 		<section class="card empty-state">
-			<h2>Пока нет силовых записей с блоками</h2>
-			<p>Запишите тренировки — здесь появится распределение нагрузки по паттернам движения.</p>
+			<h2>Пока нет силовых записей</h2>
+			<p>
+				Здесь появится распределение нагрузки по паттернам движения, как только вы запишете
+				силовые тренировки.
+			</p>
 			<a class="button button-primary" href="{base}/add">Записать тренировку</a>
 		</section>
 	{:else}
 		<section class="card parallel-panel">
 			<div class="panel-head">
 				<div>
-					<h2>Параллельная нагрузка</h2>
-					<p>Доля {metricLabelGenitive(metric)} по блокам за выбранный период</p>
+					<h2>Состав нагрузки</h2>
+					<p>Доля {metricLabelGenitive(metric)} по блокам {periodLabel}</p>
 				</div>
-				<strong class="parallel-total">{formatMetric(parallelTotal, metric)}</strong>
+				<div class="parallel-total-wrap">
+					<span class="parallel-total-caption">Всего {periodLabel}</span>
+					<strong class="parallel-total">{formatMetric(parallelTotal, metric)}</strong>
+				</div>
 			</div>
 
 			<div class="parallel-bar" role="img" aria-label="Распределение нагрузки по блокам">
@@ -154,14 +243,27 @@
 
 			<div class="legend-grid">
 				{#each summaries as item (item.block.id)}
-					{@const trend = metric === 'tonnage' ? item.trendTonnage : item.trendReps}
+					{@const trend =
+						metric === 'tonnage'
+							? item.trendTonnage
+							: metric === 'reps'
+								? item.trendReps
+								: item.trendSets}
+					{@const share =
+						metric === 'tonnage'
+							? item.shareTonnage
+							: metric === 'reps'
+								? item.shareReps
+								: item.shareSets}
 					<button
 						type="button"
 						class="legend-card"
 						class:active={selectedBlock === item.block.id}
 						style:--block-color={item.block.color}
+						style:--share="{share}%"
 						onclick={() => toggleBlock(item.block.id)}
 					>
+						<span class="legend-fill"></span>
 						<span class="legend-swatch"></span>
 						<div class="legend-copy">
 							<strong>{item.block.label}</strong>
@@ -181,11 +283,11 @@
 										: item.shareSets}%
 							</span>
 						</div>
-						<div class="legend-trend">
+						<div class="legend-trend" title="Последние 4 недели против предыдущих 4 недель">
 							<span class:up={(trend ?? 0) > 0} class:down={(trend ?? 0) < 0}>
 								{trendLabel(trend)}
 							</span>
-							<small>к прошл. периоду</small>
+							<small>посл. 4 нед. к пред. 4</small>
 						</div>
 					</button>
 				{/each}
@@ -200,10 +302,23 @@
 				</div>
 			</div>
 			<BlockLoadChart weeks={visibleWeeks} {blockIds} {metric} />
+
+			<div class="chart-legend">
+				{#each summaries as item (item.block.id)}
+					<span class="chart-legend-item">
+						<span class="chart-legend-swatch" style:background={item.block.color}></span>
+						{item.block.label}
+					</span>
+				{/each}
+			</div>
 		</section>
 
 		{#if selectedSummary}
-			<section class="card detail-panel" style:--block-color={selectedSummary.block.color}>
+			<section
+				bind:this={detailEl}
+				class="card detail-panel"
+				style:--block-color={selectedSummary.block.color}
+			>
 				<div class="panel-head">
 					<div>
 						<p class="detail-kicker">Выбранный блок</p>
@@ -234,6 +349,7 @@
 					</article>
 				</div>
 
+				<p class="detail-section-label">Динамика блока по неделям ({metricLabel(metric)})</p>
 				<div class="mini-bars">
 					{#each selectedSummary.weekly as week (week.weekStart)}
 						{@const value =
@@ -245,6 +361,21 @@
 							<div class="mini-fill" style={`height: ${(value / max) * 100}%`}></div>
 						</div>
 					{/each}
+				</div>
+
+				{#if selectedExercises.length > 0}
+					<p class="detail-section-label">Что входит в блок</p>
+					<ul class="detail-exercises">
+						{#each selectedExercises as exercise (exercise)}
+							<li>{exercise}</li>
+						{/each}
+					</ul>
+				{/if}
+
+				<div class="detail-actions">
+					<a class="button button-secondary" href="{base}/exercises">Открыть упражнения</a>
+					<a class="button button-secondary" href="{base}/cycles">Посмотреть в плане</a>
+					<a class="button button-secondary" href="{base}/body">Карта тела</a>
 				</div>
 			</section>
 		{/if}
@@ -260,6 +391,16 @@
 				</ul>
 			</section>
 		{/if}
+
+		<section class="card next-steps">
+			<h3>Что дальше</h3>
+			<div class="next-steps-row">
+				<a class="button button-secondary" href="{base}/add">Записать тренировку</a>
+				<a class="button button-secondary" href="{base}/history">Открыть журнал</a>
+				<a class="button button-secondary" href="{base}/cycles">Перейти к плану</a>
+				<a class="button button-secondary" href="{base}/stats">Аналитика</a>
+			</div>
+		</section>
 	{/if}
 </div>
 
@@ -289,6 +430,14 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px;
+	}
+
+	.control-hint {
+		display: block;
+		max-width: 360px;
+		color: var(--muted);
+		font-size: 11px;
+		line-height: 1.35;
 	}
 
 	.pill {
@@ -333,11 +482,60 @@
 		margin-bottom: 14px;
 	}
 
+	.parallel-total-wrap {
+		display: grid;
+		justify-items: end;
+		gap: 2px;
+		text-align: right;
+	}
+
+	.parallel-total-caption {
+		color: var(--muted);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
 	.parallel-total {
 		color: var(--accent);
 		font-family: var(--font-mono);
 		font-size: 18px;
 		white-space: nowrap;
+	}
+
+	.chart-legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 14px;
+		margin-top: 14px;
+		padding-top: 12px;
+		border-top: 1px solid var(--line);
+	}
+
+	.chart-legend-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		color: var(--muted-strong);
+		font-size: 11px;
+	}
+
+	.chart-legend-swatch {
+		width: 10px;
+		height: 10px;
+		border-radius: 2px;
+	}
+
+	.empty-unmapped {
+		margin: 0 auto 16px;
+		padding: 0;
+		max-width: 360px;
+		text-align: left;
+		color: var(--muted-strong);
+		font-size: 12px;
+		list-style-position: inside;
 	}
 
 	.parallel-bar {
@@ -376,6 +574,7 @@
 	}
 
 	.legend-card {
+		position: relative;
 		display: grid;
 		grid-template-columns: auto 1fr auto;
 		gap: 10px;
@@ -386,6 +585,17 @@
 		border: 1px solid var(--line);
 		cursor: pointer;
 		color: var(--text);
+		overflow: hidden;
+	}
+
+	.legend-fill {
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		width: var(--share, 0%);
+		height: 3px;
+		background: var(--block-color);
+		opacity: 0.85;
 	}
 
 	.legend-card.active {
@@ -518,6 +728,125 @@
 		font-size: 12px;
 	}
 
+	.detail-section-label {
+		margin: 18px 0 8px;
+		color: var(--muted);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.detail-exercises {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.detail-exercises li {
+		padding: 5px 10px;
+		background: var(--surface-soft);
+		border: 1px solid var(--line);
+		color: var(--muted-strong);
+		font-size: 11px;
+	}
+
+	.detail-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 18px;
+		padding-top: 16px;
+		border-top: 1px solid var(--line);
+	}
+
+	.next-steps {
+		padding: 18px 20px;
+		margin-bottom: 14px;
+	}
+
+	.next-steps h3 {
+		margin: 0 0 12px;
+		font-size: 14px;
+	}
+
+	.next-steps-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.skeleton-panel {
+		padding: 20px;
+		margin-bottom: 14px;
+	}
+
+	.skeleton-head {
+		display: flex;
+		justify-content: space-between;
+		gap: 16px;
+		margin-bottom: 16px;
+	}
+
+	.skeleton {
+		display: block;
+		background: linear-gradient(90deg, #0c0f14 25%, #161a22 37%, #0c0f14 63%);
+		background-size: 400% 100%;
+		animation: skeleton-shimmer 1.4s ease infinite;
+		border-radius: 2px;
+	}
+
+	.skeleton-title {
+		width: 180px;
+		height: 20px;
+	}
+
+	.skeleton-total {
+		width: 70px;
+		height: 20px;
+	}
+
+	.skeleton-bar {
+		width: 100%;
+		height: 34px;
+		margin-bottom: 14px;
+	}
+
+	.skeleton-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 8px;
+		margin-bottom: 18px;
+	}
+
+	.skeleton-card {
+		height: 52px;
+	}
+
+	.skeleton-chart {
+		width: 100%;
+		height: 200px;
+	}
+
+	@keyframes skeleton-shimmer {
+		0% {
+			background-position: 100% 50%;
+		}
+
+		100% {
+			background-position: 0 50%;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.skeleton {
+			animation: none;
+		}
+	}
+
 	.empty-state {
 		padding: 28px;
 		text-align: center;
@@ -539,6 +868,27 @@
 
 		.panel-head {
 			flex-direction: column;
+		}
+
+		.parallel-total-wrap {
+			justify-items: start;
+			text-align: left;
+		}
+
+		.parallel-bar {
+			height: 44px;
+		}
+
+		.detail-actions .button,
+		.next-steps-row .button {
+			flex: 1 1 140px;
+			text-align: center;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.parallel-segment span {
+			display: none;
 		}
 	}
 </style>

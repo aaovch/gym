@@ -30,6 +30,7 @@ export type BlockLoadSummary = {
 	shareSets: number;
 	trendTonnage: number | null;
 	trendReps: number | null;
+	trendSets: number | null;
 	weekly: { weekStart: string; tonnage: number; reps: number; sets: number }[];
 };
 
@@ -201,6 +202,7 @@ export function buildBlockSummaries(
 			shareSets: totalSets ? Math.round((totals.sets / totalSets) * 1000) / 10 : 0,
 			trendTonnage: pctChange(currentTrend.tonnage, priorTrend.tonnage),
 			trendReps: pctChange(currentTrend.reps, priorTrend.reps),
+			trendSets: pctChange(currentTrend.sets, priorTrend.sets),
 			weekly
 		};
 	});
@@ -221,6 +223,18 @@ export function metricLabel(metric: LoadMetric): string {
 	return 'Подходы';
 }
 
+export function metricDefinition(metric: LoadMetric): string {
+	if (metric === 'tonnage') return 'Тоннаж = вес × повторы. Общий объём поднятого за период.';
+	if (metric === 'reps') return 'Повторы — сколько раз выполнено движение. Вес не учитывается.';
+	return 'Подходы — количество рабочих сетов. Грубая оценка частоты стимула.';
+}
+
+export function metricUnit(metric: LoadMetric): string {
+	if (metric === 'tonnage') return 'тоннажу';
+	if (metric === 'reps') return 'повторам';
+	return 'подходам';
+}
+
 export function metricLabelGenitive(metric: LoadMetric): string {
 	if (metric === 'tonnage') return 'тоннажа';
 	if (metric === 'reps') return 'повторов';
@@ -231,6 +245,15 @@ export function weeksAgoIso(weeks: number): string {
 	const date = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00`);
 	date.setDate(date.getDate() - weeks * 7);
 	return weekStart(date.toISOString().slice(0, 10));
+}
+
+export function blockExerciseNames(entries: WorkoutEntry[], blockId: MovementBlockId): string[] {
+	const names = new Set<string>();
+	for (const entry of entries) {
+		if (entry.kind !== 'strength') continue;
+		if (getMovementBlock(entry.exercise) === blockId) names.add(entry.exercise);
+	}
+	return [...names].sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
 export function unmappedStrengthExercises(entries: WorkoutEntry[]): string[] {
