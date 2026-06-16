@@ -42,7 +42,7 @@
   let error = $state('');
   let weightAdjust = $state<Record<string, number>>({});
 
-  const WEIGHT_STEP = 2.5;
+  const WEIGHT_STEP = 0.5;
 
   function scrollIntoCenter(node: HTMLElement, selectedId: string | null) {
     const run = (id: string | null) => {
