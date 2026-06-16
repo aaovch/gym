@@ -1,43 +1,50 @@
 <script lang="ts">
   import { base } from '$app/paths';
-  import { browser } from '$app/environment';
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import TrendChart from '$lib/components/TrendChart.svelte';
   import { fmtNum, fmtSet, formatDateRu, todayIso } from '$lib/format';
+  import {
+    SORT_OPTIONS,
+    buildAnalyticsInsights,
+    exerciseColor,
+    sortStrengthSummary,
+    sparklinePath,
+    statsUrl,
+    trendDelta,
+    type SortKey
+  } from '$lib/stats-analytics';
   import { workoutStore } from '$lib/workout-store';
   import type { StrengthSummary, TrendPoint } from '$lib/types';
 
-  type SortKey = 'sessions' | '1rm' | 'recent' | 'name';
-  type InsightTone = 'good' | 'warn' | 'neutral';
-
   let query = $state('');
-  let selectedLocal = $state<string | null>(null);
   let sortKey = $state<SortKey>('sessions');
 
-  const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
-  const selectedExercise = $derived(selectedLocal ?? urlExercise ?? null);
   const view = $derived(workoutStore.view);
   const strengthSummary = $derived(
     view.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
   );
+  const selectedExercise = $derived.by(() => {
+    const raw = page.url.searchParams.get('exercise');
+    if (!raw) return null;
+    return strengthSummary.some((item) => item.exercise === raw) ? raw : null;
+  });
   const filtered = $derived(
     strengthSummary.filter((item) =>
       item.exercise.toLowerCase().includes(query.trim().toLowerCase())
     )
   );
-  const sortedExercises = $derived.by(() => {
-    const list = [...filtered];
-    switch (sortKey) {
-      case '1rm':
-        return list.sort((a, b) => b.best1rm.value - a.best1rm.value);
-      case 'recent':
-        return list.sort((a, b) => (b.periodEnd ?? '').localeCompare(a.periodEnd ?? ''));
-      case 'name':
-        return list.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
-      default:
-        return list.sort((a, b) => b.sessions - a.sessions);
-    }
-  });
+  const sortedExercises = $derived(sortStrengthSummary(filtered, sortKey));
+  const catalogRows = $derived(
+    sortedExercises.map((item) => {
+      const points = view.trend[item.exercise] ?? [];
+      return {
+        item,
+        color: exerciseColor(item.exercise),
+        sparkPath: sparklinePath(points)
+      };
+    })
+  );
   const trendPoints = $derived<TrendPoint[]>(
     selectedExercise ? (view.trend[selectedExercise] ?? []) : []
   );
@@ -81,91 +88,52 @@
   const maxSessions = $derived(Math.max(...mostPracticed.map((item) => item.sessions), 1));
   const selectedTrendDelta = $derived(trendDelta(trendPoints));
   const chartColor = $derived(selectedExercise ? exerciseColor(selectedExercise) : '#6ee7a8');
+  const insights = $derived(
+    buildAnalyticsInsights({ recentDays, recentPrCount, strongest })
+  );
 
-  const insights = $derived.by(() => {
-    const items: { id: string; tone: InsightTone; title: string; detail: string }[] = [];
-
-    if (recentDays >= 12) {
-      items.push({
-        id: 'rhythm',
-        tone: 'good',
-        title: 'Стабильный ритм',
-        detail: `${recentDays} тренировочных дней за 30 дней — хорошая регулярность.`
-      });
-    } else if (recentDays > 0) {
-      items.push({
-        id: 'rhythm-low',
-        tone: 'warn',
-        title: 'Мало регулярности',
-        detail: `${recentDays} из 30 дней с тренировками. Для прогресса обычно нужно 8–12+.`
-      });
-    }
-
-    if (recentPrCount > 0) {
-      items.push({
-        id: 'prs',
-        tone: 'good',
-        title: 'Свежие рекорды',
-        detail: `${recentPrCount} ${recentPrCount === 1 ? 'упражнение' : 'упражнений'} с лучшим 1ПМ за последний месяц.`
-      });
-    }
-
-    if (strongest.length >= 2) {
-      items.push({
-        id: 'anchor',
-        tone: 'neutral',
-        title: 'Якорное движение',
-        detail: `${strongest[0].exercise} — лидер по расчётному 1ПМ (${fmtNum(strongest[0].best1rm.value)} кг).`
-      });
-    }
-
-    return items.slice(0, 3);
-  });
-
-  $effect(() => {
-    if (urlExercise && strengthSummary.some((item) => item.exercise === urlExercise)) {
-      selectedLocal = urlExercise;
-    }
-  });
+  function setExerciseParam(name: string | null) {
+    const params = new URLSearchParams(page.url.searchParams);
+    if (name) params.set('exercise', name);
+    else params.delete('exercise');
+    goto(statsUrl(base, params), { keepFocus: true, noScroll: true, replaceState: true });
+  }
 
   function selectExercise(name: string) {
-    selectedLocal = selectedExercise === name ? null : name;
+    setExerciseParam(selectedExercise === name ? null : name);
   }
 
-  function trendDelta(points: TrendPoint[]): number | null {
-    if (points.length < 2) return null;
-    const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
-    const first = sorted[0].est1rm;
-    const last = sorted[sorted.length - 1].est1rm;
-    if (!first) return null;
-    return ((last - first) / first) * 100;
+  function clearSelection() {
+    setExerciseParam(null);
   }
 
-  function sparklinePath(points: TrendPoint[]): string {
-    if (points.length < 2) return '';
-    const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
-    const values = sorted.map((point) => point.est1rm);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const width = 52;
-    const height = 18;
-    return sorted
-      .map((point, index) => {
-        const x = (index / (sorted.length - 1)) * width;
-        const y =
-          max === min ? height / 2 : height - ((point.est1rm - min) / (max - min)) * height;
-        return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }
-
-  function exerciseColor(name: string): string {
-    const palette = ['#6ee7a8', '#5b9dff', '#fbbf24', '#f472b6', '#a78bfa', '#fb923c'];
-    let hash = 0;
-    for (let i = 0; i < name.length; i += 1) hash = (hash + name.charCodeAt(i) * (i + 1)) % palette.length;
-    return palette[hash];
+  function shareWidth(value: number, max: number): number {
+    return max ? (value / max) * 100 : 0;
   }
 </script>
+
+{#snippet rankRow(
+  item: StrengthSummary,
+  index: number,
+  mode: '1rm' | 'sessions',
+  max: number
+)}
+  <li>
+    <button type="button" onclick={() => selectExercise(item.exercise)}>
+      <span class="rank-no">{index + 1}</span>
+      <span class="rank-body">
+        <strong>{item.exercise}</strong>
+        <span
+          class={['rank-bar', mode === 'sessions' && 'sessions']}
+          style:width="{shareWidth(mode === '1rm' ? item.best1rm.value : item.sessions, max)}%"
+        ></span>
+      </span>
+      <em>
+        {mode === '1rm' ? `${fmtNum(item.best1rm.value)} кг` : item.sessions}
+      </em>
+    </button>
+  </li>
+{/snippet}
 
 <div class="container analytics">
   <header class="page-header">
@@ -205,7 +173,7 @@
         <span class="vital-label">Последние 30 дней</span>
         <strong>{recentDays}</strong>
         <div class="vital-meter" aria-hidden="true">
-          <span style={`width: ${consistencyPct}%`}></span>
+          <span style:width="{consistencyPct}%"></span>
         </div>
         <small>{recentDays >= 12 ? 'стабильный ритм' : 'можно добавить регулярности'}</small>
       </article>
@@ -236,17 +204,11 @@
             aria-label="Поиск упражнения"
           />
           <div class="sort-row" role="tablist" aria-label="Сортировка">
-            {#each [
-              { key: 'sessions' as SortKey, label: 'Сессии' },
-              { key: '1rm' as SortKey, label: '1ПМ' },
-              { key: 'recent' as SortKey, label: 'Недавние' },
-              { key: 'name' as SortKey, label: 'А–Я' }
-            ] as option (option.key)}
+            {#each SORT_OPTIONS as option (option.key)}
               <button
                 type="button"
                 role="tab"
-                class="sort-pill"
-                class:active={sortKey === option.key}
+                class={['sort-pill', sortKey === option.key && 'active']}
                 aria-selected={sortKey === option.key}
                 onclick={() => (sortKey = option.key)}
               >
@@ -257,29 +219,27 @@
         </div>
 
         <ul class="catalog-list">
-          {#each sortedExercises as item (item.exercise)}
-            {@const points = view.trend[item.exercise] ?? []}
-            {@const path = sparklinePath(points)}
+          {#each catalogRows as row (row.item.exercise)}
             <li>
               <button
                 type="button"
-                class="catalog-item"
-                class:active={selectedExercise === item.exercise}
-                style={`--ex-color: ${exerciseColor(item.exercise)}`}
-                onclick={() => selectExercise(item.exercise)}
+                class={['catalog-item', selectedExercise === row.item.exercise && 'active']}
+                style:--ex-color={row.color}
+                onclick={() => selectExercise(row.item.exercise)}
               >
                 <span class="cat-main">
-                  <strong>{item.exercise}</strong>
+                  <strong>{row.item.exercise}</strong>
                   <span class="cat-meta">
-                    {item.sessions} сессий · {item.periodEnd ? formatDateRu(item.periodEnd) : '—'}
+                    {row.item.sessions} сессий ·
+                    {row.item.periodEnd ? formatDateRu(row.item.periodEnd) : '—'}
                   </span>
                 </span>
-                {#if path}
+                {#if row.sparkPath}
                   <svg class="cat-spark" viewBox="0 0 52 18" aria-hidden="true">
-                    <path d={path} fill="none" stroke="var(--ex-color)" stroke-width="1.8" />
+                    <path d={row.sparkPath} fill="none" stroke="var(--ex-color)" stroke-width="1.8" />
                   </svg>
                 {/if}
-                <span class="cat-1rm">{fmtNum(item.best1rm.value)}<small>кг</small></span>
+                <span class="cat-1rm">{fmtNum(row.item.best1rm.value)}<small>кг</small></span>
               </button>
             </li>
           {/each}
@@ -293,7 +253,13 @@
               <div class="eyebrow">Выбрано упражнение</div>
               <h2>{selectedExercise}</h2>
               {#if selectedTrendDelta != null}
-                <p class="trend-badge" class:up={selectedTrendDelta > 0} class:down={selectedTrendDelta < 0}>
+                <p
+                  class={[
+                    'trend-badge',
+                    selectedTrendDelta > 0 && 'up',
+                    selectedTrendDelta < 0 && 'down'
+                  ]}
+                >
                   {selectedTrendDelta > 0 ? '+' : ''}{fmtNum(selectedTrendDelta)}% за период
                 </p>
               {/if}
@@ -305,7 +271,7 @@
               >
                 История
               </a>
-              <button class="button button-ghost" type="button" onclick={() => (selectedLocal = null)}>
+              <button class="button button-ghost" type="button" onclick={clearSelection}>
                 Закрыть
               </button>
             </div>
@@ -315,12 +281,16 @@
             <article>
               <span>Лучший 1ПМ</span>
               <strong>{fmtNum(selectedSummary.best1rm.value)}<em>кг</em></strong>
-              <small>{selectedSummary.best1rm.date ? formatDateRu(selectedSummary.best1rm.date) : '—'}</small>
+              <small>
+                {selectedSummary.best1rm.date ? formatDateRu(selectedSummary.best1rm.date) : '—'}
+              </small>
             </article>
             <article>
               <span>Лучший подход</span>
               <strong>{fmtSet(selectedSummary.bestWeight.weight, selectedSummary.bestWeight.reps)}</strong>
-              <small>{selectedSummary.bestWeight.date ? formatDateRu(selectedSummary.bestWeight.date) : '—'}</small>
+              <small>
+                {selectedSummary.bestWeight.date ? formatDateRu(selectedSummary.bestWeight.date) : '—'}
+              </small>
             </article>
             <article>
               <span>Сессий</span>
@@ -368,19 +338,7 @@
               </div>
               <ul class="rank-list">
                 {#each strongest as item, index (item.exercise)}
-                  <li>
-                    <button type="button" onclick={() => selectExercise(item.exercise)}>
-                      <span class="rank-no">{index + 1}</span>
-                      <span class="rank-body">
-                        <strong>{item.exercise}</strong>
-                        <span
-                          class="rank-bar"
-                          style={`width: ${(item.best1rm.value / max1rm) * 100}%`}
-                        ></span>
-                      </span>
-                      <em>{fmtNum(item.best1rm.value)} кг</em>
-                    </button>
-                  </li>
+                  {@render rankRow(item, index, '1rm', max1rm)}
                 {/each}
               </ul>
             </section>
@@ -392,19 +350,7 @@
               </div>
               <ul class="rank-list">
                 {#each mostPracticed as item, index (item.exercise)}
-                  <li>
-                    <button type="button" onclick={() => selectExercise(item.exercise)}>
-                      <span class="rank-no">{index + 1}</span>
-                      <span class="rank-body">
-                        <strong>{item.exercise}</strong>
-                        <span
-                          class="rank-bar sessions"
-                          style={`width: ${(item.sessions / maxSessions) * 100}%`}
-                        ></span>
-                      </span>
-                      <em>{item.sessions}</em>
-                    </button>
-                  </li>
+                  {@render rankRow(item, index, 'sessions', maxSessions)}
                 {/each}
               </ul>
             </section>
