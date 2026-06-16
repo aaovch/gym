@@ -48,14 +48,6 @@ export function dateToMs(iso: string): number {
 	return Date.UTC(y, m - 1, d);
 }
 
-function msToIso(ms: number): string {
-	const d = new Date(ms);
-	const y = d.getUTCFullYear();
-	const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-	const day = String(d.getUTCDate()).padStart(2, '0');
-	return `${y}-${m}-${day}`;
-}
-
 function daysBetween(a: string, b: string): number {
 	return Math.round((dateToMs(b) - dateToMs(a)) / DAY_MS);
 }
@@ -80,17 +72,28 @@ function formatTickLabel(iso: string, spanDays: number): string {
 	return formatDateRu(iso);
 }
 
-function buildDateTicks(minMs: number, maxMs: number, xScale: (iso: string) => number, spanDays: number, maxTicks: number): TimeChartTick[] {
-	if (maxTicks <= 1) {
-		const iso = msToIso(minMs);
-		return [{ x: xScale(iso), label: formatTickLabel(iso, spanDays) }];
+function buildDateTicks(
+	sorted: TrendPoint[],
+	xScale: (iso: string) => number,
+	spanDays: number,
+	maxTicks: number
+): TimeChartTick[] {
+	const uniqueDates = [...new Set(sorted.map((point) => point.date))].sort((a, b) =>
+		a.localeCompare(b)
+	);
+	if (uniqueDates.length === 0) return [];
+	if (uniqueDates.length <= maxTicks) {
+		return uniqueDates.map((date) => ({
+			x: xScale(date),
+			label: formatTickLabel(date, spanDays)
+		}));
 	}
 
 	const ticks: TimeChartTick[] = [];
 	for (let i = 0; i < maxTicks; i++) {
-		const t = minMs + (i / (maxTicks - 1)) * (maxMs - minMs);
-		const iso = msToIso(t);
-		ticks.push({ x: xScale(iso), label: formatTickLabel(iso, spanDays) });
+		const idx = Math.round((i / (maxTicks - 1)) * (uniqueDates.length - 1));
+		const date = uniqueDates[idx];
+		ticks.push({ x: xScale(date), label: formatTickLabel(date, spanDays) });
 	}
 	return ticks;
 }
@@ -157,7 +160,7 @@ export function buildTimeChartLayout(
 	}
 	segments.push(current);
 
-	const dateTicks = buildDateTicks(minMs, maxMs, xScale, spanDays, options.maxTicks ?? 5);
+	const dateTicks = buildDateTicks(sorted, xScale, spanDays, options.maxTicks ?? 5);
 
 	return {
 		width,

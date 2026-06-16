@@ -67,7 +67,7 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 		}
 	>();
 
-	const trendMap = new Map<string, Map<string, TrendPoint>>();
+	const trendMap = new Map<string, TrendPoint[]>();
 
 	for (const entry of entries) {
 		const metrics = computeEntryMetrics(entry.sets);
@@ -107,14 +107,16 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 			group.best5 = [metrics.best5[0], metrics.best5[1], entry.date];
 		}
 
-		if (!trendMap.has(entry.exercise)) trendMap.set(entry.exercise, new Map());
-		trendMap.get(entry.exercise)!.set(entry.date, {
-			date: entry.date,
-			est1rm: Math.round(metrics.est1rm * 10) / 10,
-			maxWeight: metrics.maxWeightSet[0],
-			maxReps: metrics.maxWeightSet[1],
-			avgIntensity: Math.round(metrics.avgIntensity * 10) / 10
-		});
+		if (kind === 'strength') {
+			if (!trendMap.has(entry.exercise)) trendMap.set(entry.exercise, []);
+			trendMap.get(entry.exercise)!.push({
+				date: entry.date,
+				est1rm: Math.round(metrics.est1rm * 10) / 10,
+				maxWeight: metrics.est1rmSet[0],
+				maxReps: metrics.est1rmSet[1],
+				avgIntensity: Math.round(metrics.avgIntensity * 10) / 10
+			});
+		}
 	}
 
 	const summary: StrengthSummary[] = [...summaryMap.values()]
@@ -153,8 +155,8 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 		}));
 
 	const trend: Record<string, TrendPoint[]> = {};
-	for (const [exercise, byDate] of trendMap.entries()) {
-		trend[exercise] = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+	for (const [exercise, points] of trendMap.entries()) {
+		trend[exercise] = [...points].sort((a, b) => a.date.localeCompare(b.date));
 	}
 
 	return { summary, trend };
