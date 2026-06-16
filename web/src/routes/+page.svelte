@@ -293,13 +293,54 @@
     return sessionProgressPercent(mesocycle, micro, index);
   }
 
-  function pickSession(slot: WorkoutSlot) {
+  type PlanSessionRef = { mesoId: string; microId: string; slot: WorkoutSlot };
+
+  const planSessionSteps = $derived.by((): PlanSessionRef[] => {
+    const steps: PlanSessionRef[] = [];
+    for (const meso of mesocycles) {
+      for (const micro of meso.microcycles) {
+        for (const slot of ['A', 'B'] as const) {
+          steps.push({ mesoId: meso.plan.id, microId: micro.plan.id, slot });
+        }
+      }
+    }
+    return steps;
+  });
+
+  const currentSessionStepIndex = $derived.by(() => {
+    if (!sessionReady || !mesocycle || !microcycle || !activeSlot) return -1;
+    return planSessionSteps.findIndex(
+      (step) =>
+        step.mesoId === mesocycle.plan.id &&
+        step.microId === microcycle.plan.id &&
+        step.slot === activeSlot
+    );
+  });
+
+  function applySessionStep(step: PlanSessionRef) {
     autoPicked = false;
-    slotPick = slot;
+    mesoPick = step.mesoId;
+    microPick = step.microId;
+    slotPick = step.slot;
     pickerOpen = false;
-    if (!microcycle) return;
-    const planned = sessionDateForIndex(microcycle, slot === 'B' ? 1 : 0);
-    datePick = planned ?? todayIso();
+    const meso = mesocycles.find((item) => item.plan.id === step.mesoId);
+    const micro = meso?.microcycles.find((item) => item.plan.id === step.microId);
+    if (micro) {
+      const planned = sessionDateForIndex(micro, step.slot === 'B' ? 1 : 0);
+      datePick = planned ?? todayIso();
+    }
+  }
+
+  function goSessionStep(delta: -1 | 1) {
+    const idx = currentSessionStepIndex;
+    if (idx < 0) return;
+    const next = planSessionSteps[idx + delta];
+    if (next) applySessionStep(next);
+  }
+
+  function pickSession(slot: WorkoutSlot) {
+    if (!mesocycle || !microcycle) return;
+    applySessionStep({ mesoId: mesocycle.plan.id, microId: microcycle.plan.id, slot });
   }
 
   function exerciseKind(name: string): ExerciseKind {
@@ -782,45 +823,96 @@
   {:else}
     <section class="card training-card">
       <div class="training-top" class:collapsed={sessionReady && !pickerOpen}>
-        <div>
+        <div class="training-top-main">
           <div class="eyebrow">Контекст тренировки</div>
-          <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
-          {#if sessionReady && mesocycle && microcycle && activeSlot}
-            <p>
-              Микроцикл {microcycle.plan.indexInMeso}
-              {#if plannedSessionDate}
-                · {formatDateRu(plannedSessionDate)}
-              {:else}
-                · дата не назначена
-              {/if}
-              {#if sessionSkipped}
-                · <span class="skip-flag">пропущена</span>
-              {/if}
-            </p>
-            {#if !pickerOpen}
-              <div class="session-tabs">
-                {#each ['A', 'B'] as slot (slot)}
-                  {@const slotKey = slot as WorkoutSlot}
-                  {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
-                  {@const tabProgress = sessionProgressFor(microcycle, slotIndex)}
-                  {@const tabSkipped = sessionSkippedFor(microcycle, slotIndex)}
-                  <button
-                    type="button"
-                    class="session-tab"
-                    class:active={activeSlot === slotKey}
-                    style={`--slot-color: ${slotColor(slotKey)}`}
-                    onclick={() => pickSession(slotKey)}
-                  >
-                    <b>{slot}</b>
-                    <span>{tabSkipped ? 'пропущена' : `${tabProgress}%`}</span>
-                  </button>
-                {/each}
+          {#if sessionReady && mesocycle && microcycle && activeSlot && !pickerOpen}
+            <div class="context-nav">
+              <button
+                type="button"
+                class="nav-arrow"
+                aria-label="Предыдущая тренировка"
+                disabled={currentSessionStepIndex <= 0}
+                onclick={() => goSessionStep(-1)}
+              >
+                ←
+              </button>
+              <div class="context-focus">
+                <div
+                  class="context-meso"
+                  style={`--meso-color: ${mesocycleColor(mesocycle.index)}`}
+                >
+                  {mesocycle.plan.label}
+                </div>
+                <div class="context-session">
+                  <span class="context-micro">Микроцикл {microcycle.plan.indexInMeso}</span>
+                  <span class="context-sep">·</span>
+                  <span class="context-slot" style={`--slot-color: ${slotColor(activeSlot)}`}>
+                    {slotLabel(activeSlot)}
+                  </span>
+                  <span class="context-sep">·</span>
+                  {#if plannedSessionDate}
+                    <span class="context-date">{formatDateRu(plannedSessionDate)}</span>
+                  {:else}
+                    <span class="context-date muted-date">дата не назначена</span>
+                  {/if}
+                  {#if sessionSkipped}
+                    <span class="skip-flag">пропущена</span>
+                  {/if}
+                </div>
+                {#if planSessionSteps.length > 1}
+                  <span class="context-position">
+                    {currentSessionStepIndex + 1} / {planSessionSteps.length}
+                  </span>
+                {/if}
               </div>
+              <button
+                type="button"
+                class="nav-arrow"
+                aria-label="Следующая тренировка"
+                disabled={currentSessionStepIndex < 0 ||
+                  currentSessionStepIndex >= planSessionSteps.length - 1}
+                onclick={() => goSessionStep(1)}
+              >
+                →
+              </button>
+            </div>
+            <div class="session-tabs">
+              {#each ['A', 'B'] as slot (slot)}
+                {@const slotKey = slot as WorkoutSlot}
+                {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
+                {@const tabProgress = sessionProgressFor(microcycle, slotIndex)}
+                {@const tabSkipped = sessionSkippedFor(microcycle, slotIndex)}
+                <button
+                  type="button"
+                  class="session-tab"
+                  class:active={activeSlot === slotKey}
+                  style={`--slot-color: ${slotColor(slotKey)}`}
+                  onclick={() => pickSession(slotKey)}
+                >
+                  <b>{slot}</b>
+                  <span>{tabSkipped ? 'пропущена' : `${tabProgress}%`}</span>
+                </button>
+              {/each}
+            </div>
+          {:else}
+            <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
+            {#if sessionReady && mesocycle && microcycle && activeSlot}
+              <p>
+                Микроцикл {microcycle.plan.indexInMeso}
+                {#if plannedSessionDate}
+                  · {formatDateRu(plannedSessionDate)}
+                {:else}
+                  · дата не назначена
+                {/if}
+                {#if sessionSkipped}
+                  · <span class="skip-flag">пропущена</span>
+                {/if}
+              </p>
+            {:else if mesocycle && microcycle}
+              <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
+            {:else if mesocycle}
+              <p>Выберите микроцикл, затем сессию A или B</p>
             {/if}
-          {:else if mesocycle && microcycle}
-            <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
-          {:else if mesocycle}
-            <p>Выберите микроцикл, затем сессию A или B</p>
           {/if}
         </div>
         {#if sessionReady}
@@ -1217,7 +1309,7 @@
 
   .training-top {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 24px;
     padding-bottom: 22px;
@@ -1227,6 +1319,103 @@
   .training-top.collapsed {
     padding-bottom: 0;
     border-bottom: 0;
+  }
+
+  .training-top-main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .context-nav {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 6px;
+  }
+
+  .context-focus {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .context-meso {
+    color: var(--meso-color, var(--text));
+    font-size: clamp(1.85rem, 3.8vw, 2.35rem);
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    line-height: 1.05;
+  }
+
+  .context-session {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 10px;
+    margin-top: 10px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .context-slot {
+    color: var(--slot-color);
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .context-sep {
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .context-date.muted-date {
+    color: var(--muted);
+  }
+
+  .context-position {
+    display: block;
+    margin-top: 8px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .nav-arrow {
+    display: grid;
+    flex: 0 0 46px;
+    width: 46px;
+    height: 46px;
+    place-items: center;
+    color: var(--text);
+    background: #0e1014;
+    border: 1px solid var(--line);
+    border-radius: 0;
+    font-family: var(--font-mono);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    transition:
+      border-color 120ms ease,
+      color 120ms ease,
+      background 120ms ease;
+  }
+
+  .nav-arrow:hover:not(:disabled) {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, #0e1014);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  }
+
+  .nav-arrow:disabled {
+    opacity: 0.28;
+    cursor: not-allowed;
   }
 
   .training-top-aside {
@@ -1922,6 +2111,38 @@
 
     .training-card {
       padding: 18px;
+    }
+
+    .context-nav {
+      gap: 10px;
+    }
+
+    .nav-arrow {
+      flex-basis: 40px;
+      width: 40px;
+      height: 40px;
+      font-size: 18px;
+    }
+
+    .context-meso {
+      font-size: 1.55rem;
+    }
+
+    .context-session {
+      font-size: 13px;
+    }
+
+    .context-slot {
+      font-size: 15px;
+    }
+
+    .training-top {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .training-top-aside {
+      justify-content: space-between;
     }
 
     .exercise-item {
