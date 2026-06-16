@@ -7,8 +7,12 @@
   import { workoutStore } from '$lib/workout-store';
   import type { StrengthSummary, TrendPoint } from '$lib/types';
 
+  type SortKey = 'sessions' | '1rm' | 'recent' | 'name';
+  type InsightTone = 'good' | 'warn' | 'neutral';
+
   let query = $state('');
   let selectedLocal = $state<string | null>(null);
+  let sortKey = $state<SortKey>('sessions');
 
   const urlExercise = $derived.by(() => (browser ? page.url.searchParams.get('exercise') : null));
   const selectedExercise = $derived(selectedLocal ?? urlExercise ?? null);
@@ -17,16 +21,29 @@
     view.summary.filter((item): item is StrengthSummary => item.kind === 'strength')
   );
   const filtered = $derived(
-    strengthSummary
-      .filter((item) => item.exercise.toLowerCase().includes(query.trim().toLowerCase()))
-      .sort((a, b) => b.sessions - a.sessions)
+    strengthSummary.filter((item) =>
+      item.exercise.toLowerCase().includes(query.trim().toLowerCase())
+    )
   );
+  const sortedExercises = $derived.by(() => {
+    const list = [...filtered];
+    switch (sortKey) {
+      case '1rm':
+        return list.sort((a, b) => b.best1rm.value - a.best1rm.value);
+      case 'recent':
+        return list.sort((a, b) => (b.periodEnd ?? '').localeCompare(a.periodEnd ?? ''));
+      case 'name':
+        return list.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
+      default:
+        return list.sort((a, b) => b.sessions - a.sessions);
+    }
+  });
   const trendPoints = $derived<TrendPoint[]>(
     selectedExercise ? (view.trend[selectedExercise] ?? []) : []
   );
   const selectedSummary = $derived(
     selectedExercise
-      ? strengthSummary.find((item) => item.exercise === selectedExercise) ?? null
+      ? (strengthSummary.find((item) => item.exercise === selectedExercise) ?? null)
       : null
   );
   const trainingDays = $derived(new Set(view.sessions.map((session) => session.date)).size);
@@ -47,198 +64,781 @@
       0
     )
   );
+  const totalTonnage = $derived(strengthSummary.reduce((sum, item) => sum + item.tonnage, 0));
+  const recentPrCount = $derived(
+    strengthSummary.filter(
+      (item) => item.best1rm.date && item.best1rm.date >= last30Start
+    ).length
+  );
+  const consistencyPct = $derived(Math.min(100, Math.round((recentDays / 12) * 100)));
   const strongest = $derived(
     [...strengthSummary].sort((a, b) => b.best1rm.value - a.best1rm.value).slice(0, 5)
   );
-  const mostPracticed = $derived([...strengthSummary].sort((a, b) => b.sessions - a.sessions).slice(0, 5));
+  const mostPracticed = $derived(
+    [...strengthSummary].sort((a, b) => b.sessions - a.sessions).slice(0, 5)
+  );
+  const max1rm = $derived(Math.max(...strongest.map((item) => item.best1rm.value), 1));
+  const maxSessions = $derived(Math.max(...mostPracticed.map((item) => item.sessions), 1));
+  const selectedTrendDelta = $derived(trendDelta(trendPoints));
+  const chartColor = $derived(selectedExercise ? exerciseColor(selectedExercise) : '#6ee7a8');
+
+  const insights = $derived.by(() => {
+    const items: { id: string; tone: InsightTone; title: string; detail: string }[] = [];
+
+    if (recentDays >= 12) {
+      items.push({
+        id: 'rhythm',
+        tone: 'good',
+        title: 'Стабильный ритм',
+        detail: `${recentDays} тренировочных дней за 30 дней — хорошая регулярность.`
+      });
+    } else if (recentDays > 0) {
+      items.push({
+        id: 'rhythm-low',
+        tone: 'warn',
+        title: 'Мало регулярности',
+        detail: `${recentDays} из 30 дней с тренировками. Для прогресса обычно нужно 8–12+.`
+      });
+    }
+
+    if (recentPrCount > 0) {
+      items.push({
+        id: 'prs',
+        tone: 'good',
+        title: 'Свежие рекорды',
+        detail: `${recentPrCount} ${recentPrCount === 1 ? 'упражнение' : 'упражнений'} с лучшим 1ПМ за последний месяц.`
+      });
+    }
+
+    if (strongest.length >= 2) {
+      items.push({
+        id: 'anchor',
+        tone: 'neutral',
+        title: 'Якорное движение',
+        detail: `${strongest[0].exercise} — лидер по расчётному 1ПМ (${fmtNum(strongest[0].best1rm.value)} кг).`
+      });
+    }
+
+    return items.slice(0, 3);
+  });
+
+  $effect(() => {
+    if (urlExercise && strengthSummary.some((item) => item.exercise === urlExercise)) {
+      selectedLocal = urlExercise;
+    }
+  });
 
   function selectExercise(name: string) {
     selectedLocal = selectedExercise === name ? null : name;
   }
+
+  function trendDelta(points: TrendPoint[]): number | null {
+    if (points.length < 2) return null;
+    const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+    const first = sorted[0].est1rm;
+    const last = sorted[sorted.length - 1].est1rm;
+    if (!first) return null;
+    return ((last - first) / first) * 100;
+  }
+
+  function sparklinePath(points: TrendPoint[]): string {
+    if (points.length < 2) return '';
+    const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+    const values = sorted.map((point) => point.est1rm);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const width = 52;
+    const height = 18;
+    return sorted
+      .map((point, index) => {
+        const x = (index / (sorted.length - 1)) * width;
+        const y =
+          max === min ? height / 2 : height - ((point.est1rm - min) / (max - min)) * height;
+        return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }
+
+  function exerciseColor(name: string): string {
+    const palette = ['#6ee7a8', '#5b9dff', '#fbbf24', '#f472b6', '#a78bfa', '#fb923c'];
+    let hash = 0;
+    for (let i = 0; i < name.length; i += 1) hash = (hash + name.charCodeAt(i) * (i + 1)) % palette.length;
+    return palette[hash];
+  }
 </script>
 
-<div class="container">
+<div class="container analytics">
   <header class="page-header">
     <div>
       <div class="eyebrow">Прогресс и закономерности</div>
       <h1>Аналитика</h1>
-      <p>
-        Регулярность тренировок, силовые показатели и динамика упражнений на основе вашего журнала.
-      </p>
+      <p>Силовые показатели, регулярность и динамика 1ПМ по журналу тренировок.</p>
     </div>
-    <a class="button button-secondary" href="{base}/load">Нагрузка по блокам</a>
+    <div class="header-actions">
+      <a class="button button-secondary" href="{base}/history">Журнал</a>
+      <a class="button button-ghost" href="{base}/load">Нагрузка по блокам</a>
+    </div>
   </header>
 
-  <section class="metric-grid">
-    <article class="metric-card">
-      <span>Тренировочных дней</span>
-      <strong>{trainingDays}</strong>
-      <small>за всё время</small>
-    </article>
-    <article class="metric-card">
-      <span>За последние 30 дней</span>
-      <strong>{recentDays}</strong>
-      <small>{recentDays >= 12 ? 'стабильный ритм' : 'можно добавить регулярности'}</small>
-    </article>
-    <article class="metric-card">
-      <span>Всего подходов</span>
-      <strong>{totalSets}</strong>
-      <small>во всех типах нагрузок</small>
-    </article>
-    <article class="metric-card">
-      <span>Силовых упражнений</span>
-      <strong>{strengthSummary.length}</strong>
-      <small>с рассчитанным прогрессом</small>
-    </article>
-  </section>
-
-  <section class="insight-grid">
-    <article class="card insight-card">
-      <div class="insight-heading">
-        <div>
-          <div class="eyebrow">По расчётному 1ПМ</div>
-          <h2>Самые сильные движения</h2>
-        </div>
-      </div>
-      <div class="ranking">
-        {#each strongest as item, index (item.exercise)}
-          <button type="button" onclick={() => selectExercise(item.exercise)}>
-            <span class="rank">{index + 1}</span>
-            <span class="rank-name">{item.exercise}</span>
-            <strong>{fmtNum(item.best1rm.value)} кг</strong>
-          </button>
-        {/each}
-      </div>
-    </article>
-
-    <article class="card insight-card">
-      <div class="insight-heading">
-        <div>
-          <div class="eyebrow">По числу сессий</div>
-          <h2>Основа программы</h2>
-        </div>
-      </div>
-      <div class="ranking">
-        {#each mostPracticed as item, index (item.exercise)}
-          <button type="button" onclick={() => selectExercise(item.exercise)}>
-            <span class="rank">{index + 1}</span>
-            <span class="rank-name">{item.exercise}</span>
-            <strong>{item.sessions}</strong>
-          </button>
-        {/each}
-      </div>
-    </article>
-  </section>
-
-  {#if selectedExercise && selectedSummary}
-    <div class="section-heading">
-      <div>
-        <h2>{selectedExercise}</h2>
-        <p>Динамика расчётного максимума по тренировочным датам</p>
-      </div>
-      <div class="chart-actions">
-        <a class="button button-ghost" href="{base}/history?exercise={encodeURIComponent(selectedExercise)}">
-          История
-        </a>
-        <button class="button button-ghost" type="button" onclick={() => (selectedLocal = null)}>
-          Закрыть
-        </button>
-      </div>
-    </div>
-    <section class="card chart-card">
-      <div class="selected-summary">
-        <div>
-          <span>Лучший 1ПМ</span>
-          <strong>{fmtNum(selectedSummary.best1rm.value)} кг</strong>
-        </div>
-        <div>
-          <span>Лучший подход</span>
-          <strong>{fmtSet(selectedSummary.bestWeight.weight, selectedSummary.bestWeight.reps)}</strong>
-        </div>
-        <div>
-          <span>Сессий</span>
-          <strong>{selectedSummary.sessions}</strong>
-        </div>
-        <div>
-          <span>Последний результат</span>
-          <strong>{selectedSummary.periodEnd ? formatDateRu(selectedSummary.periodEnd) : '—'}</strong>
-        </div>
-      </div>
-      <TrendChart title="Расчётный 1ПМ" points={trendPoints} />
+  {#if !workoutStore.bootstrapped}
+    <section class="card skeleton-panel" aria-busy="true" aria-label="Загрузка аналитики">
+      <div class="skeleton vitals-skeleton"></div>
+      <div class="skeleton workspace-skeleton"></div>
     </section>
-  {/if}
+  {:else if strengthSummary.length === 0}
+    <section class="card empty-state">
+      <h2>Пока нет силовых данных</h2>
+      <p>
+        Запишите несколько силовых тренировок — здесь появятся графики 1ПМ, рейтинги упражнений
+        и сводка по регулярности.
+      </p>
+      <a class="button button-primary" href="{base}/add">Записать тренировку</a>
+    </section>
+  {:else}
+    <section class="vitals-deck">
+      <article class="vital-card accent-vital">
+        <span class="vital-label">Тренировочных дней</span>
+        <strong>{trainingDays}</strong>
+        <small>за всё время</small>
+      </article>
+      <article class="vital-card">
+        <span class="vital-label">Последние 30 дней</span>
+        <strong>{recentDays}</strong>
+        <div class="vital-meter" aria-hidden="true">
+          <span style={`width: ${consistencyPct}%`}></span>
+        </div>
+        <small>{recentDays >= 12 ? 'стабильный ритм' : 'можно добавить регулярности'}</small>
+      </article>
+      <article class="vital-card">
+        <span class="vital-label">Суммарный объём</span>
+        <strong>{fmtNum(totalTonnage)}<em>кг</em></strong>
+        <small>{totalSets} подходов · {strengthSummary.length} упражнений</small>
+      </article>
+      <article class="vital-card">
+        <span class="vital-label">Рекорды за месяц</span>
+        <strong>{recentPrCount}</strong>
+        <small>упражнений с новым 1ПМ</small>
+      </article>
+    </section>
 
-  <div class="section-heading">
-    <div>
-      <h2>Все силовые упражнения</h2>
-      <p>Выберите строку, чтобы открыть график</p>
-    </div>
-    <input class="search" type="search" placeholder="Найти упражнение" bind:value={query} />
-  </div>
+    <div class="analytics-workspace">
+      <aside class="catalog card">
+        <div class="catalog-head">
+          <div>
+            <h2>Упражнения</h2>
+            <p>{sortedExercises.length} в каталоге</p>
+          </div>
+          <input
+            class="search"
+            type="search"
+            placeholder="Найти…"
+            bind:value={query}
+            aria-label="Поиск упражнения"
+          />
+          <div class="sort-row" role="tablist" aria-label="Сортировка">
+            {#each [
+              { key: 'sessions' as SortKey, label: 'Сессии' },
+              { key: '1rm' as SortKey, label: '1ПМ' },
+              { key: 'recent' as SortKey, label: 'Недавние' },
+              { key: 'name' as SortKey, label: 'А–Я' }
+            ] as option (option.key)}
+              <button
+                type="button"
+                role="tab"
+                class="sort-pill"
+                class:active={sortKey === option.key}
+                aria-selected={sortKey === option.key}
+                onclick={() => (sortKey = option.key)}
+              >
+                {option.label}
+              </button>
+            {/each}
+          </div>
+        </div>
 
-  <section class="card table-card">
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Упражнение</th>
-            <th>Сессий</th>
-            <th>Расчётный 1ПМ</th>
-            <th>Лучший подход</th>
-            <th>Средняя интенсивность</th>
-            <th>Последняя запись</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each filtered as item (item.exercise)}
-            <tr class:selected={selectedExercise === item.exercise} onclick={() => selectExercise(item.exercise)}>
-              <td><strong>{item.exercise}</strong></td>
-              <td>{item.sessions}</td>
-              <td>
-                <strong>{fmtNum(item.best1rm.value)} кг</strong>
-                <span>{item.best1rm.date ? formatDateRu(item.best1rm.date) : '—'}</span>
-              </td>
-              <td>
-                {fmtSet(item.bestWeight.weight, item.bestWeight.reps)}
-                <span>{item.bestWeight.date ? formatDateRu(item.bestWeight.date) : '—'}</span>
-              </td>
-              <td>{fmtNum(item.avgIntensity)} кг</td>
-              <td>{item.periodEnd ? formatDateRu(item.periodEnd) : '—'}</td>
-            </tr>
+        <ul class="catalog-list">
+          {#each sortedExercises as item (item.exercise)}
+            {@const points = view.trend[item.exercise] ?? []}
+            {@const path = sparklinePath(points)}
+            <li>
+              <button
+                type="button"
+                class="catalog-item"
+                class:active={selectedExercise === item.exercise}
+                style={`--ex-color: ${exerciseColor(item.exercise)}`}
+                onclick={() => selectExercise(item.exercise)}
+              >
+                <span class="cat-main">
+                  <strong>{item.exercise}</strong>
+                  <span class="cat-meta">
+                    {item.sessions} сессий · {item.periodEnd ? formatDateRu(item.periodEnd) : '—'}
+                  </span>
+                </span>
+                {#if path}
+                  <svg class="cat-spark" viewBox="0 0 52 18" aria-hidden="true">
+                    <path d={path} fill="none" stroke="var(--ex-color)" stroke-width="1.8" />
+                  </svg>
+                {/if}
+                <span class="cat-1rm">{fmtNum(item.best1rm.value)}<small>кг</small></span>
+              </button>
+            </li>
           {/each}
-        </tbody>
-      </table>
+        </ul>
+      </aside>
+
+      <main class="detail card">
+        {#if selectedExercise && selectedSummary}
+          <header class="detail-head">
+            <div>
+              <div class="eyebrow">Выбрано упражнение</div>
+              <h2>{selectedExercise}</h2>
+              {#if selectedTrendDelta != null}
+                <p class="trend-badge" class:up={selectedTrendDelta > 0} class:down={selectedTrendDelta < 0}>
+                  {selectedTrendDelta > 0 ? '+' : ''}{fmtNum(selectedTrendDelta)}% за период
+                </p>
+              {/if}
+            </div>
+            <div class="detail-actions">
+              <a
+                class="button button-secondary"
+                href="{base}/history?exercise={encodeURIComponent(selectedExercise)}"
+              >
+                История
+              </a>
+              <button class="button button-ghost" type="button" onclick={() => (selectedLocal = null)}>
+                Закрыть
+              </button>
+            </div>
+          </header>
+
+          <div class="kpi-grid">
+            <article>
+              <span>Лучший 1ПМ</span>
+              <strong>{fmtNum(selectedSummary.best1rm.value)}<em>кг</em></strong>
+              <small>{selectedSummary.best1rm.date ? formatDateRu(selectedSummary.best1rm.date) : '—'}</small>
+            </article>
+            <article>
+              <span>Лучший подход</span>
+              <strong>{fmtSet(selectedSummary.bestWeight.weight, selectedSummary.bestWeight.reps)}</strong>
+              <small>{selectedSummary.bestWeight.date ? formatDateRu(selectedSummary.bestWeight.date) : '—'}</small>
+            </article>
+            <article>
+              <span>Сессий</span>
+              <strong>{selectedSummary.sessions}</strong>
+              <small>{selectedSummary.sets} подходов</small>
+            </article>
+            <article>
+              <span>Средняя интенсивность</span>
+              <strong>{fmtNum(selectedSummary.avgIntensity)}<em>кг</em></strong>
+              <small>на повторение</small>
+            </article>
+          </div>
+
+          <div class="chart-wrap">
+            <TrendChart title="Расчётный 1ПМ" points={trendPoints} color={chartColor} />
+          </div>
+        {:else}
+          <header class="detail-head overview-head">
+            <div>
+              <div class="eyebrow">Обзор</div>
+              <h2>Выберите упражнение</h2>
+              <p>Кликните в списке слева — откроется график и детальная сводка.</p>
+            </div>
+          </header>
+
+          {#if insights.length > 0}
+            <ul class="insight-list">
+              {#each insights as item (item.id)}
+                <li class="insight insight-{item.tone}">
+                  <span class="insight-dot"></span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+
+          <div class="rank-grid">
+            <section class="rank-panel">
+              <div class="rank-head">
+                <span class="eyebrow">По 1ПМ</span>
+                <h3>Самые сильные</h3>
+              </div>
+              <ul class="rank-list">
+                {#each strongest as item, index (item.exercise)}
+                  <li>
+                    <button type="button" onclick={() => selectExercise(item.exercise)}>
+                      <span class="rank-no">{index + 1}</span>
+                      <span class="rank-body">
+                        <strong>{item.exercise}</strong>
+                        <span
+                          class="rank-bar"
+                          style={`width: ${(item.best1rm.value / max1rm) * 100}%`}
+                        ></span>
+                      </span>
+                      <em>{fmtNum(item.best1rm.value)} кг</em>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            </section>
+
+            <section class="rank-panel">
+              <div class="rank-head">
+                <span class="eyebrow">По сессиям</span>
+                <h3>Основа программы</h3>
+              </div>
+              <ul class="rank-list">
+                {#each mostPracticed as item, index (item.exercise)}
+                  <li>
+                    <button type="button" onclick={() => selectExercise(item.exercise)}>
+                      <span class="rank-no">{index + 1}</span>
+                      <span class="rank-body">
+                        <strong>{item.exercise}</strong>
+                        <span
+                          class="rank-bar sessions"
+                          style={`width: ${(item.sessions / maxSessions) * 100}%`}
+                        ></span>
+                      </span>
+                      <em>{item.sessions}</em>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          </div>
+        {/if}
+      </main>
     </div>
-  </section>
+  {/if}
 </div>
 
 <style>
-  .insight-grid {
+  .analytics {
+    padding-bottom: 40px;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .vitals-deck {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .vital-card {
+    position: relative;
+    padding: 16px 18px;
+    background: linear-gradient(155deg, #1a1d24, #111419);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+
+  .vital-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--line-strong);
+  }
+
+  .vital-card.accent-vital::before {
+    background: var(--accent);
+  }
+
+  .vital-label {
+    display: block;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .vital-card strong {
+    display: block;
+    margin-top: 8px;
+    font-family: var(--font-display);
+    font-size: clamp(26px, 3vw, 34px);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+
+  .vital-card strong em {
+    margin-left: 4px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 600;
+  }
+
+  .vital-card small {
+    display: block;
+    margin-top: 8px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  .vital-meter {
+    height: 4px;
+    margin-top: 10px;
+    background: #0a0c10;
+    border: 1px solid var(--line);
+  }
+
+  .vital-meter span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--blue), var(--accent));
+    transition: width 280ms ease;
+  }
+
+  .analytics-workspace {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+
+  .catalog {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 280px);
+    min-height: 420px;
+    padding: 0;
+    overflow: hidden;
+    position: sticky;
+    top: 12px;
+  }
+
+  .catalog-head {
+    display: grid;
+    gap: 10px;
+    padding: 18px 18px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .catalog-head h2 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: 0.03em;
+  }
+
+  .catalog-head p {
+    margin: 3px 0 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  .search {
+    width: 100%;
+  }
+
+  .sort-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .sort-pill {
+    padding: 5px 9px;
+    color: var(--muted-strong);
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .sort-pill.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .catalog-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    overflow: auto;
+    flex: 1;
+  }
+
+  .catalog-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+    padding: 10px 12px;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-align: left;
+    transition:
+      background 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .catalog-item:hover {
+    background: rgb(255 255 255 / 2%);
+    border-color: var(--line);
+  }
+
+  .catalog-item.active {
+    background: color-mix(in srgb, var(--ex-color) 10%, #121419);
+    border-color: color-mix(in srgb, var(--ex-color) 35%, var(--line));
+    border-left: 3px solid var(--ex-color);
+  }
+
+  .cat-main strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .cat-meta {
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+  }
+
+  .cat-spark {
+    width: 52px;
+    height: 18px;
+    opacity: 0.85;
+  }
+
+  .cat-1rm {
+    color: var(--ex-color, var(--accent));
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .cat-1rm small {
+    margin-left: 2px;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 600;
+  }
+
+  .detail {
+    padding: 22px;
+    min-height: 420px;
+  }
+
+  .detail-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .detail-head h2 {
+    margin: 4px 0 0;
+    font-size: clamp(22px, 3vw, 30px);
+    letter-spacing: 0.02em;
+  }
+
+  .detail-head p,
+  .overview-head p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .trend-badge {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 9px;
+    color: var(--muted-strong);
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .trend-badge.up {
+    color: var(--accent);
+    border-color: rgb(204 255 51 / 35%);
+  }
+
+  .trend-badge.down {
+    color: var(--danger);
+    border-color: rgb(255 92 82 / 35%);
+  }
+
+  .detail-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .kpi-grid article {
+    padding: 14px;
+    background: #0e1014;
+    border: 1px solid var(--line);
+  }
+
+  .kpi-grid span {
+    display: block;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .kpi-grid strong {
+    display: block;
+    margin-top: 8px;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .kpi-grid strong em {
+    margin-left: 3px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 600;
+  }
+
+  .kpi-grid small {
+    display: block;
+    margin-top: 6px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+  }
+
+  .chart-wrap :global(.chart-card) {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .insight-list {
+    list-style: none;
+    margin: 0 0 18px;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .insight {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 12px 14px;
+    background: #0e1014;
+    border: 1px solid var(--line);
+  }
+
+  .insight-dot {
+    width: 8px;
+    height: 8px;
+    margin-top: 5px;
+    background: var(--muted);
+  }
+
+  .insight-good .insight-dot {
+    background: var(--accent);
+    box-shadow: 0 0 12px rgb(204 255 51 / 45%);
+  }
+
+  .insight-warn .insight-dot {
+    background: var(--hazard);
+  }
+
+  .insight strong {
+    display: block;
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .insight p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .rank-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
-    margin-top: 16px;
   }
 
-  .insight-card {
-    padding: 20px;
+  .rank-panel {
+    padding: 16px;
+    background: #0e1014;
+    border: 1px solid var(--line);
   }
 
-  .insight-heading h2 {
-    margin: 5px 0 15px;
-    font-size: 18px;
+  .rank-head h3 {
+    margin: 4px 0 0;
+    font-size: 16px;
+    letter-spacing: 0.03em;
   }
 
-  .ranking {
+  .rank-list {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0;
     display: grid;
+    gap: 6px;
   }
 
-  .ranking button {
+  .rank-list button {
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    gap: 9px;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 10px;
     align-items: center;
-    padding: 10px 0;
+    width: 100%;
+    padding: 8px 0;
     color: var(--text);
     background: transparent;
     border: 0;
@@ -247,121 +847,143 @@
     text-align: left;
   }
 
-  .ranking button:last-child {
+  .rank-list li:last-child button {
     border-bottom: 0;
   }
 
-  .rank {
-    display: grid;
-    width: 24px;
-    height: 24px;
-    place-items: center;
+  .rank-no {
     color: var(--muted);
-    background: var(--surface-soft);
-    border-radius: 0;
-    font-size: 9px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 800;
   }
 
-  .rank-name {
+  .rank-body {
+    position: relative;
+    min-width: 0;
+    padding-bottom: 6px;
+  }
+
+  .rank-body strong {
+    display: block;
     overflow: hidden;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .ranking strong {
+  .rank-bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+    max-width: 100%;
+  }
+
+  .rank-bar.sessions {
+    background: linear-gradient(90deg, var(--blue), transparent);
+  }
+
+  .rank-list em {
     color: var(--accent);
-    font-size: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 800;
   }
 
-  .chart-actions {
-    display: flex;
-    gap: 7px;
-  }
-
-  .chart-card {
+  .skeleton-panel {
     padding: 20px;
-  }
-
-  .selected-summary {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
+    gap: 12px;
   }
 
-  .selected-summary div {
-    padding: 12px;
-    background: var(--surface-soft);
-    border: 1px solid var(--line);
+  .skeleton {
+    display: block;
     border-radius: 0;
+    background: linear-gradient(
+      90deg,
+      rgb(255 255 255 / 4%) 0%,
+      rgb(255 255 255 / 9%) 50%,
+      rgb(255 255 255 / 4%) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.2s ease-in-out infinite;
   }
 
-  .selected-summary span,
-  .selected-summary strong {
-    display: block;
+  @keyframes shimmer {
+    0% {
+      background-position: 100% 0;
+    }
+    100% {
+      background-position: -100% 0;
+    }
   }
 
-  .selected-summary span {
-    color: var(--muted);
-    font-size: 9px;
+  .vitals-skeleton {
+    height: 96px;
   }
 
-  .selected-summary strong {
-    margin-top: 6px;
-    font-size: 14px;
+  .workspace-skeleton {
+    height: 420px;
   }
 
-  .search {
-    width: 230px;
-  }
+  @media (max-width: 980px) {
+    .vitals-deck {
+      grid-template-columns: 1fr 1fr;
+    }
 
-  .table-card {
-    overflow: hidden;
-  }
-
-  .table-wrap {
-    overflow-x: auto;
-  }
-
-  tbody tr {
-    cursor: pointer;
-    transition: background 120ms ease;
-  }
-
-  tbody tr:hover,
-  tbody tr.selected {
-    background: rgb(185 243 90 / 5%);
-  }
-
-  td span {
-    display: block;
-    margin-top: 3px;
-    color: var(--muted);
-    font-size: 9px;
-  }
-
-  @media (max-width: 850px) {
-    .insight-grid {
+    .analytics-workspace {
       grid-template-columns: 1fr;
     }
 
-    .selected-summary {
+    .catalog {
+      position: static;
+      max-height: none;
+      min-height: 0;
+    }
+
+    .catalog-list {
+      max-height: 320px;
+    }
+
+    .kpi-grid {
       grid-template-columns: 1fr 1fr;
     }
   }
 
-  @media (max-width: 560px) {
-    .search {
+  @media (max-width: 620px) {
+    .vitals-deck {
+      grid-template-columns: 1fr;
+    }
+
+    .detail-head {
+      flex-direction: column;
+    }
+
+    .detail-actions {
       width: 100%;
     }
 
-    .chart-actions {
+    .detail-actions .button {
+      flex: 1;
+    }
+
+    .rank-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .kpi-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .header-actions {
       width: 100%;
     }
 
-    .chart-actions .button {
+    .header-actions .button {
       flex: 1;
     }
   }
