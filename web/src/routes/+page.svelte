@@ -96,6 +96,16 @@
     if (!microcycle || activeIndex == null) return null;
     return sessionDateForIndex(microcycle, activeIndex);
   });
+  const sessionHeadline = $derived.by(() => {
+    if (!sessionReady || !activeSlot) return null;
+    if (plannedSessionDate) {
+      return plannedSessionDate === todayIso() ? 'Сегодня' : formatDateRu(plannedSessionDate);
+    }
+    if (mesocycle && microcycle) {
+      return `${mesocycle.plan.label} · ${slotLabel(activeSlot)}`;
+    }
+    return slotLabel(activeSlot);
+  });
   const workoutDate = $derived(
     sessionReady ? (urlDate ?? plannedSessionDate ?? datePick) : (urlDate ?? datePick)
   );
@@ -800,8 +810,8 @@
         {/if}
       </div>
       <h1>
-        {#if sessionReady && workoutDate}
-          {workoutDate === todayIso() ? 'Сегодня' : formatDateRu(workoutDate)}
+        {#if sessionHeadline}
+          {sessionHeadline}
         {:else}
           Выберите тренировку
         {/if}
