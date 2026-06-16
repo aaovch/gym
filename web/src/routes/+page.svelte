@@ -319,14 +319,44 @@
     };
   }
 
-  function applyWeightDelta(sets: ExerciseSet[], kind: ExerciseKind, delta: number): ExerciseSet[] {
-    if (!delta || kind !== 'strength') return sets;
-    return sets.map(([weight, reps]) => [Math.max(0, weight + delta), reps] as ExerciseSet);
+  function applySetAdjustments(
+    sets: ExerciseSet[],
+    kind: ExerciseKind,
+    exerciseName: string,
+    adjustments: Record<string, number>
+  ): ExerciseSet[] {
+    if (kind !== 'strength') return sets;
+    return sets.map(([weight, reps], index) => {
+      const delta = adjustments[setAdjustKey(exerciseName, index)] ?? 0;
+      return delta ? [Math.max(0, weight + delta), reps] as ExerciseSet : [weight, reps];
+    });
   }
 
-  function nudgeWeight(exerciseName: string, direction: 1 | -1) {
-    const current = weightAdjust[exerciseName] ?? 0;
-    weightAdjust = { ...weightAdjust, [exerciseName]: current + direction * WEIGHT_STEP };
+  function setAdjustKey(exerciseName: string, setIndex: number): string {
+    return `${exerciseName}:${setIndex}`;
+  }
+
+  function setAdjustDelta(exerciseName: string, setIndex: number): number {
+    return weightAdjust[setAdjustKey(exerciseName, setIndex)] ?? 0;
+  }
+
+  function clearWeightAdjust(exerciseName: string) {
+    const prefix = `${exerciseName}:`;
+    const next = { ...weightAdjust };
+    let changed = false;
+    for (const key of Object.keys(next)) {
+      if (key.startsWith(prefix)) {
+        delete next[key];
+        changed = true;
+      }
+    }
+    if (changed) weightAdjust = next;
+  }
+
+  function nudgeSetWeight(exerciseName: string, setIndex: number, direction: 1 | -1) {
+    const key = setAdjustKey(exerciseName, setIndex);
+    const current = weightAdjust[key] ?? 0;
+    weightAdjust = { ...weightAdjust, [key]: current + direction * WEIGHT_STEP };
   }
 
   function adjustedPreviewSets(
@@ -335,10 +365,11 @@
     if (protocolSkips.has(exerciseName)) return null;
     const input = plannedInput(exerciseName);
     if (!input) return null;
-    const sets = applyWeightDelta(
+    const sets = applySetAdjustments(
       suggestPlannedSets(input),
       input.kind,
-      weightAdjust[exerciseName] ?? 0
+      exerciseName,
+      weightAdjust
     );
     if (!sets.length) return null;
     return { kind: input.kind, sets };
@@ -368,7 +399,7 @@
         microId: microcycle.plan.id,
         indexInMicro: activeIndex
       });
-      weightAdjust = { ...weightAdjust, [exerciseName]: 0 };
+      clearWeightAdjust(exerciseName);
       if (!silent) toasts.success(successMessage);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось сохранить';
@@ -383,10 +414,11 @@
     if (protocolSkips.has(exerciseName)) return;
     const input = plannedInput(exerciseName);
     if (!input) return;
-    const sets = applyWeightDelta(
+    const sets = applySetAdjustments(
       suggestPlannedSets(input),
       input.kind,
-      weightAdjust[exerciseName] ?? 0
+      exerciseName,
+      weightAdjust
     );
     await saveSetsFor(exerciseName, input.kind, sets, `Записано: ${exerciseName}`);
   }
@@ -402,10 +434,11 @@
       for (const exerciseName of targets) {
         const input = plannedInput(exerciseName);
         if (!input) continue;
-        const sets = applyWeightDelta(
+        const sets = applySetAdjustments(
           suggestPlannedSets(input),
           input.kind,
-          weightAdjust[exerciseName] ?? 0
+          exerciseName,
+          weightAdjust
         );
         if (!sets.length) continue;
         await saveSetsFor(exerciseName, input.kind, sets, '', true);
@@ -589,6 +622,36 @@
       <span>объём {fmtNum(st.tonnage)} кг</span>
     </p>
   {/if}
+{/snippet}
+
+{#snippet setStepper(exercise: string, setIndex: number, disabled: boolean)}
+  {@const delta = setAdjustDelta(exercise, setIndex)}
+  <div class="set-stepper" role="group" aria-label="Поправка веса подхода {setIndex + 1}">
+    <button
+      type="button"
+      aria-label="Меньше на {WEIGHT_STEP} кг"
+      {disabled}
+      onclick={() => nudgeSetWeight(exercise, setIndex, -1)}
+    >
+      −
+    </button>
+    <span class:dim={!delta}>
+      {#if delta === 0}
+        ±0
+      {:else}
+        {delta > 0 ? '+' : '−'}{fmtNum(Math.abs(delta))}
+      {/if}
+      <small>кг</small>
+    </span>
+    <button
+      type="button"
+      aria-label="Больше на {WEIGHT_STEP} кг"
+      {disabled}
+      onclick={() => nudgeSetWeight(exercise, setIndex, 1)}
+    >
+      +
+    </button>
+  </div>
 {/snippet}
 
 <div class="container dashboard">
@@ -925,36 +988,35 @@
                   {:else if hint || previewSets}
                     {@const ps = previewSets ? planStats(previewSets.sets) : null}
                     <div class="plan-meta">
-                      {#if previewSets && previewSets.kind === 'strength' && ps?.uniform}
+                      {#if hint && ps?.uniform}
                         <div class="rx">
                           <span class="rx-weight">{fmtNum(ps.weight)}<small>кг</small></span>
                           <span class="rx-scheme">{ps.count} × {ps.reps}</span>
-                          {#if hint}
-                            <span class="target-pct">{hint.targetPct}%<small>1ПМ</small></span>
-                          {/if}
+                          <span class="target-pct">{hint.targetPct}%<small>1ПМ</small></span>
                         </div>
-                      {:else}
-                        {#if hint}
-                          <div class="plan-target">
-                            <span class="target-weight">
-                              {fmtNum(hint.targetWeight)}<small>кг</small>
-                            </span>
-                            <span class="target-pct">
-                              {hint.targetPct}%<small>1ПМ</small>
-                            </span>
-                          </div>
-                        {/if}
-                        {#if previewSets}
-                          <div class="plan-sets">
-                            {#each previewSets.sets as set, setIndex}
+                      {:else if hint}
+                        <div class="plan-target">
+                          <span class="target-weight">
+                            {fmtNum(hint.targetWeight)}<small>кг</small>
+                          </span>
+                          <span class="target-pct">
+                            {hint.targetPct}%<small>1ПМ</small>
+                          </span>
+                        </div>
+                      {/if}
+                      {#if previewSets}
+                        <div class="plan-sets-editable">
+                          {#each previewSets.sets as set, setIndex}
+                            <div class="set-row">
                               <span class="set-chip">
                                 <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
                               </span>
-                            {/each}
-                          </div>
-                        {/if}
-                      {/if}
-                      {#if previewSets}
+                              {#if previewSets.kind === 'strength'}
+                                {@render setStepper(exercise, setIndex, busyId === exercise)}
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
                         {@render specSub(previewSets.kind, previewSets.sets, hint?.anchor1rm ?? null, null, '')}
                       {/if}
                     </div>
@@ -976,34 +1038,6 @@
                   {:else if protocolSkip}
                     <!-- actions hidden: protocol skip -->
                   {:else}
-                    {#if exerciseKind(exercise) === 'strength'}
-                      <div class="weight-stepper" role="group" aria-label="Поправка веса">
-                        <button
-                          type="button"
-                          aria-label="Меньше на {WEIGHT_STEP} кг"
-                          disabled={busyId === exercise}
-                          onclick={() => nudgeWeight(exercise, -1)}
-                        >
-                          −
-                        </button>
-                        <span class:dim={!(weightAdjust[exercise] ?? 0)}>
-                          {#if (weightAdjust[exercise] ?? 0) === 0}
-                            ±0
-                          {:else}
-                            {(weightAdjust[exercise] ?? 0) > 0 ? '+' : '−'}{fmtNum(Math.abs(weightAdjust[exercise] ?? 0))}
-                          {/if}
-                          <small>кг</small>
-                        </span>
-                        <button
-                          type="button"
-                          aria-label="Больше на {WEIGHT_STEP} кг"
-                          disabled={busyId === exercise}
-                          onclick={() => nudgeWeight(exercise, 1)}
-                        >
-                          +
-                        </button>
-                      </div>
-                    {/if}
                     <button
                       type="button"
                       class="button button-primary"
@@ -1519,6 +1553,71 @@
     gap: 6px;
   }
 
+  .plan-sets-editable {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .set-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .set-stepper {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    border: 1px solid var(--line);
+    background: #0a0c10;
+  }
+
+  .set-stepper button {
+    width: 28px;
+    height: 100%;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .set-stepper button:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--surface-raised);
+  }
+
+  .set-stepper button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .set-stepper span {
+    min-width: 44px;
+    padding: 0 4px;
+    border-inline: 1px solid var(--line);
+    color: var(--accent);
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .set-stepper span small {
+    margin-left: 2px;
+    color: var(--muted);
+    font-size: 8px;
+    font-weight: 600;
+  }
+
+  .set-stepper span.dim {
+    color: var(--muted);
+  }
+
   .set-chip {
     display: inline-flex;
     align-items: center;
@@ -1646,57 +1745,6 @@
     border: 0;
     cursor: pointer;
     font-size: 10px;
-  }
-
-  .weight-stepper {
-    display: inline-flex;
-    align-items: center;
-    height: 40px;
-    border: 1px solid var(--line-strong);
-    background: #0a0c10;
-  }
-
-  .weight-stepper button {
-    width: 38px;
-    height: 100%;
-    color: var(--text);
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    font-size: 20px;
-    line-height: 1;
-  }
-
-  .weight-stepper button:hover:not(:disabled) {
-    color: var(--accent);
-    background: var(--surface-raised);
-  }
-
-  .weight-stepper button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .weight-stepper span {
-    min-width: 56px;
-    padding: 0 4px;
-    border-inline: 1px solid var(--line);
-    color: var(--accent);
-    text-align: center;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .weight-stepper span small {
-    margin-left: 3px;
-    color: var(--muted);
-    font-size: 9px;
-    font-weight: 600;
-  }
-
-  .weight-stepper span.dim {
-    color: var(--muted);
   }
 
   .set-list.compact {
