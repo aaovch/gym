@@ -36,11 +36,13 @@ export type TimeChartLayout = {
 	plotTop: number;
 	plotBottom: number;
 	plotHeight: number;
-	xScale: (dateIso: string) => number;
+	pointX: (index: number) => number;
 	segments: TrendPoint[][];
 	gaps: TimeChartGap[];
 	dateTicks: TimeChartTick[];
 	spanDays: number;
+	startDate: string;
+	endDate: string;
 };
 
 export function dateToMs(iso: string): number {
@@ -74,26 +76,25 @@ function formatTickLabel(iso: string, spanDays: number): string {
 
 function buildDateTicks(
 	sorted: TrendPoint[],
-	xScale: (iso: string) => number,
+	pointX: (index: number) => number,
 	spanDays: number,
 	maxTicks: number
 ): TimeChartTick[] {
-	const uniqueDates = [...new Set(sorted.map((point) => point.date))].sort((a, b) =>
-		a.localeCompare(b)
-	);
-	if (uniqueDates.length === 0) return [];
-	if (uniqueDates.length <= maxTicks) {
-		return uniqueDates.map((date) => ({
-			x: xScale(date),
-			label: formatTickLabel(date, spanDays)
+	if (sorted.length === 0) return [];
+	if (sorted.length <= maxTicks) {
+		return sorted.map((point, index) => ({
+			x: pointX(index),
+			label: formatTickLabel(point.date, spanDays)
 		}));
 	}
 
 	const ticks: TimeChartTick[] = [];
 	for (let i = 0; i < maxTicks; i++) {
-		const idx = Math.round((i / (maxTicks - 1)) * (uniqueDates.length - 1));
-		const date = uniqueDates[idx];
-		ticks.push({ x: xScale(date), label: formatTickLabel(date, spanDays) });
+		const index = Math.round((i / (maxTicks - 1)) * (sorted.length - 1));
+		ticks.push({
+			x: pointX(index),
+			label: formatTickLabel(sorted[index].date, spanDays)
+		});
 	}
 	return ticks;
 }
@@ -106,6 +107,7 @@ export function buildTimeChartLayout(
 		padding?: ChartPadding;
 		gapDays?: number;
 		maxTicks?: number;
+		minPointSpacing?: number;
 	} = {}
 ): TimeChartLayout | null {
 	if (points.length === 0) return null;
@@ -113,22 +115,21 @@ export function buildTimeChartLayout(
 	const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
 	const gapDays = options.gapDays ?? TRAINING_GAP_DAYS;
 	const padding = options.padding ?? { left: 44, right: 12, top: 12, bottom: 28 };
-	const width = options.width ?? 640;
+	const minPointSpacing = options.minPointSpacing ?? 24;
 	const height = options.height ?? 200;
 	const plotTop = padding.top;
 	const plotBottom = height - padding.bottom;
 	const plotHeight = plotBottom - plotTop;
+	const width =
+		options.width ??
+		Math.max(640, padding.left + padding.right + Math.max(sorted.length - 1, 1) * minPointSpacing);
 	const plotWidth = width - padding.left - padding.right;
 
-	const minMs = dateToMs(sorted[0].date);
-	const maxMs = dateToMs(sorted[sorted.length - 1].date);
 	const spanDays = Math.max(daysBetween(sorted[0].date, sorted[sorted.length - 1].date), 1);
-	const dateSpanMs = Math.max(maxMs - minMs, DAY_MS);
 
-	const xScale = (dateIso: string) => {
+	const pointX = (index: number) => {
 		if (sorted.length === 1) return padding.left + plotWidth / 2;
-		const t = dateToMs(dateIso);
-		return padding.left + ((t - minMs) / dateSpanMs) * plotWidth;
+		return padding.left + (index / (sorted.length - 1)) * plotWidth;
 	};
 
 	const segments: TrendPoint[][] = [];
@@ -145,8 +146,8 @@ export function buildTimeChartLayout(
 			gaps.push({
 				startDate: prev.date,
 				endDate: cur.date,
-				startX: xScale(prev.date),
-				endX: xScale(cur.date),
+				startX: pointX(i - 1),
+				endX: pointX(i),
 				days: gap,
 				weeks,
 				label: formatGapLabel(gap),
@@ -160,7 +161,7 @@ export function buildTimeChartLayout(
 	}
 	segments.push(current);
 
-	const dateTicks = buildDateTicks(sorted, xScale, spanDays, options.maxTicks ?? 5);
+	const dateTicks = buildDateTicks(sorted, pointX, spanDays, options.maxTicks ?? 6);
 
 	return {
 		width,
@@ -169,11 +170,13 @@ export function buildTimeChartLayout(
 		plotTop,
 		plotBottom,
 		plotHeight,
-		xScale,
+		pointX,
 		segments,
 		gaps,
 		dateTicks,
-		spanDays
+		spanDays,
+		startDate: sorted[0].date,
+		endDate: sorted[sorted.length - 1].date
 	};
 }
 

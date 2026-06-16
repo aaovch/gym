@@ -27,7 +27,8 @@
 		buildTimeChartLayout(points, {
 			height: compact ? 168 : 230,
 			gapDays,
-			maxTicks: compact ? 4 : 6
+			maxTicks: compact ? 4 : 8,
+			minPointSpacing: compact ? 18 : 26
 		})
 	);
 
@@ -41,6 +42,12 @@
 	<div class="chart-head">
 		<div>
 			<h4>{title}</h4>
+			{#if layout && sortedPoints.length > 1}
+				<p class="period-caption">
+					{formatDateRu(layout.startDate)} — {formatDateRu(layout.endDate)} · {sortedPoints.length}
+					{sortedPoints.length === 1 ? 'запись' : sortedPoints.length < 5 ? 'записи' : 'записей'}
+				</p>
+			{/if}
 			{#if layout && layout.gaps.length > 0}
 				<p class="gap-hint">
 					Перерывы &gt; 3 нед.: <strong>{layout.gaps.length}</strong>
@@ -68,75 +75,84 @@
 	{#if !layout}
 		<p class="muted empty">Нет данных для графика.</p>
 	{:else}
-		<svg
-			viewBox="0 0 {layout.width} {layout.height}"
-			class="chart"
-			role="img"
-			aria-label="График 1ПМ по датам: {title}"
-		>
-			{#each layout.dateTicks as tick, tickIndex (`${tick.x}:${tick.label}:${tickIndex}`)}
-				<line
-					x1={tick.x}
-					y1={layout.plotTop}
-					x2={tick.x}
-					y2={layout.plotBottom}
-					class="grid-line"
-				/>
-				<text x={tick.x} y={layout.height - 6} class="axis-label" text-anchor="middle">{tick.label}</text>
-			{/each}
+		<div class="chart-scroll" class:compact>
+			<svg
+				width={layout.width}
+				height={layout.height}
+				viewBox="0 0 {layout.width} {layout.height}"
+				class="chart"
+				role="img"
+				aria-label="График 1ПМ по датам: {title}"
+			>
+				{#each layout.dateTicks as tick, tickIndex (`${tick.x}:${tick.label}:${tickIndex}`)}
+					<line
+						x1={tick.x}
+						y1={layout.plotTop}
+						x2={tick.x}
+						y2={layout.plotBottom}
+						class="grid-line"
+					/>
+					<text x={tick.x} y={layout.height - 6} class="axis-label" text-anchor="middle">{tick.label}</text>
+				{/each}
 
-		{#each layout.gaps as gap, gapBandIndex (`${gap.startDate}:${gap.endDate}:${gapBandIndex}`)}
-			<rect
-					x={gap.startX}
-					y={layout.plotTop}
-					width={Math.max(gap.endX - gap.startX, 3)}
-					height={layout.plotHeight}
-					class="gap-band"
-					class:long={gap.long}
-					rx="3"
-				/>
-				<line
-					x1={gap.startX}
-					y1={layout.plotTop}
-					x2={gap.startX}
-					y2={layout.plotBottom}
-					class="gap-edge"
-					class:long={gap.long}
-				/>
-				<line
-					x1={gap.endX}
-					y1={layout.plotTop}
-					x2={gap.endX}
-					y2={layout.plotBottom}
-					class="gap-edge"
-					class:long={gap.long}
-				/>
-				<text
-					x={(gap.startX + gap.endX) / 2}
-					y={layout.plotTop + layout.plotHeight / 2 + 4}
-					class="gap-label"
-					class:long={gap.long}
-					text-anchor="middle"
-				>
-					{gap.label}
-				</text>
-			{/each}
+				{#each layout.gaps as gap, gapBandIndex (`${gap.startDate}:${gap.endDate}:${gapBandIndex}`)}
+					<rect
+						x={gap.startX}
+						y={layout.plotTop}
+						width={Math.max(gap.endX - gap.startX, 3)}
+						height={layout.plotHeight}
+						class="gap-band"
+						class:long={gap.long}
+						rx="3"
+					/>
+					<line
+						x1={gap.startX}
+						y1={layout.plotTop}
+						x2={gap.startX}
+						y2={layout.plotBottom}
+						class="gap-edge"
+						class:long={gap.long}
+					/>
+					<line
+						x1={gap.endX}
+						y1={layout.plotTop}
+						x2={gap.endX}
+						y2={layout.plotBottom}
+						class="gap-edge"
+						class:long={gap.long}
+					/>
+					<text
+						x={(gap.startX + gap.endX) / 2}
+						y={layout.plotTop + layout.plotHeight / 2 + 4}
+						class="gap-label"
+						class:long={gap.long}
+						text-anchor="middle"
+					>
+						{gap.label}
+					</text>
+				{/each}
 
-			{#each layout.segments as segment}
-				{#each segment as point, index}
-					{@const x = layout.xScale(point.date)}
+				{#each sortedPoints as point, index (`${point.date}:${index}`)}
+					{@const x = layout.pointX(index)}
 					{@const y = yScale(point.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
 					{#if index > 0}
-						{@const prev = segment[index - 1]}
-						{@const px = layout.xScale(prev.date)}
-						{@const py = yScale(prev.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
-						<line x1={px} y1={py} x2={x} y2={y} stroke={color} stroke-opacity="0.9" stroke-width="2" />
+						{@const prev = sortedPoints[index - 1]}
+						{@const gap = Math.round((dateToMs(point.date) - dateToMs(prev.date)) / 86400000)}
+						{#if gap <= gapDays}
+							{@const px = layout.pointX(index - 1)}
+							{@const py = yScale(prev.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
+							<line x1={px} y1={py} x2={x} y2={y} stroke={color} stroke-opacity="0.9" stroke-width="2" />
+						{/if}
 					{/if}
 					<circle cx={x} cy={y} r="4" fill={color} />
 					<title>{formatDateRu(point.date)} — {fmtNum(point.est1rm)} кг</title>
 				{/each}
-			{/each}
-		</svg>
+			</svg>
+		</div>
+
+		{#if !compact && layout.width > 640}
+			<p class="scroll-hint">Прокрутите график влево‑вправо, чтобы увидеть все {sortedPoints.length} записей</p>
+		{/if}
 
 		{#if !compact}
 			<ul class="trend-list">
@@ -188,6 +204,13 @@
 		margin: 0;
 		font-size: 0.95rem;
 		font-weight: 600;
+	}
+
+	.period-caption {
+		margin: 0.15rem 0 0;
+		color: var(--muted);
+		font-family: var(--font-mono);
+		font-size: 0.72rem;
 	}
 
 	.gap-hint {
@@ -248,13 +271,34 @@
 		font-size: 0.85rem;
 	}
 
-	.chart {
-		width: 100%;
-		height: auto;
-		display: block;
-		margin-bottom: 0.65rem;
+	.chart-scroll {
+		overflow-x: auto;
+		overflow-y: hidden;
+		max-width: 100%;
+		margin-bottom: 0.35rem;
 		background: var(--surface);
 		border: 1px solid var(--border);
+		border-radius: 0;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	.chart-scroll.compact {
+		margin-bottom: 0;
+	}
+
+	.scroll-hint {
+		margin: 0 0 0.55rem;
+		color: var(--muted);
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+	}
+
+	.chart {
+		display: block;
+		height: auto;
+		margin-bottom: 0;
+		background: transparent;
+		border: 0;
 		border-radius: 0;
 	}
 
@@ -310,6 +354,8 @@
 		margin: 0;
 		display: grid;
 		gap: 0.35rem;
+		max-height: min(320px, 40vh);
+		overflow-y: auto;
 	}
 
 	.trend-list li {
