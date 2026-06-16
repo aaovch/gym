@@ -227,16 +227,48 @@
     return index === 0 ? (micro.dayA?.date ?? null) : (micro.dayB?.date ?? null);
   }
 
+  function sessionProgressPercent(
+    meso: (typeof mesocycles)[number],
+    micro: EnrichedMicrocycle,
+    index: 0 | 1
+  ): number {
+    const exercises = exercisesForMicroSession(meso, view.workoutTemplates, index, view.keyMaps);
+    if (!exercises.length) return 0;
+
+    const required = exercises.filter((exercise) => {
+      const skip = exerciseProtocolSkipOnMicro(
+        view.cyclePlanForCalc,
+        meso.plan,
+        micro.plan,
+        exercise,
+        view.keyMaps
+      );
+      return !skip.skipped;
+    });
+    if (!required.length) return 100;
+
+    const msId = sessionPlanByIndex(micro.plan, index)?.id ?? null;
+    const sessionDate = sessionDateForIndex(micro, index);
+
+    const logged = required.filter((exercise) => {
+      if (msId) {
+        const linked = view.entries.some(
+          (entry) => entry.microSessionId === msId && entry.exercise === exercise
+        );
+        if (linked) return true;
+      }
+      if (!sessionDate) return false;
+      return view.entries.some(
+        (entry) => entry.date === sessionDate && entry.exercise === exercise
+      );
+    }).length;
+
+    return Math.round((logged / required.length) * 100);
+  }
+
   function sessionProgressFor(micro: EnrichedMicrocycle, index: 0 | 1): number {
     if (!mesocycle) return 0;
-    const exercises = exercisesForMicroSession(mesocycle, view.workoutTemplates, index, view.keyMaps);
-    if (!exercises.length) return 0;
-    const date = sessionDateForIndex(micro, index);
-    if (!date) return 0;
-    const logged = exercises.filter((exercise) =>
-      view.entries.some((entry) => entry.date === date && entry.exercise === exercise)
-    ).length;
-    return Math.round((logged / exercises.length) * 100);
+    return sessionProgressPercent(mesocycle, micro, index);
   }
 
   function pickSession(slot: WorkoutSlot) {
@@ -456,25 +488,7 @@
   function sessionProgressOf(meso: (typeof mesocycles)[number], micro: EnrichedMicrocycle, index: 0 | 1) {
     const exercises = exercisesForMicroSession(meso, view.workoutTemplates, index, view.keyMaps);
     if (!exercises.length) return { progress: 0, hasExercises: false };
-    const required = exercises.filter((exercise) => {
-      const skip = exerciseProtocolSkipOnMicro(
-        view.cyclePlanForCalc,
-        meso.plan,
-        micro.plan,
-        exercise,
-        view.keyMaps
-      );
-      return !skip.skipped;
-    });
-    if (!required.length) {
-      return { progress: 100, hasExercises: true };
-    }
-    const date = sessionDateForIndex(micro, index);
-    if (!date) return { progress: 0, hasExercises: true };
-    const logged = required.filter((exercise) =>
-      view.entries.some((entry) => entry.date === date && entry.exercise === exercise)
-    ).length;
-    return { progress: Math.round((logged / required.length) * 100), hasExercises: true };
+    return { progress: sessionProgressPercent(meso, micro, index), hasExercises: true };
   }
 
   function daysFromToday(date: string): number {
