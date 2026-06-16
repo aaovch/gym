@@ -343,6 +343,29 @@
     applySessionStep({ mesoId: mesocycle.plan.id, microId: microcycle.plan.id, slot });
   }
 
+  $effect(() => {
+    if (!browser || !sessionReady || pickerOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goSessionStep(-1);
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        goSessionStep(1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   function exerciseKind(name: string): ExerciseKind {
     return workoutStore.database.exercises.find((item) => item.name === name)?.kind ?? 'strength';
   }
@@ -767,8 +790,8 @@
   </div>
 {/snippet}
 
-<div class="container dashboard">
-  <header class="page-header">
+<div class="container dashboard" class:session-active={sessionReady}>
+  <header class="page-header" class:compact={sessionReady}>
     <div>
       <div class="eyebrow">
         {sessionReady ? 'Тренировка' : 'Обзор'}
@@ -778,36 +801,20 @@
       </div>
       <h1>
         {#if sessionReady && workoutDate}
-          {workoutDate === todayIso() ? 'Тренировка сегодня' : formatDateRu(workoutDate)}
+          {workoutDate === todayIso() ? 'Сегодня' : formatDateRu(workoutDate)}
         {:else}
           Выберите тренировку
         {/if}
       </h1>
-      <p>
-        {#if sessionReady}
-          План, целевые веса и факт по выбранной сессии. Меняй дату, если нужно записать тренировку
-          в другой день.
+      <p class="header-lead">
+        {#if sessionReady && mesocycle && activeSlot}
+          {loggedPlanned}/{requiredSlotExercises.length} упражнений · {mesocycle.plan.label} ·
+          {slotLabel(activeSlot)}
         {:else}
           Укажите мезоцикл, микроцикл и сессию A или B — появится план и записи по этому дню.
         {/if}
       </p>
     </div>
-    {#if sessionReady}
-      <div class="date-control">
-        <span>Дата записи</span>
-        <input
-          type="date"
-          value={workoutDate}
-          oninput={(event) => (datePick = event.currentTarget.value)}
-          list="workout-dates"
-        />
-        <datalist id="workout-dates">
-          {#each availableDates as date (date)}
-            <option value={date}></option>
-          {/each}
-        </datalist>
-      </div>
-    {/if}
   </header>
 
   {#if mesocycles.length === 0}
@@ -822,79 +829,144 @@
     </section>
   {:else}
     <section class="card training-card">
-      <div class="training-top" class:collapsed={sessionReady && !pickerOpen}>
-        <div class="training-top-main">
-          <div class="eyebrow">Контекст тренировки</div>
-          {#if sessionReady && mesocycle && microcycle && activeSlot && !pickerOpen}
-            <div class="context-nav">
-              <button
-                type="button"
-                class="nav-arrow"
-                aria-label="Предыдущая тренировка"
-                disabled={currentSessionStepIndex <= 0}
-                onclick={() => goSessionStep(-1)}
-              >
-                ←
-              </button>
-              <div class="context-focus">
-                <div
-                  class="context-meso"
-                  style={`--meso-color: ${mesocycleColor(mesocycle.index)}`}
-                >
-                  {mesocycle.plan.label}
-                </div>
-                <div class="context-session">
-                  <span class="context-micro">Микроцикл {microcycle.plan.indexInMeso}</span>
-                  <span class="context-sep">·</span>
-                  <span class="context-slot" style={`--slot-color: ${slotColor(activeSlot)}`}>
-                    {slotLabel(activeSlot)}
-                  </span>
-                  <span class="context-sep">·</span>
-                  {#if plannedSessionDate}
-                    <span class="context-date">{formatDateRu(plannedSessionDate)}</span>
-                  {:else}
-                    <span class="context-date muted-date">дата не назначена</span>
-                  {/if}
-                  {#if sessionSkipped}
-                    <span class="skip-flag">пропущена</span>
-                  {/if}
-                </div>
+      {#if sessionReady && mesocycle && microcycle && activeSlot && !pickerOpen}
+        <div
+          class="session-deck"
+          style={`--meso-color: ${mesocycleColor(mesocycle.index)}; --slot-color: ${slotColor(activeSlot)}`}
+        >
+          <button
+            type="button"
+            class="deck-nav"
+            aria-label="Предыдущая тренировка"
+            disabled={currentSessionStepIndex <= 0}
+            onclick={() => goSessionStep(-1)}
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+
+          <div class="deck-core">
+            <header class="deck-head">
+              <div class="deck-labels">
+                <span class="eyebrow">Контекст тренировки</span>
                 {#if planSessionSteps.length > 1}
-                  <span class="context-position">
-                    {currentSessionStepIndex + 1} / {planSessionSteps.length}
-                  </span>
+                  <span class="deck-index">{currentSessionStepIndex + 1} / {planSessionSteps.length}</span>
                 {/if}
               </div>
+              <h2 class="deck-meso">{mesocycle.plan.label}</h2>
+              <div class="deck-meta">
+                <span>Микро {microcycle.plan.indexInMeso}</span>
+                <span class="deck-slot">{slotLabel(activeSlot)}</span>
+                {#if plannedSessionDate}
+                  <span>{formatDateRu(plannedSessionDate)}</span>
+                {:else}
+                  <span class="muted-date">дата не назначена</span>
+                {/if}
+                {#if sessionSkipped}
+                  <span class="skip-flag">пропущена</span>
+                {/if}
+              </div>
+            </header>
+
+            <div class="deck-toolbar">
+              <div class="slot-segment" role="tablist" aria-label="Сессия A или B">
+                {#each ['A', 'B'] as slot (slot)}
+                  {@const slotKey = slot as WorkoutSlot}
+                  {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
+                  {@const tabProgress = sessionProgressFor(microcycle, slotIndex)}
+                  {@const tabSkipped = sessionSkippedFor(microcycle, slotIndex)}
+                  <button
+                    type="button"
+                    role="tab"
+                    class="slot-seg"
+                    class:active={activeSlot === slotKey}
+                    aria-selected={activeSlot === slotKey}
+                    style={`--seg-color: ${slotColor(slotKey)}`}
+                    onclick={() => pickSession(slotKey)}
+                  >
+                    <b>{slot}</b>
+                    <span>{tabSkipped ? '—' : `${tabProgress}%`}</span>
+                  </button>
+                {/each}
+              </div>
+
+              <label class="deck-date">
+                <span>Запись</span>
+                <input
+                  type="date"
+                  value={workoutDate}
+                  oninput={(event) => (datePick = event.currentTarget.value)}
+                  list="workout-dates"
+                />
+              </label>
+
               <button
                 type="button"
-                class="nav-arrow"
-                aria-label="Следующая тренировка"
-                disabled={currentSessionStepIndex < 0 ||
-                  currentSessionStepIndex >= planSessionSteps.length - 1}
-                onclick={() => goSessionStep(1)}
+                class="button button-ghost deck-change"
+                aria-expanded={pickerOpen}
+                onclick={() => (pickerOpen = true)}
               >
-                →
+                Сменить
               </button>
-            </div>
-            <div class="session-tabs">
-              {#each ['A', 'B'] as slot (slot)}
-                {@const slotKey = slot as WorkoutSlot}
-                {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
-                {@const tabProgress = sessionProgressFor(microcycle, slotIndex)}
-                {@const tabSkipped = sessionSkippedFor(microcycle, slotIndex)}
+
+              <div class="deck-nav-mobile">
                 <button
                   type="button"
-                  class="session-tab"
-                  class:active={activeSlot === slotKey}
-                  style={`--slot-color: ${slotColor(slotKey)}`}
-                  onclick={() => pickSession(slotKey)}
+                  class="deck-nav-mini"
+                  aria-label="Предыдущая тренировка"
+                  disabled={currentSessionStepIndex <= 0}
+                  onclick={() => goSessionStep(-1)}
                 >
-                  <b>{slot}</b>
-                  <span>{tabSkipped ? 'пропущена' : `${tabProgress}%`}</span>
+                  ‹
                 </button>
-              {/each}
+                <button
+                  type="button"
+                  class="deck-nav-mini"
+                  aria-label="Следующая тренировка"
+                  disabled={currentSessionStepIndex < 0 ||
+                    currentSessionStepIndex >= planSessionSteps.length - 1}
+                  onclick={() => goSessionStep(1)}
+                >
+                  ›
+                </button>
+              </div>
             </div>
-          {:else}
+
+            {#if !sessionSkipped && requiredSlotExercises.length > 0}
+              <div class="deck-progress" aria-hidden="true">
+                <div class="deck-progress-track">
+                  <div class="deck-progress-fill" style={`width: ${sessionProgress}%`}></div>
+                </div>
+                <span>{loggedPlanned}/{requiredSlotExercises.length}</span>
+              </div>
+            {/if}
+          </div>
+
+          <div class="deck-ring">
+            <div
+              class="session-ring"
+              class:skipped={sessionSkipped}
+              style={`--progress: ${sessionProgress * 3.6}deg`}
+            >
+              <span>{sessionSkipped ? 'skip' : `${sessionProgress}%`}</span>
+            </div>
+            <span class="ring-cap">готовность {activeSlot}</span>
+          </div>
+
+          <button
+            type="button"
+            class="deck-nav"
+            aria-label="Следующая тренировка"
+            disabled={currentSessionStepIndex < 0 ||
+              currentSessionStepIndex >= planSessionSteps.length - 1}
+            onclick={() => goSessionStep(1)}
+          >
+            <span aria-hidden="true">›</span>
+          </button>
+        </div>
+      {:else}
+        <div class="training-top">
+          <div class="training-top-main">
+            <div class="eyebrow">Контекст тренировки</div>
             <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
             {#if sessionReady && mesocycle && microcycle && activeSlot}
               <p>
@@ -913,31 +985,27 @@
             {:else if mesocycle}
               <p>Выберите микроцикл, затем сессию A или B</p>
             {/if}
+          </div>
+          {#if sessionReady}
+            <div class="training-top-aside">
+              <button
+                type="button"
+                class="button button-ghost picker-toggle"
+                aria-expanded={pickerOpen}
+                onclick={() => (pickerOpen = !pickerOpen)}
+              >
+                {pickerOpen ? 'Свернуть' : 'Сменить'}
+              </button>
+            </div>
           {/if}
         </div>
-        {#if sessionReady}
-          <div class="training-top-aside">
-            <button
-              type="button"
-              class="button button-ghost picker-toggle"
-              aria-expanded={pickerOpen}
-              onclick={() => (pickerOpen = !pickerOpen)}
-            >
-              {pickerOpen ? 'Свернуть' : 'Сменить'}
-            </button>
-            <div class="ring-wrap">
-              <div
-                class="session-ring"
-                class:skipped={sessionSkipped}
-                style={`--progress: ${sessionProgress * 3.6}deg`}
-              >
-                <span>{sessionSkipped ? 'skip' : `${sessionProgress}%`}</span>
-              </div>
-              <span class="ring-cap">готовность {activeSlot}</span>
-            </div>
-          </div>
-        {/if}
-      </div>
+      {/if}
+
+      <datalist id="workout-dates">
+        {#each availableDates as date (date)}
+          <option value={date}></option>
+        {/each}
+      </datalist>
 
       {#if !sessionReady || pickerOpen}
       <div class="context-picker">
@@ -1038,22 +1106,25 @@
         </p>
       </section>
     {:else}
-      <div class="section-heading">
-        <div>
-          <h2>План сессии {activeSlot}</h2>
-          <p>
+      <div
+        class="session-toolbar"
+        class:toolbar-complete={!sessionSkipped && sessionProgress === 100}
+      >
+        <div class="toolbar-main">
+          <h2>План {activeSlot}</h2>
+          <p class="toolbar-status">
             {#if sessionSkipped}
-              Тренировка отмечена пропущенной — она не учитывается в незаполненных.
+              Сессия пропущена — не учитывается в незаполненных
             {:else if sessionProgress === 100}
-              Сессия записана — можно отредактировать отдельные упражнения.
+              Все упражнения записаны
             {:else if loggedPlanned > 0}
-              Часть упражнений уже записана — дозаполните остальные или измените факт.
+              Записано {loggedPlanned} из {requiredSlotExercises.length}
             {:else}
-              Готово — принять план как есть. Изменить — если нужно подправить веса или подходы.
+              {requiredSlotExercises.length} упражнений · «Готово» принимает план, «Изменить» — правки
             {/if}
           </p>
         </div>
-        <div class="heading-actions">
+        <div class="toolbar-actions">
           {#if !sessionSkipped && pendingPlanned.length > 0}
             <button
               type="button"
@@ -1080,24 +1151,14 @@
             class="button button-secondary"
             href="{base}/add?date={workoutDate}&meso={mesocycle?.plan.id}&micro={microcycle?.plan.id}&session={activeIndex}"
           >
-            Добавить вне плана
+            Вне плана
           </a>
+          {#if !sessionSkipped && sessionProgress === 100}
+            <a class="button button-ghost" href="{base}/history">Журнал</a>
+            <a class="button button-ghost" href="{base}/stats">Аналитика</a>
+          {/if}
         </div>
       </div>
-
-      {#if !sessionSkipped && sessionProgress === 100 && requiredSlotExercises.length > 0}
-        <section class="card session-done">
-          <div class="session-done-main">
-            <div class="eyebrow">Готово</div>
-            <h2>Сессия {activeSlot} записана</h2>
-            <p>Все запланированные упражнения внесены в журнал. Отдельные подходы можно поправить ниже.</p>
-          </div>
-          <div class="session-done-actions">
-            <a class="button button-secondary" href="{base}/history">Открыть журнал</a>
-            <a class="button button-secondary" href="{base}/stats">Аналитика</a>
-          </div>
-        </section>
-      {/if}
 
       {#if sessionSkipped}
         <section class="card empty-state skipped-state">
@@ -1265,8 +1326,23 @@
 </div>
 
 <style>
-  .dashboard {
-    padding-bottom: 30px;
+  .dashboard.session-active {
+    padding-bottom: 48px;
+  }
+
+  .page-header.compact h1 {
+    font-size: clamp(28px, 3.6vw, 44px);
+  }
+
+  .header-lead {
+    max-width: 56ch;
+  }
+
+  .page-header.compact .header-lead {
+    margin-bottom: 0;
+    color: var(--muted-strong);
+    font-family: var(--font-mono);
+    font-size: 12px;
   }
 
   .auto-badge {
@@ -1282,11 +1358,6 @@
     vertical-align: middle;
   }
 
-  .date-control {
-    width: 176px;
-  }
-
-  .date-control span,
   .control-label {
     display: block;
     margin-bottom: 7px;
@@ -1304,7 +1375,289 @@
   }
 
   .training-card {
-    padding: 24px;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .session-deck {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr) auto 56px;
+    align-items: stretch;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--meso-color) 14%, transparent), transparent 28%),
+      linear-gradient(180deg, #171a21, #121419);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .deck-nav {
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--muted-strong);
+    background: #0c0e12;
+    border: 0;
+    border-right: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 300;
+    line-height: 1;
+    cursor: pointer;
+    transition:
+      color 140ms ease,
+      background 140ms ease;
+  }
+
+  .session-deck .deck-nav:last-child {
+    border-right: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .deck-nav:hover:not(:disabled) {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, #0c0e12);
+  }
+
+  .deck-nav:disabled {
+    opacity: 0.22;
+    cursor: not-allowed;
+  }
+
+  .deck-core {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+    padding: 20px 22px 18px;
+  }
+
+  .deck-labels {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .deck-index {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  .deck-meso {
+    margin: 4px 0 0;
+    color: var(--meso-color, var(--text));
+    font-size: clamp(1.65rem, 3.2vw, 2.1rem);
+    letter-spacing: 0.02em;
+    line-height: 1.05;
+  }
+
+  .deck-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 14px;
+    margin-top: 8px;
+    color: var(--muted-strong);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .deck-slot {
+    color: var(--slot-color);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .deck-meta .muted-date {
+    color: var(--muted);
+  }
+
+  .deck-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 14px;
+  }
+
+  .slot-segment {
+    display: inline-flex;
+    border: 1px solid var(--line);
+  }
+
+  .slot-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 72px;
+    padding: 8px 12px;
+    color: var(--muted-strong);
+    background: #0a0c10;
+    border: 0;
+    border-right: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+      background 120ms ease,
+      color 120ms ease;
+  }
+
+  .slot-seg:last-child {
+    border-right: 0;
+  }
+
+  .slot-seg b {
+    color: var(--seg-color);
+    font-size: 13px;
+  }
+
+  .slot-seg.active {
+    color: var(--text);
+    background: color-mix(in srgb, var(--seg-color) 14%, #111722);
+  }
+
+  .deck-date {
+    display: grid;
+    gap: 5px;
+  }
+
+  .deck-date span {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .deck-date input {
+    width: 148px;
+    padding: 7px 9px;
+    color: var(--text);
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .deck-change {
+    align-self: flex-end;
+    white-space: nowrap;
+  }
+
+  .deck-nav-mobile {
+    display: none;
+    gap: 6px;
+  }
+
+  .deck-nav-mini {
+    display: grid;
+    width: 44px;
+    height: 36px;
+    place-items: center;
+    padding: 0;
+    color: var(--muted-strong);
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .deck-nav-mini:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+
+  .deck-nav-mini:disabled {
+    opacity: 0.28;
+    cursor: not-allowed;
+  }
+
+  .deck-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .deck-progress-track {
+    flex: 1;
+    height: 4px;
+    background: #0a0c10;
+    border: 1px solid var(--line);
+  }
+
+  .deck-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--slot-color), var(--accent));
+    transition: width 220ms ease;
+  }
+
+  .deck-progress span {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .deck-ring {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 16px 20px;
+    border-left: 1px solid var(--line);
+  }
+
+  .session-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 20px 0 12px;
+    padding: 14px 16px;
+    background: rgb(11 12 15 / 92%);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--hazard);
+    backdrop-filter: blur(10px);
+  }
+
+  .session-toolbar.toolbar-complete {
+    border-left-color: var(--accent);
+  }
+
+  .toolbar-main h2 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: 0.03em;
+  }
+
+  .toolbar-status {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .toolbar-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
   }
 
   .training-top {
@@ -1312,110 +1665,13 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 24px;
-    padding-bottom: 22px;
+    padding: 24px;
     border-bottom: 1px solid var(--line);
-  }
-
-  .training-top.collapsed {
-    padding-bottom: 0;
-    border-bottom: 0;
   }
 
   .training-top-main {
     flex: 1;
     min-width: 0;
-  }
-
-  .context-nav {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-top: 6px;
-  }
-
-  .context-focus {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .context-meso {
-    color: var(--meso-color, var(--text));
-    font-size: clamp(1.85rem, 3.8vw, 2.35rem);
-    font-weight: 800;
-    letter-spacing: 0.02em;
-    line-height: 1.05;
-  }
-
-  .context-session {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px 10px;
-    margin-top: 10px;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1.35;
-  }
-
-  .context-slot {
-    color: var(--slot-color);
-    font-size: 17px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .context-sep {
-    color: var(--muted);
-    font-weight: 500;
-  }
-
-  .context-date.muted-date {
-    color: var(--muted);
-  }
-
-  .context-position {
-    display: block;
-    margin-top: 8px;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .nav-arrow {
-    display: grid;
-    flex: 0 0 46px;
-    width: 46px;
-    height: 46px;
-    place-items: center;
-    color: var(--text);
-    background: #0e1014;
-    border: 1px solid var(--line);
-    border-radius: 0;
-    font-family: var(--font-mono);
-    font-size: 20px;
-    line-height: 1;
-    cursor: pointer;
-    transition:
-      border-color 120ms ease,
-      color 120ms ease,
-      background 120ms ease;
-  }
-
-  .nav-arrow:hover:not(:disabled) {
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 8%, #0e1014);
-    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  }
-
-  .nav-arrow:disabled {
-    opacity: 0.28;
-    cursor: not-allowed;
   }
 
   .training-top-aside {
@@ -1428,76 +1684,10 @@
     white-space: nowrap;
   }
 
-  .session-tabs {
-    display: flex;
-    gap: 6px;
-    margin-top: 12px;
-  }
-
-  .session-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 10px;
-    color: var(--muted-strong);
-    background: #0e1014;
-    border: 1px solid var(--line);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: border-color 120ms ease, background 120ms ease;
-  }
-
-  .session-tab:hover {
-    border-color: var(--line-strong);
-  }
-
-  .session-tab b {
-    color: var(--slot-color);
-    font-size: 11px;
-  }
-
-  .session-tab.active {
-    color: var(--text);
-    background: color-mix(in srgb, var(--slot-color) 12%, #111722);
-    border-color: color-mix(in srgb, var(--slot-color) 45%, var(--line));
-  }
-
-  .ring-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .ring-cap {
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  .training-top h2 {
-    margin: 6px 0 6px;
-    font-size: 30px;
-    letter-spacing: 0.01em;
-  }
-
-  .training-top p {
-    margin: 0;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-  }
-
   .session-ring {
     display: grid;
-    width: 70px;
-    height: 70px;
+    width: 76px;
+    height: 76px;
     flex: 0 0 auto;
     place-items: center;
     background:
@@ -1525,11 +1715,27 @@
     text-transform: uppercase;
   }
 
-  .heading-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
+  .ring-cap {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .training-top h2 {
+    margin: 6px 0 6px;
+    font-size: 30px;
+    letter-spacing: 0.01em;
+  }
+
+  .training-top p {
+    margin: 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
   }
 
   .skip-flag {
@@ -1541,38 +1747,11 @@
     border-left: 3px solid var(--hazard, #f5a524);
   }
 
-  .session-done {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 16px;
-    border-left: 3px solid var(--accent);
-  }
-
-  .session-done-main h2 {
-    margin: 4px 0 4px;
-    font-size: 20px;
-  }
-
-  .session-done-main p {
-    margin: 0;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-  }
-
-  .session-done-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
   .context-picker {
     display: grid;
     grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(180px, 0.7fr);
     gap: 22px;
-    padding-top: 22px;
+    padding: 22px 24px 24px;
   }
 
   .choice-row {
@@ -2105,40 +2284,64 @@
   }
 
   @media (max-width: 680px) {
-    .date-control {
+    .deck-nav-mobile {
+      display: flex;
+      margin-left: auto;
+    }
+
+    .session-deck .deck-nav {
+      display: none;
+    }
+
+    .deck-ring {
+      border-left: 0;
+      border-top: 1px solid var(--line);
+      padding: 12px 14px;
+    }
+
+    .session-deck {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .deck-core {
+      padding: 16px 14px 12px;
+    }
+
+    .deck-meso {
+      font-size: 1.45rem;
+    }
+
+    .deck-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .deck-date input {
       width: 100%;
     }
 
-    .training-card {
-      padding: 18px;
+    .deck-change {
+      width: 100%;
     }
 
-    .context-nav {
-      gap: 10px;
+    .session-toolbar {
+      top: 0;
+      flex-direction: column;
+      align-items: stretch;
     }
 
-    .nav-arrow {
-      flex-basis: 40px;
-      width: 40px;
-      height: 40px;
-      font-size: 18px;
+    .toolbar-actions {
+      justify-content: stretch;
     }
 
-    .context-meso {
-      font-size: 1.55rem;
-    }
-
-    .context-session {
-      font-size: 13px;
-    }
-
-    .context-slot {
-      font-size: 15px;
+    .toolbar-actions .button {
+      flex: 1 1 auto;
     }
 
     .training-top {
       flex-direction: column;
       align-items: stretch;
+      padding: 18px;
     }
 
     .training-top-aside {
