@@ -6,8 +6,10 @@
     exerciseProtocolSkipOnMicro,
     exerciseTargetOnMicro,
     exercisesForMicroSession,
+    resolveMesoMicroSelection,
     setSessionSkipped,
     sortExercisesByAnchorDesc,
+    suggestSessionIndex,
     type EnrichedMicrocycle
   } from '$lib/cycle-plan';
   import { sessionPlanByIndex } from '$lib/micro-plan';
@@ -110,6 +112,14 @@
   });
   const entriesForSession = $derived.by(() => {
     if (!sessionReady || !microcycle || activeIndex == null) return [];
+
+    const byWorkoutDate = view.entries.filter(
+      (entry) => entry.date === workoutDate && slotExercises.includes(entry.exercise)
+    );
+    if (byWorkoutDate.length) {
+      return byWorkoutDate.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
+    }
+
     const msId = activeMicroSessionId;
     if (msId) {
       const linked = view.entries.filter((entry) => entry.microSessionId === msId);
@@ -200,6 +210,18 @@
   );
   const outOfPlanEntries = $derived.by(() => {
     if (!sessionReady) return [];
+    const core = entriesForSession;
+
+    const onWorkoutDate = view.entries.filter(
+      (entry) =>
+        entry.date === workoutDate &&
+        !slotExercises.includes(entry.exercise) &&
+        !core.some((linked) => linked.id === entry.id)
+    );
+    if (onWorkoutDate.length) {
+      return onWorkoutDate.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
+    }
+
     const msId = activeMicroSessionId;
 
     if (msId) {
@@ -218,7 +240,7 @@
         (entry) =>
           entry.date === sessionDate &&
           !slotExercises.includes(entry.exercise) &&
-          !entriesForSession.some((linked) => linked.id === entry.id)
+          !core.some((linked) => linked.id === entry.id)
       )
       .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
   });
@@ -541,16 +563,52 @@
 
   let autoSelected = $state(false);
   let autoPicked = $state(false);
+  let appliedUrlDate = $state<string | null>(null);
+
   $effect(() => {
+    if (!workoutStore.bootstrapped) return;
+
+    if (urlDate && urlDate !== appliedUrlDate) {
+      appliedUrlDate = urlDate;
+      datePick = urlDate;
+      const resolved = resolveMesoMicroSelection(
+        mesocycles,
+        urlDate,
+        urlMeso,
+        urlMicro
+      );
+      if (resolved) {
+        mesoPick = resolved.meso.plan.id;
+        microPick = resolved.micro.plan.id;
+        if (urlSession !== null) {
+          slotPick = urlSession === 1 ? 'B' : 'A';
+        } else {
+          const index = suggestSessionIndex(
+            resolved.micro,
+            urlDate,
+            view.entries,
+            view.workoutTemplates
+          ) as 0 | 1;
+          slotPick = index === 1 ? 'B' : 'A';
+        }
+      }
+      autoPicked = false;
+      autoSelected = true;
+      return;
+    }
+
+    if (!urlDate) appliedUrlDate = null;
+
     if (autoSelected) return;
     // Уважаем явный выбор: через URL (со страницы «План») или вручную кликом.
     if (urlMeso || urlMicro || urlSession !== null || mesoPick || microPick || slotPick) {
       autoSelected = true;
       return;
     }
-    // Ждём, пока стор поднимет журнал — иначе все сессии выглядят пустыми
-    // и «ближайшей» окажется уже закрытая тренировка.
-    if (!workoutStore.bootstrapped || !mesocycles.length) return;
+    if (!mesocycles.length) {
+      autoSelected = true;
+      return;
+    }
     const pick = findNearestIncomplete();
     if (pick) {
       mesoPick = pick.mesoId;
