@@ -50,8 +50,25 @@ export function dateToMs(iso: string): number {
 	return Date.UTC(y, m - 1, d);
 }
 
+export function msToIso(ms: number): string {
+	const d = new Date(ms);
+	const y = d.getUTCFullYear();
+	const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+	const day = String(d.getUTCDate()).padStart(2, '0');
+	return `${y}-${m}-${day}`;
+}
+
 function daysBetween(a: string, b: string): number {
 	return Math.round((dateToMs(b) - dateToMs(a)) / DAY_MS);
+}
+
+function chooseTickStepDays(spanDays: number): number {
+	if (spanDays > 730) return 90;
+	if (spanDays > 400) return 30;
+	if (spanDays > 180) return 14;
+	if (spanDays > 60) return 7;
+	if (spanDays > 14) return 3;
+	return 1;
 }
 
 export function formatGapLabel(days: number): string {
@@ -75,28 +92,82 @@ function formatTickLabel(iso: string, spanDays: number): string {
 }
 
 function buildDateTicks(
-	sorted: TrendPoint[],
-	pointX: (index: number) => number,
+	startMs: number,
+	spanMs: number,
+	xAtMs: (ms: number) => number,
 	spanDays: number,
 	maxTicks: number
 ): TimeChartTick[] {
-	if (sorted.length === 0) return [];
-	if (sorted.length <= maxTicks) {
-		return sorted.map((point, index) => ({
-			x: pointX(index),
-			label: formatTickLabel(point.date, spanDays)
-		}));
-	}
+	if (spanMs <= 0) return [];
 
+	const stepMs = chooseTickStepDays(spanDays) * DAY_MS;
 	const ticks: TimeChartTick[] = [];
-	for (let i = 0; i < maxTicks; i++) {
-		const index = Math.round((i / (maxTicks - 1)) * (sorted.length - 1));
+
+	for (let ms = startMs; ms <= startMs + spanMs + stepMs / 2; ms += stepMs) {
 		ticks.push({
-			x: pointX(index),
-			label: formatTickLabel(sorted[index].date, spanDays)
+			x: xAtMs(ms),
+			label: formatTickLabel(msToIso(ms), spanDays)
 		});
 	}
-	return ticks;
+
+	if (ticks.length <= maxTicks) return ticks;
+
+	const stride = Math.ceil(ticks.length / maxTicks);
+	return ticks.filter((_, index) => index % stride === 0 || index === ticks.length - 1);
+}
+
+function buildSameDayOffsets(sorted: TrendPoint[], minPointSpacing: number): Map<number, number> {
+	const byDate = new Map<string, number[]>();
+	for (let index = 0; index < sorted.length; index++) {
+		const indices = byDate.get(sorted[index].date) ?? [];
+		indices.push(index);
+		byDate.set(sorted[index].date, indices);
+	}
+
+	const offsets = new Map<number, number>();
+	const maxOffset = Math.min(minPointSpacing * 0.45, 10);
+
+	for (const indices of byDate.values()) {
+		if (indices.length === 1) continue;
+		const center = (indices.length - 1) / 2;
+		for (let position = 0; position < indices.length; position++) {
+			offsets.set(indices[position], (position - center) * maxOffset);
+		}
+	}
+
+	return offsets;
+}
+
+function computePlotWidth(
+	sorted: TrendPoint[],
+	padding: ChartPadding,
+	minPointSpacing: number,
+	minTotalWidth: number
+): number {
+	const minPlotWidth = minTotalWidth - padding.left - padding.right;
+	if (sorted.length <= 1) return minPlotWidth;
+
+	const startMs = dateToMs(sorted[0].date);
+	const endMs = dateToMs(sorted[sorted.length - 1].date);
+	const spanMs = Math.max(endMs - startMs, DAY_MS);
+
+	let minGapMs = spanMs;
+	for (let index = 1; index < sorted.length; index++) {
+		const gapMs = dateToMs(sorted[index].date) - dateToMs(sorted[index - 1].date);
+		if (gapMs > 0) minGapMs = Math.min(minGapMs, gapMs);
+	}
+
+	const byDate = new Map<string, number>();
+	for (const point of sorted) {
+		byDate.set(point.date, (byDate.get(point.date) ?? 0) + 1);
+	}
+	const maxSameDay = Math.max(...byDate.values(), 1);
+
+	return Math.max(
+		minPlotWidth,
+		(spanMs / minGapMs) * minPointSpacing,
+		(maxSameDay - 1) * minPointSpacing * 0.45
+	);
 }
 
 export function buildTimeChartLayout(
@@ -120,17 +191,25 @@ export function buildTimeChartLayout(
 	const plotTop = padding.top;
 	const plotBottom = height - padding.bottom;
 	const plotHeight = plotBottom - plotTop;
-	const width =
-		options.width ??
-		Math.max(640, padding.left + padding.right + Math.max(sorted.length - 1, 1) * minPointSpacing);
-	const plotWidth = width - padding.left - padding.right;
+	const minTotalWidth = 640;
+	const plotWidth =
+		options.width != null
+			? options.width - padding.left - padding.right
+			: computePlotWidth(sorted, padding, minPointSpacing, minTotalWidth);
+	const width = options.width ?? padding.left + padding.right + plotWidth;
 
+	const startMs = dateToMs(sorted[0].date);
+	const endMs = dateToMs(sorted[sorted.length - 1].date);
+	const spanMs = Math.max(endMs - startMs, DAY_MS);
 	const spanDays = Math.max(daysBetween(sorted[0].date, sorted[sorted.length - 1].date), 1);
+	const sameDayOffsets = buildSameDayOffsets(sorted, minPointSpacing);
 
-	const pointX = (index: number) => {
+	const xAtMs = (ms: number) => {
 		if (sorted.length === 1) return padding.left + plotWidth / 2;
-		return padding.left + (index / (sorted.length - 1)) * plotWidth;
+		return padding.left + ((ms - startMs) / spanMs) * plotWidth;
 	};
+
+	const pointX = (index: number) => xAtMs(dateToMs(sorted[index].date)) + (sameDayOffsets.get(index) ?? 0);
 
 	const segments: TrendPoint[][] = [];
 	const gaps: TimeChartGap[] = [];
@@ -161,7 +240,7 @@ export function buildTimeChartLayout(
 	}
 	segments.push(current);
 
-	const dateTicks = buildDateTicks(sorted, pointX, spanDays, options.maxTicks ?? 6);
+	const dateTicks = buildDateTicks(startMs, spanMs, xAtMs, spanDays, options.maxTicks ?? 6);
 
 	return {
 		width,
