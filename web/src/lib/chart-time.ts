@@ -259,6 +259,46 @@ export function buildTimeChartLayout(
 	};
 }
 
+export type ValueChartTick = {
+	value: number;
+	y: number;
+	label: string;
+};
+
+export function yAxisBounds(min: number, max: number): { min: number; max: number } {
+	const span = Math.max(max - min, 2);
+	return { min: min - span * 0.08, max: max + span * 0.08 };
+}
+
+export function buildValueAxisTicks(
+	min: number,
+	max: number,
+	plotTop: number,
+	plotBottom: number,
+	maxTicks = 5,
+	formatLabel: (value: number) => string = (value) => String(Math.round(value))
+): ValueChartTick[] {
+	const span = Math.max(max - min, 1);
+	const rawStep = span / Math.max(maxTicks - 1, 1);
+	const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+	const step = Math.max(Math.ceil(rawStep / magnitude) * magnitude, 1);
+	let start = Math.floor(min / step) * step;
+	let end = Math.ceil(max / step) * step;
+	if (end - start < step * (maxTicks - 1)) {
+		end = start + step * (maxTicks - 1);
+	}
+
+	const ticks: ValueChartTick[] = [];
+	for (let value = start; value <= end + step * 0.001; value += step) {
+		ticks.push({
+			value,
+			y: yScale(value, min, max, plotTop, plotBottom),
+			label: formatLabel(value)
+		});
+	}
+	return ticks;
+}
+
 export function yScale(value: number, min: number, max: number, plotTop: number, plotBottom: number): number {
 	const span = Math.max(max - min, 1);
 	return plotBottom - ((value - min) / span) * (plotBottom - plotTop);

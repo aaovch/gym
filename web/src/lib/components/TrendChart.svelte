@@ -3,9 +3,10 @@
 	import {
 		TRAINING_GAP_DAYS,
 		buildTimeChartLayout,
+		buildValueAxisTicks,
 		dateToMs,
-		formatGapLabel,
 		msToIso,
+		yAxisBounds,
 		yScale
 	} from '$lib/chart-time';
 	import { fmtNum, formatDateRu } from '$lib/format';
@@ -37,18 +38,34 @@
 			height: compact ? 168 : 230,
 			gapDays,
 			maxTicks: compact ? 4 : 8,
-			minPointSpacing: compact ? 18 : 26
+			minPointSpacing: compact ? 18 : 26,
+			padding: compact
+				? undefined
+				: { left: 12, right: 12, top: 12, bottom: 28 }
 		})
 	);
 
 	const sortedPoints = $derived([...points].sort((a, b) => a.date.localeCompare(b.date)));
 
-	const yMin = $derived(sortedPoints.length ? Math.min(...sortedPoints.map((p) => p.est1rm)) : 0);
-	const yMax = $derived(sortedPoints.length ? Math.max(...sortedPoints.map((p) => p.est1rm)) : 0);
+	const rawYMin = $derived(sortedPoints.length ? Math.min(...sortedPoints.map((p) => p.est1rm)) : 0);
+	const rawYMax = $derived(sortedPoints.length ? Math.max(...sortedPoints.map((p) => p.est1rm)) : 0);
+	const yBounds = $derived(yAxisBounds(rawYMin, rawYMax));
+	const yTicks = $derived(
+		layout
+			? buildValueAxisTicks(
+					yBounds.min,
+					yBounds.max,
+					layout.plotTop,
+					layout.plotBottom,
+					compact ? 4 : 5,
+					(value) => fmtNum(value)
+				)
+			: []
+	);
+	const plotRight = $derived(layout ? layout.width - layout.padding.right : 0);
 
 	let hoverIndex = $state<number | null>(null);
 	let scrollEl = $state<HTMLDivElement | undefined>();
-	let listEl = $state<HTMLUListElement | undefined>();
 	let svgEl = $state<SVGSVGElement | undefined>();
 	let dragStartX = $state<number | null>(null);
 	let dragCurrentX = $state<number | null>(null);
@@ -159,11 +176,7 @@
 	function scrollToLatest() {
 		void tick().then(() => {
 			if (scrollEl && scrollEl.scrollWidth > scrollEl.clientWidth) {
-				// RTL container: scrollLeft 0 keeps the viewport on the latest dates.
 				scrollEl.scrollLeft = 0;
-			}
-			if (listEl && listEl.scrollHeight > listEl.clientHeight) {
-				listEl.scrollTop = listEl.scrollHeight - listEl.clientHeight;
 			}
 		});
 	}
@@ -227,7 +240,29 @@
 	{#if !layout}
 		<p class="muted empty">Нет данных для графика.</p>
 	{:else}
-		<div class="chart-scroll" class:compact bind:this={scrollEl}>
+		<div class="chart-frame" class:compact>
+			{#if !compact}
+				<svg
+					class="y-axis"
+					width="48"
+					height={layout.height}
+					viewBox="0 0 48 {layout.height}"
+					aria-hidden="true"
+				>
+					<text x="44" y={layout.plotTop - 2} class="y-axis-unit" text-anchor="end">кг</text>
+					{#each yTicks as tick, tickIndex (`${tick.value}:${tickIndex}`)}
+						<line
+							x1="0"
+							y1={tick.y}
+							x2="44"
+							y2={tick.y}
+							class="y-axis-tick-mark"
+						/>
+						<text x="42" y={tick.y + 3} class="y-axis-label" text-anchor="end">{tick.label}</text>
+					{/each}
+				</svg>
+			{/if}
+			<div class="chart-scroll" class:compact bind:this={scrollEl}>
 			<svg
 				bind:this={svgEl}
 				width={layout.width}
@@ -253,6 +288,17 @@
 						rx="3"
 					/>
 				{/if}
+
+				{#each yTicks as tick, tickIndex (`${tick.value}:grid:${tickIndex}`)}
+					<line
+						x1={layout.padding.left}
+						y1={tick.y}
+						x2={plotRight}
+						y2={tick.y}
+						class="grid-line y-grid"
+					/>
+				{/each}
+
 				{#each layout.dateTicks as tick, tickIndex (`${tick.x}:${tick.label}:${tickIndex}`)}
 					{@const active =
 						hoverIndex != null && Math.abs(layout.pointX(hoverIndex) - tick.x) < 0.5}
@@ -323,13 +369,13 @@
 
 				{#each sortedPoints as point, index (`${point.date}:${point.est1rm}:${index}`)}
 					{@const x = layout.pointX(index)}
-					{@const y = yScale(point.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
+					{@const y = yScale(point.est1rm, yBounds.min, yBounds.max, layout.plotTop, layout.plotBottom)}
 					{#if index > 0}
 						{@const prev = sortedPoints[index - 1]}
 						{@const gap = Math.round((dateToMs(point.date) - dateToMs(prev.date)) / 86400000)}
 						{#if gap <= gapDays}
 							{@const px = layout.pointX(index - 1)}
-							{@const py = yScale(prev.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
+							{@const py = yScale(prev.est1rm, yBounds.min, yBounds.max, layout.plotTop, layout.plotBottom)}
 							<line x1={px} y1={py} x2={x} y2={y} stroke={color} stroke-opacity="0.9" stroke-width="2" />
 						{/if}
 					{/if}
@@ -349,34 +395,11 @@
 					</g>
 				{/each}
 			</svg>
+			</div>
 		</div>
 
 		{#if !compact && layout.width > 640}
 			<p class="scroll-hint">Прокрутите график влево‑вправо, чтобы увидеть все {sortedPoints.length} записей</p>
-		{/if}
-
-		{#if !compact}
-			<ul class="trend-list" bind:this={listEl}>
-				{#each displayPoints as point, index (`${point.date}:${point.est1rm}:${index}`)}
-					{#if index > 0}
-						{@const gap = Math.round(
-							(dateToMs(point.date) - dateToMs(displayPoints[index - 1].date)) / 86400000
-						)}
-						{#if gap > gapDays}
-							<li class="gap-row" class:long={gap >= 42}>
-								<span>
-									перерыв {formatGapLabel(gap)} · {formatDateRu(displayPoints[index - 1].date)} →
-									{formatDateRu(point.date)}
-								</span>
-							</li>
-						{/if}
-					{/if}
-					<li>
-						<span>{formatDateRu(point.date)}</span>
-						<strong>{fmtNum(point.est1rm)} кг</strong>
-					</li>
-				{/each}
-			</ul>
 		{/if}
 	{/if}
 </div>
@@ -503,13 +526,52 @@
 		font-size: 0.85rem;
 	}
 
-	.chart-scroll {
-		overflow-x: auto;
-		overflow-y: hidden;
-		max-width: 100%;
-		margin-bottom: 0.35rem;
+	.chart-frame {
+		display: flex;
+		align-items: stretch;
 		background: var(--surface);
 		border: 1px solid var(--border);
+		border-radius: 0;
+	}
+
+	.chart-frame.compact {
+		border: 0;
+		background: transparent;
+	}
+
+	.y-axis {
+		flex: 0 0 48px;
+		display: block;
+		border-right: 1px solid var(--border);
+		background: var(--surface);
+	}
+
+	.y-axis-unit {
+		fill: var(--muted);
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+	}
+
+	.y-axis-label {
+		fill: var(--muted);
+		font-family: var(--font-mono);
+		font-size: 9px;
+	}
+
+	.y-axis-tick-mark {
+		stroke: rgba(255, 255, 255, 0.08);
+		stroke-width: 1;
+	}
+
+	.chart-scroll {
+		flex: 1;
+		min-width: 0;
+		overflow-x: auto;
+		overflow-y: hidden;
+		margin-bottom: 0;
+		background: transparent;
+		border: 0;
 		border-radius: 0;
 		-webkit-overflow-scrolling: touch;
 		direction: rtl;
@@ -524,7 +586,7 @@
 	}
 
 	.scroll-hint {
-		margin: 0 0 0.55rem;
+		margin: 0.35rem 0 0;
 		color: var(--muted);
 		font-family: var(--font-mono);
 		font-size: 0.68rem;
@@ -542,6 +604,10 @@
 	.grid-line {
 		stroke: rgba(255, 255, 255, 0.06);
 		stroke-width: 1;
+	}
+
+	.grid-line.y-grid {
+		stroke: rgba(255, 255, 255, 0.05);
 	}
 
 	.grid-line.muted {
@@ -618,41 +684,5 @@
 	.gap-label.long {
 		font-size: 12px;
 		fill: #ffb4b4;
-	}
-
-	.trend-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: grid;
-		gap: 0.35rem;
-		max-height: min(320px, 40vh);
-		overflow-y: auto;
-	}
-
-	.trend-list li {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.5rem;
-		font-size: 0.8rem;
-		padding: 0.35rem 0.5rem;
-		border: 1px solid var(--border);
-		border-radius: 0;
-		background: var(--surface);
-	}
-
-	.gap-row {
-		justify-content: center;
-		border-style: dashed;
-		border-color: rgba(255, 143, 143, 0.5);
-		background: rgba(255, 143, 143, 0.12);
-		color: var(--danger);
-		font-size: 0.75rem;
-		font-weight: 600;
-	}
-
-	.gap-row.long {
-		border-color: rgba(255, 100, 100, 0.65);
-		background: rgba(255, 100, 100, 0.18);
 	}
 </style>
