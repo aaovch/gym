@@ -36,6 +36,16 @@
 
 	const yMin = $derived(sortedPoints.length ? Math.min(...sortedPoints.map((p) => p.est1rm)) : 0);
 	const yMax = $derived(sortedPoints.length ? Math.max(...sortedPoints.map((p) => p.est1rm)) : 0);
+
+	let hoverIndex = $state<number | null>(null);
+
+	function showPoint(index: number) {
+		hoverIndex = index;
+	}
+
+	function hidePoint() {
+		hoverIndex = null;
+	}
 </script>
 
 <div class="chart-card" class:compact>
@@ -55,7 +65,13 @@
 			{/if}
 		</div>
 		{#if sortedPoints.length > 0}
-			<span class="latest">{fmtNum(sortedPoints[sortedPoints.length - 1].est1rm)} кг</span>
+			<span class="latest">
+				{#if hoverIndex != null}
+					{formatDateRu(sortedPoints[hoverIndex].date)} · {fmtNum(sortedPoints[hoverIndex].est1rm)} кг
+				{:else}
+					{fmtNum(sortedPoints[sortedPoints.length - 1].est1rm)} кг
+				{/if}
+			</span>
 		{/if}
 	</div>
 
@@ -85,15 +101,35 @@
 				aria-label="График 1ПМ по датам: {title}"
 			>
 				{#each layout.dateTicks as tick, tickIndex (`${tick.x}:${tick.label}:${tickIndex}`)}
+					{@const active =
+						hoverIndex != null && Math.abs(layout.pointX(hoverIndex) - tick.x) < 0.5}
 					<line
 						x1={tick.x}
 						y1={layout.plotTop}
 						x2={tick.x}
 						y2={layout.plotBottom}
 						class="grid-line"
+						class:muted={hoverIndex != null && !active}
 					/>
-					<text x={tick.x} y={layout.height - 6} class="axis-label" text-anchor="middle">{tick.label}</text>
+					{#if hoverIndex == null || !active}
+						<text x={tick.x} y={layout.height - 6} class="axis-label" text-anchor="middle">{tick.label}</text>
+					{/if}
 				{/each}
+
+				{#if hoverIndex != null}
+					{@const hoverX = layout.pointX(hoverIndex)}
+					{@const hoverPoint = sortedPoints[hoverIndex]}
+					<line
+						x1={hoverX}
+						y1={layout.plotTop}
+						x2={hoverX}
+						y2={layout.plotBottom}
+						class="hover-guide"
+					/>
+					<text x={hoverX} y={layout.height - 6} class="axis-label active" text-anchor="middle">
+						{formatDateRu(hoverPoint.date)}
+					</text>
+				{/if}
 
 				{#each layout.gaps as gap, gapBandIndex (`${gap.startDate}:${gap.endDate}:${gapBandIndex}`)}
 					<rect
@@ -132,7 +168,7 @@
 					</text>
 				{/each}
 
-				{#each sortedPoints as point, index (`${point.date}:${index}`)}
+				{#each sortedPoints as point, index (`${point.date}:${point.est1rm}:${index}`)}
 					{@const x = layout.pointX(index)}
 					{@const y = yScale(point.est1rm, yMin, yMax, layout.plotTop, layout.plotBottom)}
 					{#if index > 0}
@@ -144,8 +180,19 @@
 							<line x1={px} y1={py} x2={x} y2={y} stroke={color} stroke-opacity="0.9" stroke-width="2" />
 						{/if}
 					{/if}
-					<circle cx={x} cy={y} r="4" fill={color} />
-					<title>{formatDateRu(point.date)} — {fmtNum(point.est1rm)} кг</title>
+					<g
+						class="point-hit"
+						class:active={hoverIndex === index}
+						role="presentation"
+						onmouseenter={() => showPoint(index)}
+						onmouseleave={hidePoint}
+						onfocus={() => showPoint(index)}
+						onblur={hidePoint}
+					>
+						<title>{formatDateRu(point.date)} — {fmtNum(point.est1rm)} кг</title>
+						<circle cx={x} cy={y} r="10" class="point-target" />
+						<circle cx={x} cy={y} r="4" fill={color} class="point-dot" />
+					</g>
 				{/each}
 			</svg>
 		</div>
@@ -307,9 +354,44 @@
 		stroke-width: 1;
 	}
 
+	.grid-line.muted {
+		stroke-opacity: 0.35;
+	}
+
+	.hover-guide {
+		stroke: color-mix(in srgb, var(--accent, #6ee7a8) 70%, white);
+		stroke-width: 1.5;
+		stroke-dasharray: 3 3;
+		pointer-events: none;
+	}
+
 	.axis-label {
 		fill: var(--muted);
 		font-size: 10px;
+	}
+
+	.axis-label.active {
+		fill: var(--text, #f3f4f6);
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.point-hit {
+		cursor: pointer;
+	}
+
+	.point-target {
+		fill: transparent;
+		stroke: transparent;
+	}
+
+	.point-dot {
+		pointer-events: none;
+	}
+
+	.point-hit.active .point-dot {
+		stroke: rgba(255, 255, 255, 0.85);
+		stroke-width: 1.5;
 	}
 
 	.gap-band {
