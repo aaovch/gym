@@ -18,6 +18,7 @@ import {
 	targetWeight
 } from './protocol';
 import type { MicrocycleOverview, TrainingDay, WorkoutTemplate } from './microcycle';
+import { mesocycleDisplayLabel } from './microcycle';
 import {
 	defaultMicroSessions,
 	microDates,
@@ -650,7 +651,7 @@ export function importPlanFromAuto(
 
 		return {
 			id: existingMeso?.id ?? newId('meso'),
-			label: meso.label,
+			label: existingMeso?.label ?? mesocycleDisplayLabel(meso.index),
 			startDate: meso.startDate,
 			endDate: meso.endDate,
 			templateId: existingMeso?.templateId ?? defaultTemplateId,
@@ -1090,7 +1091,10 @@ export function assignSessionToMicro(
 	return assignSessionDate(plan, mesoId, microId, date, indexInMicro);
 }
 
-export function createMesocycle(plan: CyclePlan, label = 'Новый блок'): CyclePlan {
+export function createMesocycle(
+	plan: CyclePlan,
+	label = mesocycleDisplayLabel(plan.mesocycles.length + 1)
+): CyclePlan {
 	const meso: MesocyclePlan = {
 		id: newId('meso'),
 		label,
@@ -1618,7 +1622,7 @@ export function autoMesocyclesAsView(
 
 		const plan: MesocyclePlan = {
 			id: `auto-${meso.index}`,
-			label: meso.label,
+			label: mesocycleDisplayLabel(meso.index),
 			startDate: meso.startDate,
 			endDate: meso.endDate,
 			templateId: defaultTemplate.id,

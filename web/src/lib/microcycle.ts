@@ -224,29 +224,8 @@ function buildMicrocycles(days: TrainingDay[]): Microcycle[] {
 	return cycles;
 }
 
-function mesocycleLabel(microcycles: Microcycle[]): string {
-	const exercises = new Set<string>();
-	for (const micro of microcycles) {
-		for (const day of micro.days) {
-			for (const exercise of day.exercises) {
-				if (!isCardio(exercise)) exercises.add(exercise);
-			}
-		}
-	}
-
-	const names = [...exercises];
-	if (names.some((item) => item.includes('Сплит')) && names.some((item) => item.includes('Жим гантелей лёжа'))) {
-		return 'сплит + жим лёжа';
-	}
-	if (names.some((item) => item.includes('Приседания')) && names.some((item) => item.includes('лендмайн'))) {
-		return 'присед + лендмайн';
-	}
-	if (names.some((item) => item.includes('Вертикальный жим'))) {
-		return 'жим + присед';
-	}
-
-	const picks = names.slice(0, 2).map(shortExerciseName);
-	return picks.length ? picks.join(' + ') : 'блок';
+export function mesocycleDisplayLabel(index: number): string {
+	return `Мезоцикл ${index}`;
 }
 
 function buildMesocycles(cycles: Microcycle[]): Mesocycle[] {
@@ -271,7 +250,7 @@ function buildMesocycles(cycles: Microcycle[]): Mesocycle[] {
 			durationDays: daysBetween(startDate, endDate),
 			microcycles,
 			completeMicrocycles: microcycles.filter((micro) => micro.complete).length,
-			label: mesocycleLabel(microcycles),
+			label: mesocycleDisplayLabel(mesoIndex),
 			gapAfterDays: null
 		});
 		bucket = [];

@@ -28,6 +28,7 @@
 	import { microDates } from '$lib/micro-plan';
 	import {
 		mesocycleColor,
+		mesocycleDisplayLabel,
 		sessionIndexColor,
 		sessionIndexLabel,
 		type WorkoutTemplate
@@ -91,7 +92,7 @@
 	let macroStart = $state('');
 	let macroBlocks = $state<MacroBlockDraft[]>([]);
 
-	let constructorLabel = $state('Новый блок');
+	let constructorLabel = $state(mesocycleDisplayLabel(1));
 	let constructorStart = $state('');
 	let constructorMicroCount = $state(4);
 	let constructorProtocolId = $state('submax-effort');
@@ -661,10 +662,7 @@
 			return;
 		}
 		mesoConstructorMacroId = macroId;
-		const scopeMesos = macroId
-			? (plan?.macrocycles.find((macro) => macro.id === macroId)?.mesoIds.length ?? 0)
-			: (workoutStore.cyclePlan?.mesocycles.length ?? 0);
-		constructorLabel = `Блок ${scopeMesos + 1}`;
+		constructorLabel = mesocycleDisplayLabel((workoutStore.cyclePlan?.mesocycles.length ?? 0) + 1);
 		constructorStart = defaultMesoStartDate(view.entries);
 		constructorMicroCount = 4;
 		initConstructorSessions();

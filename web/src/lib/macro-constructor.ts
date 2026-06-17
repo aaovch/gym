@@ -1,5 +1,6 @@
 import type { CyclePlan, MacrocyclePlan, MesocyclePlan } from './cycle-plan';
 import type { WorkoutTemplate } from './microcycle';
+import { mesocycleDisplayLabel } from './microcycle';
 import { buildProtocolMatrix, type ExerciseAnchorInfo, type ProtocolMatrixRow } from './cycle-plan';
 import { dateToMs } from './chart-time';
 import { defaultMicroSessions } from './micro-plan';
@@ -85,6 +86,7 @@ export function previewMacroPlan(
 
 	let currentStart = input.startDate;
 	const previews: MacroBlockPreview[] = [];
+	let mesoNumber = plan.mesocycles.length;
 
 	for (const block of input.blocks) {
 		if (block.exercises.length === 0 || block.microCount < 1) {
@@ -92,10 +94,12 @@ export function previewMacroPlan(
 			continue;
 		}
 
+		mesoNumber += 1;
+		const mesoLabel = mesocycleDisplayLabel(mesoNumber);
 		const defaultProtocolId = block.defaultProtocolId ?? DEFAULT_PROTOCOL_TEMPLATE.id;
 		const mesoPlan: MesocyclePlan = {
 			id: 'preview-meso',
-			label: block.label,
+			label: mesoLabel,
 			startDate: currentStart,
 			endDate: mesoCalendarEnd(currentStart, block.microCount),
 			templateId: defaultProtocolId,
@@ -117,7 +121,7 @@ export function previewMacroPlan(
 
 		const template = plan.templates.find((item) => item.id === defaultProtocolId);
 		previews.push({
-			label: block.label,
+			label: mesoLabel,
 			startDate: currentStart,
 			endDate: mesoPlan.endDate,
 			microCount: block.microCount,
@@ -150,12 +154,14 @@ export function createMacrocycleFromConstructor(
 	const mesoIds: string[] = [];
 	const newMesos: MesocyclePlan[] = [];
 	let currentStart = input.startDate;
+	let mesoNumber = plan.mesocycles.length;
 
 	for (const block of input.blocks) {
 		if (block.exercises.length === 0 || block.microCount < 1) continue;
 
+		mesoNumber += 1;
 		const mesoInput: MesoConstructorInput = {
-			label: block.label,
+			label: mesocycleDisplayLabel(mesoNumber),
 			startDate: currentStart,
 			microCount: block.microCount,
 			defaultProtocolId: block.defaultProtocolId,
