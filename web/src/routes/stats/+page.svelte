@@ -565,18 +565,16 @@
     display: grid;
     grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
     gap: 12px;
-    align-items: start;
+    align-items: stretch;
   }
 
   .catalog {
     display: flex;
     flex-direction: column;
-    max-height: calc(100vh - 280px);
     min-height: 420px;
+    height: 100%;
     padding: 0;
     overflow: hidden;
-    position: sticky;
-    top: 12px;
   }
 
   .catalog-head {
@@ -704,8 +702,11 @@
   }
 
   .detail {
+    display: flex;
+    flex-direction: column;
     padding: 22px;
     min-height: 420px;
+    height: 100%;
   }
 
   .detail-head {
@@ -858,6 +859,11 @@
     color: var(--muted);
     font-family: var(--font-mono);
     font-size: 9px;
+  }
+
+  .chart-wrap {
+    flex: 1;
+    min-height: 0;
   }
 
   .chart-wrap :global(.chart-card) {
