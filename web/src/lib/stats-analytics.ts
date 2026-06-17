@@ -165,9 +165,21 @@ export function sortStrengthSummary(list: StrengthSummary[], sortKey: SortKey): 
 	}
 }
 
+export function recentPrRecords(summary: StrengthSummary[], sinceIso: string) {
+	return summary
+		.filter((item) => item.best1rm.date && item.best1rm.date >= sinceIso)
+		.map((item) => ({
+			exercise: item.exercise,
+			value: item.best1rm.value,
+			date: item.best1rm.date!
+		}))
+		.sort(
+			(a, b) => b.date.localeCompare(a.date) || a.exercise.localeCompare(b.exercise, 'ru')
+		);
+}
+
 export function buildAnalyticsInsights(input: {
 	recentDays: number;
-	recentPrCount: number;
 	strongest: StrengthSummary[];
 }): AnalyticsInsight[] {
 	const items: AnalyticsInsight[] = [];
@@ -185,15 +197,6 @@ export function buildAnalyticsInsights(input: {
 			tone: 'warn',
 			title: 'Мало регулярности',
 			detail: `${input.recentDays} из 30 дней с тренировками. Для прогресса обычно нужно 8–12+.`
-		});
-	}
-
-	if (input.recentPrCount > 0) {
-		items.push({
-			id: 'prs',
-			tone: 'good',
-			title: 'Свежие рекорды',
-			detail: `${input.recentPrCount} ${input.recentPrCount === 1 ? 'упражнение' : 'упражнений'} с лучшим 1ПМ за последний месяц.`
 		});
 	}
 

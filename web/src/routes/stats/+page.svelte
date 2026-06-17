@@ -10,6 +10,7 @@
     buildAnalyticsInsights,
     exerciseColor,
     presetPeriodRange,
+    recentPrRecords as listRecentPrRecords,
     sortStrengthSummary,
     sparklinePath,
     statsUrl,
@@ -76,7 +77,6 @@
       ? (strengthSummary.find((item) => item.exercise === selectedExercise) ?? null)
       : null
   );
-  const trainingDays = $derived(new Set(view.sessions.map((session) => session.date)).size);
   const last30Start = $derived.by(() => {
     const date = new Date(`${todayIso()}T12:00:00`);
     date.setDate(date.getDate() - 29);
@@ -87,20 +87,7 @@
       view.sessions.filter((session) => session.date >= last30Start).map((session) => session.date)
     ).size
   );
-  const totalSets = $derived(
-    view.sessions.reduce(
-      (total, session) =>
-        total + session.rows.reduce((rowTotal, row) => rowTotal + row.sets.length, 0),
-      0
-    )
-  );
-  const totalTonnage = $derived(strengthSummary.reduce((sum, item) => sum + item.tonnage, 0));
-  const recentPrCount = $derived(
-    strengthSummary.filter(
-      (item) => item.best1rm.date && item.best1rm.date >= last30Start
-    ).length
-  );
-  const consistencyPct = $derived(Math.min(100, Math.round((recentDays / 12) * 100)));
+  const recentPrRecords = $derived(listRecentPrRecords(strengthSummary, last30Start));
   const strongest = $derived(
     [...strengthSummary].sort((a, b) => b.best1rm.value - a.best1rm.value).slice(0, 5)
   );
@@ -110,9 +97,7 @@
   const max1rm = $derived(Math.max(...strongest.map((item) => item.best1rm.value), 1));
   const maxSessions = $derived(Math.max(...mostPracticed.map((item) => item.sessions), 1));
   const chartColor = $derived(selectedExercise ? exerciseColor(selectedExercise) : '#6ee7a8');
-  const insights = $derived(
-    buildAnalyticsInsights({ recentDays, recentPrCount, strongest })
-  );
+  const insights = $derived(buildAnalyticsInsights({ recentDays, strongest }));
 
   function setExerciseParam(name: string | null) {
     const params = new URLSearchParams(page.url.searchParams);
@@ -197,7 +182,6 @@
 
   {#if !workoutStore.bootstrapped}
     <section class="card skeleton-panel" aria-busy="true" aria-label="Загрузка аналитики">
-      <div class="skeleton vitals-skeleton"></div>
       <div class="skeleton workspace-skeleton"></div>
     </section>
   {:else if strengthSummary.length === 0}
@@ -210,31 +194,33 @@
       <a class="button button-primary" href="{base}/add">Записать тренировку</a>
     </section>
   {:else}
-    <section class="vitals-deck">
-      <article class="vital-card accent-vital">
-        <span class="vital-label">Тренировочных дней</span>
-        <strong>{trainingDays}</strong>
-        <small>за всё время</small>
-      </article>
-      <article class="vital-card">
-        <span class="vital-label">Последние 30 дней</span>
-        <strong>{recentDays}</strong>
-        <div class="vital-meter" aria-hidden="true">
-          <span style:width="{consistencyPct}%"></span>
+    {#if recentPrRecords.length > 0}
+      <section class="recent-prs card" aria-label="Новые рекорды 1ПМ за 30 дней">
+        <div class="recent-prs-head">
+          <div>
+            <span class="eyebrow">Новые 1ПМ</span>
+            <h2>За последние 30 дней</h2>
+          </div>
+          <span class="recent-prs-count">{recentPrRecords.length}</span>
         </div>
-        <small>{recentDays >= 12 ? 'стабильный ритм' : 'можно добавить регулярности'}</small>
-      </article>
-      <article class="vital-card">
-        <span class="vital-label">Суммарный объём</span>
-        <strong>{fmtNum(totalTonnage)}<em>кг</em></strong>
-        <small>{totalSets} подходов · {strengthSummary.length} упражнений</small>
-      </article>
-      <article class="vital-card">
-        <span class="vital-label">Рекорды за месяц</span>
-        <strong>{recentPrCount}</strong>
-        <small>упражнений с новым 1ПМ</small>
-      </article>
-    </section>
+        <ul class="recent-prs-list">
+          {#each recentPrRecords as record (record.exercise)}
+            <li>
+              <button
+                type="button"
+                class={['recent-pr-item', selectedExercise === record.exercise && 'active']}
+                style:--ex-color={exerciseColor(record.exercise)}
+                onclick={() => selectExercise(record.exercise)}
+              >
+                <span class="recent-pr-name">{record.exercise}</span>
+                <span class="recent-pr-value">{fmtNum(record.value)}<small>кг</small></span>
+                <span class="recent-pr-date">{formatDateRu(record.date)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
 
     <div class="analytics-workspace">
       <aside class="catalog card">
@@ -471,82 +457,108 @@
     flex-wrap: wrap;
   }
 
-  .vitals-deck {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px;
+  .recent-prs {
     margin-bottom: 14px;
-  }
-
-  .vital-card {
-    position: relative;
     padding: 16px 18px;
-    background: linear-gradient(155deg, #1a1d24, #111419);
+  }
+
+  .recent-prs-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .recent-prs-head h2 {
+    margin: 4px 0 0;
+    font-size: 16px;
+    letter-spacing: 0.03em;
+  }
+
+  .recent-prs-count {
+    display: grid;
+    place-items: center;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 8px;
+    color: var(--accent);
+    background: rgb(204 255 51 / 10%);
+    border: 1px solid rgb(204 255 51 / 35%);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .recent-prs-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+  }
+
+  .recent-pr-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 2px 10px;
+    width: 100%;
+    padding: 10px 12px;
+    color: var(--text);
+    background: #0e1014;
     border: 1px solid var(--line);
-    overflow: hidden;
+    border-left: 3px solid var(--ex-color, var(--accent));
+    cursor: pointer;
+    text-align: left;
+    transition:
+      background 120ms ease,
+      border-color 120ms ease;
   }
 
-  .vital-card::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 3px;
-    background: var(--line-strong);
+  .recent-pr-item:hover {
+    background: rgb(255 255 255 / 2%);
+    border-color: color-mix(in srgb, var(--ex-color, var(--accent)) 35%, var(--line));
   }
 
-  .vital-card.accent-vital::before {
-    background: var(--accent);
+  .recent-pr-item.active {
+    background: color-mix(in srgb, var(--ex-color, var(--accent)) 10%, #121419);
+    border-color: color-mix(in srgb, var(--ex-color, var(--accent)) 45%, var(--line));
   }
 
-  .vital-label {
-    display: block;
+  .recent-pr-name {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .recent-pr-value {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    color: var(--ex-color, var(--accent));
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .recent-pr-value small {
+    margin-left: 2px;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 600;
+  }
+
+  .recent-pr-date {
+    grid-column: 1;
+    grid-row: 2;
     color: var(--muted);
     font-family: var(--font-mono);
     font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .vital-card strong {
-    display: block;
-    margin-top: 8px;
-    font-family: var(--font-display);
-    font-size: clamp(26px, 3vw, 34px);
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: 0.02em;
-  }
-
-  .vital-card strong em {
-    margin-left: 4px;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-style: normal;
-    font-weight: 600;
-  }
-
-  .vital-card small {
-    display: block;
-    margin-top: 8px;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
-  }
-
-  .vital-meter {
-    height: 4px;
-    margin-top: 10px;
-    background: #0a0c10;
-    border: 1px solid var(--line);
-  }
-
-  .vital-meter span {
-    display: block;
-    height: 100%;
-    background: linear-gradient(90deg, var(--blue), var(--accent));
-    transition: width 280ms ease;
   }
 
   .analytics-workspace {
@@ -1019,19 +1031,11 @@
     }
   }
 
-  .vitals-skeleton {
-    height: 96px;
-  }
-
   .workspace-skeleton {
     height: 420px;
   }
 
   @media (max-width: 980px) {
-    .vitals-deck {
-      grid-template-columns: 1fr 1fr;
-    }
-
     .analytics-workspace {
       grid-template-columns: 1fr;
     }
@@ -1052,7 +1056,7 @@
   }
 
   @media (max-width: 620px) {
-    .vitals-deck {
+    .recent-prs-list {
       grid-template-columns: 1fr;
     }
 
