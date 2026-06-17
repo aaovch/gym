@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import {
 		TRAINING_GAP_DAYS,
 		buildTimeChartLayout,
@@ -38,6 +39,8 @@
 	const yMax = $derived(sortedPoints.length ? Math.max(...sortedPoints.map((p) => p.est1rm)) : 0);
 
 	let hoverIndex = $state<number | null>(null);
+	let scrollEl = $state<HTMLDivElement | undefined>();
+	let listEl = $state<HTMLUListElement | undefined>();
 
 	function showPoint(index: number) {
 		hoverIndex = index;
@@ -46,6 +49,25 @@
 	function hidePoint() {
 		hoverIndex = null;
 	}
+
+	function scrollToLatest() {
+		void tick().then(() => {
+			if (scrollEl && scrollEl.scrollWidth > scrollEl.clientWidth) {
+				// RTL container: scrollLeft 0 keeps the viewport on the latest dates.
+				scrollEl.scrollLeft = 0;
+			}
+			if (listEl && listEl.scrollHeight > listEl.clientHeight) {
+				listEl.scrollTop = listEl.scrollHeight - listEl.clientHeight;
+			}
+		});
+	}
+
+	$effect(() => {
+		layout?.width;
+		sortedPoints.length;
+		sortedPoints.at(-1)?.date;
+		scrollToLatest();
+	});
 </script>
 
 <div class="chart-card" class:compact>
@@ -91,7 +113,7 @@
 	{#if !layout}
 		<p class="muted empty">Нет данных для графика.</p>
 	{:else}
-		<div class="chart-scroll" class:compact>
+		<div class="chart-scroll" class:compact bind:this={scrollEl}>
 			<svg
 				width={layout.width}
 				height={layout.height}
@@ -202,7 +224,7 @@
 		{/if}
 
 		{#if !compact}
-			<ul class="trend-list">
+			<ul class="trend-list" bind:this={listEl}>
 				{#each sortedPoints as point, index (`${point.date}:${index}`)}
 					{#if index > 0}
 						{@const gap = Math.round(
@@ -327,6 +349,11 @@
 		border: 1px solid var(--border);
 		border-radius: 0;
 		-webkit-overflow-scrolling: touch;
+		direction: rtl;
+	}
+
+	.chart-scroll .chart {
+		direction: ltr;
 	}
 
 	.chart-scroll.compact {
