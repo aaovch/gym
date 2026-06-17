@@ -862,10 +862,14 @@
                   <span class="deck-index">{currentSessionStepIndex + 1} / {planSessionSteps.length}</span>
                 {/if}
               </div>
-              <h2 class="deck-meso">{mesocycle.plan.label}</h2>
+              <h2 class="deck-title">
+                <span class="deck-part deck-meso">{mesocycle.plan.label}</span>
+                <span class="deck-sep" aria-hidden="true">·</span>
+                <span class="deck-part deck-micro">Микроцикл {microcycle.plan.indexInMeso}</span>
+                <span class="deck-sep" aria-hidden="true">·</span>
+                <span class="deck-part deck-slot">{slotLabel(activeSlot)}</span>
+              </h2>
               <div class="deck-meta">
-                <span>Микро {microcycle.plan.indexInMeso}</span>
-                <span class="deck-slot">{slotLabel(activeSlot)}</span>
                 {#if plannedSessionDate}
                   <span>{formatDateRu(plannedSessionDate)}</span>
                 {:else}
@@ -974,26 +978,39 @@
           </button>
         </div>
       {:else}
-        <div class="training-top">
+        <div
+          class="training-top"
+          style={sessionReady && mesocycle && activeSlot
+            ? `--meso-color: ${mesocycleColor(mesocycle.index)}; --slot-color: ${slotColor(activeSlot)}`
+            : undefined}
+        >
           <div class="training-top-main">
             <div class="eyebrow">Контекст тренировки</div>
-            <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
             {#if sessionReady && mesocycle && microcycle && activeSlot}
+              <h2 class="deck-title">
+                <span class="deck-part deck-meso">{mesocycle.plan.label}</span>
+                <span class="deck-sep" aria-hidden="true">·</span>
+                <span class="deck-part deck-micro">Микроцикл {microcycle.plan.indexInMeso}</span>
+                <span class="deck-sep" aria-hidden="true">·</span>
+                <span class="deck-part deck-slot">{slotLabel(activeSlot)}</span>
+              </h2>
               <p>
-                Микроцикл {microcycle.plan.indexInMeso}
                 {#if plannedSessionDate}
-                  · {formatDateRu(plannedSessionDate)}
+                  {formatDateRu(plannedSessionDate)}
                 {:else}
-                  · дата не назначена
+                  дата не назначена
                 {/if}
                 {#if sessionSkipped}
                   · <span class="skip-flag">пропущена</span>
                 {/if}
               </p>
-            {:else if mesocycle && microcycle}
-              <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
-            {:else if mesocycle}
-              <p>Выберите микроцикл, затем сессию A или B</p>
+            {:else}
+              <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
+              {#if mesocycle && microcycle}
+                <p>Микроцикл {microcycle.plan.indexInMeso} — выберите сессию A или B</p>
+              {:else if mesocycle}
+                <p>Выберите микроцикл, затем сессию A или B</p>
+              {/if}
             {/if}
           </div>
           {#if sessionReady}
@@ -1456,12 +1473,35 @@
     white-space: nowrap;
   }
 
-  .deck-meso {
+  .deck-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
     margin: 4px 0 0;
-    color: var(--meso-color, var(--text));
     font-size: clamp(1.65rem, 3.2vw, 2.1rem);
+    font-weight: 700;
     letter-spacing: 0.02em;
     line-height: 1.05;
+    text-transform: uppercase;
+  }
+
+  .deck-part.deck-meso {
+    color: var(--meso-color, var(--text));
+  }
+
+  .deck-part.deck-micro {
+    color: var(--meso-color, var(--text));
+  }
+
+  .deck-part.deck-slot {
+    color: var(--slot-color, var(--accent));
+  }
+
+  .deck-sep {
+    color: var(--muted);
+    font-weight: 400;
+    opacity: 0.45;
   }
 
   .deck-meta {
@@ -1474,14 +1514,6 @@
     font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 600;
-  }
-
-  .deck-slot {
-    color: var(--slot-color);
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
   }
 
   .deck-meta .muted-date {
@@ -1739,6 +1771,12 @@
     margin: 6px 0 6px;
     font-size: 30px;
     letter-spacing: 0.01em;
+  }
+
+  .training-top .deck-title {
+    margin: 6px 0 4px;
+    font-size: clamp(1.65rem, 3.2vw, 2.1rem);
+    letter-spacing: 0.02em;
   }
 
   .training-top p {
@@ -2317,7 +2355,7 @@
       padding: 16px 14px 12px;
     }
 
-    .deck-meso {
+    .deck-title {
       font-size: 1.45rem;
     }
 
