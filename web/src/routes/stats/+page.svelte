@@ -6,12 +6,16 @@
   import { fmtNum, fmtSet, formatDateRu, todayIso } from '$lib/format';
   import {
     SORT_OPTIONS,
+    PERIOD_PRESETS,
     buildAnalyticsInsights,
     exerciseColor,
+    presetPeriodRange,
     sortStrengthSummary,
     sparklinePath,
     statsUrl,
-    trendDelta,
+    summarizeTrendPeriod,
+    type DateRange,
+    type PeriodPresetKey,
     type SortKey
   } from '$lib/stats-analytics';
   import { workoutStore } from '$lib/workout-store';
@@ -19,6 +23,8 @@
 
   let query = $state('');
   let sortKey = $state<SortKey>('sessions');
+  let periodRange = $state<DateRange | null>(null);
+  let periodPreset = $state<PeriodPresetKey>('all');
 
   const view = $derived(workoutStore.view);
   const strengthSummary = $derived(
@@ -48,6 +54,23 @@
   const trendPoints = $derived<TrendPoint[]>(
     selectedExercise ? (view.trend[selectedExercise] ?? []) : []
   );
+  const periodSummary = $derived(summarizeTrendPeriod(trendPoints, periodRange));
+  const periodSets = $derived.by(() => {
+    if (!selectedExercise) return 0;
+    return view.sessions
+      .filter((session) => {
+        if (session.exercise !== selectedExercise) return false;
+        if (!periodRange) return true;
+        return session.date >= periodRange.from && session.date <= periodRange.to;
+      })
+      .reduce(
+        (total, session) =>
+          total + session.rows.reduce((rowTotal, row) => rowTotal + row.sets.length, 0),
+        0
+      );
+  });
+  const displayDelta = $derived(periodSummary?.deltaPct ?? null);
+  const usingPeriod = $derived(periodRange != null && periodSummary != null);
   const selectedSummary = $derived(
     selectedExercise
       ? (strengthSummary.find((item) => item.exercise === selectedExercise) ?? null)
@@ -86,7 +109,6 @@
   );
   const max1rm = $derived(Math.max(...strongest.map((item) => item.best1rm.value), 1));
   const maxSessions = $derived(Math.max(...mostPracticed.map((item) => item.sessions), 1));
-  const selectedTrendDelta = $derived(trendDelta(trendPoints));
   const chartColor = $derived(selectedExercise ? exerciseColor(selectedExercise) : '#6ee7a8');
   const insights = $derived(
     buildAnalyticsInsights({ recentDays, recentPrCount, strongest })
@@ -106,6 +128,31 @@
   function clearSelection() {
     setExerciseParam(null);
   }
+
+  function resetPeriod() {
+    periodRange = null;
+    periodPreset = 'all';
+  }
+
+  function applyPeriodPreset(key: PeriodPresetKey) {
+    periodPreset = key;
+    if (key === 'all') {
+      periodRange = null;
+      return;
+    }
+    const preset = PERIOD_PRESETS.find((item) => item.key === key);
+    periodRange = preset ? presetPeriodRange(trendPoints, preset.days) : null;
+  }
+
+  function setPeriodRange(range: DateRange | null) {
+    periodRange = range;
+    periodPreset = range ? 'custom' : 'all';
+  }
+
+  $effect(() => {
+    selectedExercise;
+    resetPeriod();
+  });
 
   function shareWidth(value: number, max: number): number {
     return max ? (value / max) * 100 : 0;
@@ -252,15 +299,16 @@
             <div>
               <div class="eyebrow">Выбрано упражнение</div>
               <h2>{selectedExercise}</h2>
-              {#if selectedTrendDelta != null}
+              {#if displayDelta != null}
                 <p
                   class={[
                     'trend-badge',
-                    selectedTrendDelta > 0 && 'up',
-                    selectedTrendDelta < 0 && 'down'
+                    displayDelta > 0 && 'up',
+                    displayDelta < 0 && 'down'
                   ]}
                 >
-                  {selectedTrendDelta > 0 ? '+' : ''}{fmtNum(selectedTrendDelta)}% за период
+                  {displayDelta > 0 ? '+' : ''}{fmtNum(displayDelta)}%
+                  {usingPeriod ? ' за выбранный период' : ' за всё время'}
                 </p>
               {/if}
             </div>
@@ -277,35 +325,86 @@
             </div>
           </header>
 
+          <div class="period-controls" role="toolbar" aria-label="Период анализа">
+            {#each PERIOD_PRESETS as preset (preset.key)}
+              <button
+                type="button"
+                class={['period-pill', periodPreset === preset.key && 'active']}
+                onclick={() => applyPeriodPreset(preset.key)}
+              >
+                {preset.label}
+              </button>
+            {/each}
+            {#if periodPreset === 'custom'}
+              <span class="period-custom-label">Свой период</span>
+            {/if}
+            {#if periodRange}
+              <button type="button" class="period-reset" onclick={resetPeriod}>Сброс</button>
+            {/if}
+          </div>
+
           <div class="kpi-grid">
             <article>
-              <span>Лучший 1ПМ</span>
-              <strong>{fmtNum(selectedSummary.best1rm.value)}<em>кг</em></strong>
+              <span>Лучший 1ПМ{usingPeriod ? ' · период' : ''}</span>
+              <strong>
+                {fmtNum(usingPeriod ? periodSummary!.best1rm.value : selectedSummary.best1rm.value)}<em
+                  >кг</em
+                >
+              </strong>
               <small>
-                {selectedSummary.best1rm.date ? formatDateRu(selectedSummary.best1rm.date) : '—'}
+                {usingPeriod
+                  ? formatDateRu(periodSummary!.best1rm.date)
+                  : selectedSummary.best1rm.date
+                    ? formatDateRu(selectedSummary.best1rm.date)
+                    : '—'}
               </small>
             </article>
             <article>
-              <span>Лучший подход</span>
-              <strong>{fmtSet(selectedSummary.bestWeight.weight, selectedSummary.bestWeight.reps)}</strong>
+              <span>Лучший подход{usingPeriod ? ' · период' : ''}</span>
+              <strong>
+                {usingPeriod
+                  ? fmtSet(periodSummary!.bestSet.weight, periodSummary!.bestSet.reps)
+                  : fmtSet(selectedSummary.bestWeight.weight, selectedSummary.bestWeight.reps)}
+              </strong>
               <small>
-                {selectedSummary.bestWeight.date ? formatDateRu(selectedSummary.bestWeight.date) : '—'}
+                {usingPeriod
+                  ? formatDateRu(periodSummary!.bestSet.date)
+                  : selectedSummary.bestWeight.date
+                    ? formatDateRu(selectedSummary.bestWeight.date)
+                    : '—'}
               </small>
             </article>
             <article>
-              <span>Сессий</span>
-              <strong>{selectedSummary.sessions}</strong>
-              <small>{selectedSummary.sets} подходов</small>
+              <span>Сессий{usingPeriod ? ' · период' : ''}</span>
+              <strong>{usingPeriod ? periodSummary!.sessions : selectedSummary.sessions}</strong>
+              <small>{usingPeriod ? periodSets : selectedSummary.sets} подходов</small>
             </article>
             <article>
-              <span>Средняя интенсивность</span>
-              <strong>{fmtNum(selectedSummary.avgIntensity)}<em>кг</em></strong>
-              <small>на повторение</small>
+              <span>Средняя интенсивность{usingPeriod ? ' · период' : ''}</span>
+              <strong>
+                {fmtNum(usingPeriod ? periodSummary!.avgIntensity : selectedSummary.avgIntensity)}<em
+                  >кг</em
+                >
+              </strong>
+              <small>
+                {#if usingPeriod}
+                  {formatDateRu(periodSummary!.from)} — {formatDateRu(periodSummary!.to)}
+                {:else}
+                  на повторение
+                {/if}
+              </small>
             </article>
           </div>
 
           <div class="chart-wrap">
-            <TrendChart title="Расчётный 1ПМ" points={trendPoints} color={chartColor} />
+            <TrendChart
+              title="Расчётный 1ПМ"
+              points={trendPoints}
+              color={chartColor}
+              range={periodRange}
+              enableRangeSelect={true}
+              onRangeChange={setPeriodRange}
+            />
           </div>
         {:else}
           <header class="detail-head overview-head">
@@ -646,6 +745,58 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  .period-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .period-pill {
+    padding: 5px 10px;
+    color: var(--muted-strong);
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+      border-color 120ms ease,
+      color 120ms ease,
+      background 120ms ease;
+  }
+
+  .period-pill.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .period-custom-label {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .period-reset {
+    padding: 5px 10px;
+    color: var(--muted-strong);
+    background: transparent;
+    border: 1px dashed var(--line);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
   }
 
   .kpi-grid {

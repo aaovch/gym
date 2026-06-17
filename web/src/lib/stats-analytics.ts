@@ -1,5 +1,33 @@
 import { fmtNum } from '$lib/format';
+import { dateToMs, msToIso } from '$lib/chart-time';
 import type { StrengthSummary, TrendPoint } from '$lib/types';
+
+export type DateRange = {
+	from: string;
+	to: string;
+};
+
+export type PeriodPresetKey = 'all' | '30d' | '90d' | '180d' | '365d' | 'custom';
+
+export type TrendPeriodSummary = {
+	from: string;
+	to: string;
+	sessions: number;
+	deltaPct: number | null;
+	start1rm: number;
+	end1rm: number;
+	best1rm: { value: number; date: string };
+	bestSet: { weight: number; reps: number; date: string };
+	avgIntensity: number;
+};
+
+export const PERIOD_PRESETS: { key: PeriodPresetKey; label: string; days: number | null }[] = [
+	{ key: 'all', label: 'Всё', days: null },
+	{ key: '30d', label: '30 дн', days: 30 },
+	{ key: '90d', label: '3 мес', days: 90 },
+	{ key: '180d', label: '6 мес', days: 180 },
+	{ key: '365d', label: '12 мес', days: 365 }
+];
 
 export type SortKey = 'sessions' | '1rm' | 'recent' | 'name';
 export type InsightTone = 'good' | 'warn' | 'neutral';
@@ -35,6 +63,74 @@ export function trendDelta(points: TrendPoint[]): number | null {
 	const last = sorted[sorted.length - 1].est1rm;
 	if (!first) return null;
 	return ((last - first) / first) * 100;
+}
+
+export function sortTrendPoints(points: TrendPoint[]): TrendPoint[] {
+	return [...points].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function filterTrendByRange(points: TrendPoint[], range: DateRange | null): TrendPoint[] {
+	const sorted = sortTrendPoints(points);
+	if (!range) return sorted;
+	return sorted.filter((point) => point.date >= range.from && point.date <= range.to);
+}
+
+export function presetPeriodRange(points: TrendPoint[], days: number | null): DateRange | null {
+	const sorted = sortTrendPoints(points);
+	if (sorted.length === 0) return null;
+	const to = sorted[sorted.length - 1].date;
+	if (days == null) {
+		return { from: sorted[0].date, to };
+	}
+	const fromMs = dateToMs(to) - (days - 1) * 86400000;
+	const from = msToIso(fromMs);
+	return { from: from < sorted[0].date ? sorted[0].date : from, to };
+}
+
+export function summarizeTrendPeriod(
+	points: TrendPoint[],
+	range: DateRange | null
+): TrendPeriodSummary | null {
+	const filtered = filterTrendByRange(points, range);
+	if (filtered.length === 0) return null;
+
+	const best1rmPoint = filtered.reduce((best, point) =>
+		point.est1rm > best.est1rm ? point : best
+	);
+	const bestWeightPoint = filtered.reduce((best, point) =>
+		point.maxWeight > best.maxWeight ||
+		(point.maxWeight === best.maxWeight && point.maxReps > best.maxReps)
+			? point
+			: best
+	);
+
+	return {
+		from: filtered[0].date,
+		to: filtered[filtered.length - 1].date,
+		sessions: filtered.length,
+		deltaPct: trendDelta(filtered),
+		start1rm: filtered[0].est1rm,
+		end1rm: filtered[filtered.length - 1].est1rm,
+		best1rm: { value: best1rmPoint.est1rm, date: best1rmPoint.date },
+		bestSet: {
+			weight: bestWeightPoint.maxWeight,
+			reps: bestWeightPoint.maxReps,
+			date: bestWeightPoint.date
+		},
+		avgIntensity: filtered.reduce((sum, point) => sum + point.avgIntensity, 0) / filtered.length
+	};
+}
+
+export function rangeFromSvgDates(
+	points: TrendPoint[],
+	fromDate: string,
+	toDate: string
+): DateRange | null {
+	const start = fromDate <= toDate ? fromDate : toDate;
+	const end = fromDate <= toDate ? toDate : fromDate;
+	const filtered = filterTrendByRange(points, { from: start, to: end });
+	if (filtered.length === 0) return null;
+	return { from: filtered[0].date, to: filtered[filtered.length - 1].date };
 }
 
 export function sparklinePath(points: TrendPoint[]): string {
