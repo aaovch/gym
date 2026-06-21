@@ -123,6 +123,9 @@
   const entriesForSession = $derived.by(() => {
     if (!sessionReady || !microcycle || activeIndex == null) return [];
 
+    const sessionDate = sessionDateForIndex(microcycle, activeIndex);
+    if (!sessionDate) return [];
+
     const byWorkoutDate = view.entries.filter(
       (entry) => entry.date === workoutDate && slotExercises.includes(entry.exercise)
     );
@@ -137,8 +140,7 @@
         return linked.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
       }
     }
-    const sessionDate = sessionDateForIndex(microcycle, activeIndex);
-    if (!sessionDate) return [];
+
     return view.entries
       .filter(
         (entry) => entry.date === sessionDate && slotExercises.includes(entry.exercise)
@@ -219,7 +221,7 @@
     thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
   );
   const outOfPlanEntries = $derived.by(() => {
-    if (!sessionReady) return [];
+    if (!sessionReady || !plannedSessionDate) return [];
     const core = entriesForSession;
 
     const onWorkoutDate = view.entries.filter(
@@ -283,13 +285,13 @@
     const sessionDate = sessionDateForIndex(micro, index);
 
     const logged = required.filter((exercise) => {
+      if (!sessionDate) return false;
       if (msId) {
         const linked = view.entries.some(
           (entry) => entry.microSessionId === msId && entry.exercise === exercise
         );
         if (linked) return true;
       }
-      if (!sessionDate) return false;
       return view.entries.some(
         (entry) => entry.date === sessionDate && entry.exercise === exercise
       );
