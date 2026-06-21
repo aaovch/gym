@@ -23,7 +23,7 @@
 		type ExerciseAnchorInfo,
 		type ProtocolMatrixRow
 	} from '$lib/cycle-plan';
-	import { mesoProtocolId } from '$lib/exercise-keys';
+	import { mesoProtocolId, toExerciseId } from '$lib/exercise-keys';
 	import { formatDateRu, fmtNum, todayIso } from '$lib/format';
 	import { microDates } from '$lib/micro-plan';
 	import {
@@ -42,6 +42,7 @@
 		resolveExerciseAnchor,
 		sessionsFromFlags,
 		suggestedMicroCount,
+		updateMesocycleFromConstructor,
 		type MesoExerciseSetup
 	} from '$lib/meso-constructor';
 	import {
@@ -88,6 +89,7 @@
 	let macroPick = $state<string | null>(null);
 	let mesoPick = $state<string | null>(null);
 	let mesoConstructorMacroId = $state<string | null>(null);
+	let mesoConstructorEditId = $state<string | null>(null);
 	let macroLabel = $state('Макро 1');
 	let macroStart = $state('');
 	let macroBlocks = $state<MacroBlockDraft[]>([]);
@@ -661,6 +663,7 @@
 			workoutStore.patchSync({ error: constructorError });
 			return;
 		}
+		mesoConstructorEditId = null;
 		mesoConstructorMacroId = macroId;
 		constructorLabel = mesocycleDisplayLabel((workoutStore.cyclePlan?.mesocycles.length ?? 0) + 1);
 		constructorStart = defaultMesoStartDate(view.entries);
@@ -669,9 +672,58 @@
 		showMesoConstructor = true;
 	}
 
+	function openMesoConstructorForEdit(meso: EnrichedMesocycle) {
+		constructorError = '';
+		if (!ensurePlanForConstructor()) {
+			workoutStore.patchSync({ error: constructorError });
+			return;
+		}
+
+		mesoConstructorEditId = meso.plan.id;
+		mesoConstructorMacroId = null;
+		constructorLabel = meso.plan.label;
+		constructorStart = meso.plan.startDate || defaultMesoStartDate(view.entries);
+		constructorMicroCount = meso.microcycles.length;
+		constructorProtocolId = meso.plan.templateId;
+
+		const sessionA: string[] = [];
+		const sessionB: string[] = [];
+		const data = new Map<string, ConstructorRow>();
+		const exercises = Object.keys(meso.anchorInfo).sort((a, b) => a.localeCompare(b, 'ru'));
+
+		for (const exercise of exercises) {
+			const info = meso.anchorInfo[exercise];
+			const protocolId = exerciseTemplateId(meso, exercise);
+			const mesoSessions = meso.plan.exerciseSessions?.[toExerciseId(exercise, keyMaps)];
+			const inA = mesoSessions
+				? mesoSessions.includes(0)
+				: planMatrixForSession(meso.protocolMatrix, 0).some((row) => row.exercise === exercise);
+			const inB = mesoSessions
+				? mesoSessions.includes(1)
+				: planMatrixForSession(meso.protocolMatrix, 1).some((row) => row.exercise === exercise);
+
+			data.set(exercise, {
+				enabled: true,
+				protocolId,
+				anchor1rm: info.anchor,
+				manual: info.manual,
+				anchorSource: anchorSourceLabel(info)
+			});
+			if (inA) sessionA.push(exercise);
+			if (inB) sessionB.push(exercise);
+			if (!inA && !inB) sessionA.push(exercise);
+		}
+
+		constructorSessionA = sessionA;
+		constructorSessionB = sessionB;
+		constructorData = data;
+		showMesoConstructor = true;
+	}
+
 	function closeMesoConstructor() {
 		showMesoConstructor = false;
 		mesoConstructorMacroId = null;
+		mesoConstructorEditId = null;
 	}
 
 	function confirmMesoConstructor() {
@@ -686,29 +738,54 @@
 				'Укажите якорь 1ПМ (больше 0) хотя бы для одного упражнения в тренировке A или B.';
 			return;
 		}
-		const next = createMesocycleFromConstructor(
-			currentPlan,
-			{
-				label: constructorLabel,
-				startDate: constructorStart || defaultMesoStartDate(view.entries),
-				microCount: Math.max(1, Math.min(12, Number(constructorMicroCount) || 4)),
-				defaultProtocolId: constructorProtocolId,
-				exercises: constructorExercises,
-				macroId: mesoConstructorMacroId ?? undefined
-			},
-			keyMaps
-		);
-		if (!save(next)) {
-			constructorError = workoutStore.sync.error || 'Не удалось сохранить план.';
-			return;
+
+		const input = {
+			label: constructorLabel,
+			startDate: constructorStart || defaultMesoStartDate(view.entries),
+			microCount: Math.max(1, Math.min(12, Number(constructorMicroCount) || 4)),
+			defaultProtocolId: constructorProtocolId,
+			exercises: constructorExercises,
+			macroId: mesoConstructorMacroId ?? undefined
+		};
+
+		if (mesoConstructorEditId) {
+			const existing = currentPlan.mesocycles.find((meso) => meso.id === mesoConstructorEditId);
+			if (existing && input.microCount < existing.microcycles.length) {
+				const removed = [...existing.microcycles]
+					.sort((a, b) => a.indexInMeso - b.indexInMeso)
+					.slice(input.microCount);
+				const removedDates = removed.flatMap((micro) => microDates(micro));
+				if (
+					removedDates.length > 0 &&
+					!confirm(
+						`Число μ уменьшится: ${removed.length} блок(ов) с назначенными днями будет удалено. Продолжить?`
+					)
+				) {
+					return;
+				}
+			}
+			const next = updateMesocycleFromConstructor(currentPlan, mesoConstructorEditId, input, keyMaps);
+			if (!save(next)) {
+				constructorError = workoutStore.sync.error || 'Не удалось сохранить план.';
+				return;
+			}
+			mesoPick = mesoConstructorEditId;
+		} else {
+			const next = createMesocycleFromConstructor(currentPlan, input, keyMaps);
+			if (!save(next)) {
+				constructorError = workoutStore.sync.error || 'Не удалось сохранить план.';
+				return;
+			}
+			const meso = next.mesocycles[next.mesocycles.length - 1];
+			macroPick = mesoConstructorMacroId;
+			mesoPick = meso?.id ?? null;
 		}
-		const meso = next.mesocycles[next.mesocycles.length - 1];
-		macroPick = mesoConstructorMacroId;
-		mesoPick = meso?.id ?? null;
+
 		mesoTab = 'plan';
 		planningTab = 'program';
 		showMesoConstructor = false;
 		mesoConstructorMacroId = null;
+		mesoConstructorEditId = null;
 	}
 
 	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
@@ -1333,11 +1410,22 @@
 		<div class="constructor-head">
 			<div>
 				<h3 id="meso-constructor-title">
-					{mesoConstructorMacroId ? 'Добавить мезо в макро' : 'Конструктор мезоцикла'}
+					{#if mesoConstructorEditId}
+						Редактирование мезоцикла
+					{:else if mesoConstructorMacroId}
+						Добавить мезо в макро
+					{:else}
+						Конструктор мезоцикла
+					{/if}
 				</h3>
 				<p class="muted constructor-hint">
-					Добавляйте упражнения прямо в блок <strong>A</strong> или <strong>B</strong>. Кнопка
-					<strong>→ B / → A</strong> копирует упражнение в другой день с тем же якорем и методом.
+					{#if mesoConstructorEditId}
+						Меняйте упражнения, методы, якоря и число μ. Назначенные дни сохраняются; при уменьшении μ
+						лишние блоки удаляются с конца.
+					{:else}
+						Добавляйте упражнения прямо в блок <strong>A</strong> или <strong>B</strong>. Кнопка
+						<strong>→ B / → A</strong> копирует упражнение в другой день с тем же якорем и методом.
+					{/if}
 				</p>
 			</div>
 			<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
@@ -1582,7 +1670,7 @@
 		<div class="constructor-actions">
 			<button type="button" class="btn" onclick={closeMesoConstructor}>Отмена</button>
 			<button type="button" class="btn primary" onclick={confirmMesoConstructor}>
-				Создать мезоцикл
+				{mesoConstructorEditId ? 'Сохранить изменения' : 'Создать мезоцикл'}
 			</button>
 		</div>
 	</section>
@@ -2042,6 +2130,13 @@
 						</a>
 					{/if}
 					{#if usingManual && plan}
+						<button
+							type="button"
+							class="btn small"
+							onclick={() => openMesoConstructorForEdit(selectedMeso)}
+						>
+							Редактировать план
+						</button>
 						<button type="button" class="btn small" onclick={() => handleAddMicro(selectedMeso.plan.id)}>
 							+ μ
 						</button>

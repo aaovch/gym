@@ -4,7 +4,7 @@ import {
 	type ExerciseAnchorInfo
 } from './cycle-plan';
 import { toExerciseId, type ExerciseKeyMaps } from './exercise-keys';
-import { defaultMicroSessions } from './micro-plan';
+import { defaultMicroSessions, microDates } from './micro-plan';
 import type { WorkoutTemplate } from './microcycle';
 import {
 	best1rmAllTime,
@@ -202,6 +202,72 @@ export function suggestedMicroCount(templates: ProtocolTemplate[], exercises: Me
 	return Math.min(12, Math.max(1, maxPhase));
 }
 
+function clampMicroCount(count: number): number {
+	return Math.max(1, Math.min(12, Math.floor(count) || 1));
+}
+
+function mesocycleExerciseFieldsFromInput(
+	input: MesoConstructorInput,
+	keyMaps: ExerciseKeyMaps
+): Pick<
+	MesocyclePlan,
+	'templateId' | 'anchor1rm' | 'anchor1rmManual' | 'exerciseProtocols' | 'exerciseSessions'
+> {
+	const defaultProtocolId = input.defaultProtocolId ?? DEFAULT_PROTOCOL_TEMPLATE.id;
+	const exerciseProtocols: Record<string, string> = {};
+	const anchor1rm: Record<string, number> = {};
+	const anchor1rmManual: Record<string, boolean> = {};
+
+	for (const row of input.exercises) {
+		const id = toExerciseId(row.exercise, keyMaps);
+		anchor1rm[id] = row.anchor1rm;
+		if (row.manual) anchor1rmManual[id] = true;
+		if (row.protocolId !== defaultProtocolId) exerciseProtocols[id] = row.protocolId;
+	}
+
+	return {
+		templateId: defaultProtocolId,
+		anchor1rm,
+		anchor1rmManual,
+		exerciseProtocols,
+		exerciseSessions: buildExerciseSessionsRecord(input.exercises, keyMaps)
+	};
+}
+
+function newMicrocyclePlan(indexInMeso: number): MicrocyclePlan {
+	return {
+		id: `micro-${crypto.randomUUID().slice(0, 8)}`,
+		indexInMeso,
+		sessions: defaultMicroSessions()
+	};
+}
+
+function mergeMicrocycles(existing: MicrocyclePlan[], targetCount: number): MicrocyclePlan[] {
+	const sorted = [...existing].sort((a, b) => a.indexInMeso - b.indexInMeso);
+	if (targetCount > sorted.length) {
+		return [
+			...sorted,
+			...Array.from({ length: targetCount - sorted.length }, (_, index) =>
+				newMicrocyclePlan(sorted.length + index + 1)
+			)
+		];
+	}
+	return sorted.slice(0, targetCount);
+}
+
+function reindexMesoPlan(meso: MesocyclePlan): MesocyclePlan {
+	const microcycles = [...meso.microcycles]
+		.sort((a, b) => a.indexInMeso - b.indexInMeso)
+		.map((micro, index) => ({ ...micro, indexInMeso: index + 1 }));
+	const allDates = microcycles.flatMap((micro) => microDates(micro)).sort();
+	return {
+		...meso,
+		microcycles,
+		startDate: allDates[0] ?? meso.startDate,
+		endDate: allDates[allDates.length - 1] ?? meso.endDate
+	};
+}
+
 export function createMesocycleFromConstructor(
 	plan: CyclePlan,
 	input: MesoConstructorInput,
@@ -230,34 +296,50 @@ export function createMesocycleFromConstructor(
 	};
 }
 
-export function buildMesocyclePlan(input: MesoConstructorInput, keyMaps: ExerciseKeyMaps): MesocyclePlan {
-	const defaultProtocolId = input.defaultProtocolId ?? DEFAULT_PROTOCOL_TEMPLATE.id;
-	const exerciseProtocols: Record<string, string> = {};
-	const anchor1rm: Record<string, number> = {};
-	const anchor1rmManual: Record<string, boolean> = {};
+export function patchMesocycleFromConstructor(
+	existing: MesocyclePlan,
+	input: MesoConstructorInput,
+	keyMaps: ExerciseKeyMaps
+): MesocyclePlan {
+	const fields = mesocycleExerciseFieldsFromInput(input, keyMaps);
+	const targetCount = clampMicroCount(input.microCount);
 
-	for (const row of input.exercises) {
-		const id = toExerciseId(row.exercise, keyMaps);
-		anchor1rm[id] = row.anchor1rm;
-		if (row.manual) anchor1rmManual[id] = true;
-		if (row.protocolId !== defaultProtocolId) exerciseProtocols[id] = row.protocolId;
-	}
+	return reindexMesoPlan({
+		...existing,
+		label: input.label.trim() || existing.label,
+		startDate: input.startDate || existing.startDate,
+		...fields,
+		microcycles: mergeMicrocycles(existing.microcycles, targetCount)
+	});
+}
+
+export function updateMesocycleFromConstructor(
+	plan: CyclePlan,
+	mesoId: string,
+	input: MesoConstructorInput,
+	keyMaps: ExerciseKeyMaps
+): CyclePlan {
+	return {
+		...plan,
+		revision: plan.revision + 1,
+		updatedAt: new Date().toISOString(),
+		mesocycles: plan.mesocycles.map((meso) =>
+			meso.id === mesoId ? patchMesocycleFromConstructor(meso, input, keyMaps) : meso
+		)
+	};
+}
+
+export function buildMesocyclePlan(input: MesoConstructorInput, keyMaps: ExerciseKeyMaps): MesocyclePlan {
+	const fields = mesocycleExerciseFieldsFromInput(input, keyMaps);
+	const targetCount = clampMicroCount(input.microCount);
 
 	return {
 		id: `meso-${crypto.randomUUID().slice(0, 8)}`,
 		label: input.label.trim() || 'Новый блок',
 		startDate: input.startDate,
 		endDate: '',
-		templateId: defaultProtocolId,
-		anchor1rm,
-		anchor1rmManual,
-		exerciseProtocols,
-		exerciseSessions: buildExerciseSessionsRecord(input.exercises, keyMaps),
-		microcycles: Array.from({ length: input.microCount }, (_, index) => ({
-			id: `micro-${crypto.randomUUID().slice(0, 8)}`,
-			indexInMeso: index + 1,
-			sessions: defaultMicroSessions()
-		}))
+		...fields,
+		microcycles: Array.from({ length: targetCount }, (_, index) => newMicrocyclePlan(index + 1))
 	};
 }
 
