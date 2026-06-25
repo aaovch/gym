@@ -29,7 +29,7 @@
     type PlannedSetsInput
   } from '$lib/planned-sets';
   import { thesesStore } from '$lib/training-theses';
-  import type { ExerciseKind, ExerciseLog, ExerciseSet } from '$lib/types';
+  import type { ExerciseKind, ExerciseLog, ExerciseSet, WorkoutEntry } from '$lib/types';
   import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
   import { deleteSession, saveCyclePlanState, saveLog, workoutStore } from '$lib/workout-store';
   import { toasts } from '$lib/toast.svelte';
@@ -178,13 +178,23 @@
   const requiredSlotExercises = $derived(
     slotExercises.filter((exercise) => !protocolSkips.has(exercise))
   );
+  function isExerciseFullyLogged(exerciseName: string, entry?: WorkoutEntry): boolean {
+    if (!entry?.sets.length) return false;
+    const preview = adjustedPreviewSets(exerciseName);
+    if (!preview) return true;
+    return entry.sets.length >= preview.sets.length;
+  }
+
   const loggedPlanned = $derived(
-    requiredSlotExercises.filter((exercise) => entryByExercise.has(exercise)).length
+    requiredSlotExercises.filter((exercise) =>
+      isExerciseFullyLogged(exercise, entryByExercise.get(exercise))
+    ).length
   );
   const pendingPlanned = $derived(
-    requiredSlotExercises.filter(
-      (exercise) => !entryByExercise.has(exercise) && Boolean(adjustedPreviewSets(exercise))
-    )
+    requiredSlotExercises.filter((exercise) => {
+      const entry = entryByExercise.get(exercise);
+      return !isExerciseFullyLogged(exercise, entry) && Boolean(adjustedPreviewSets(exercise));
+    })
   );
   const sessionProgress = $derived(
     requiredSlotExercises.length
@@ -510,7 +520,8 @@
     kind: ExerciseKind,
     sets: ExerciseSet[],
     successMessage: string,
-    silent = false
+    silent = false,
+    existingId?: string
   ) {
     if (!mesocycle || !microcycle || activeIndex == null) return;
     busyId = exerciseName;
@@ -521,7 +532,7 @@
         exerciseName,
         workoutDate,
         [{ kind, sets, comment: null }],
-        crypto.randomUUID()
+        existingId ?? crypto.randomUUID()
       );
       workoutStore.database = db;
       await saveLog(log, {
@@ -529,7 +540,10 @@
         microId: microcycle.plan.id,
         indexInMicro: activeIndex
       });
-      clearWeightAdjust(exerciseName);
+      const preview = adjustedPreviewSets(exerciseName);
+      if (preview && sets.length >= preview.sets.length) {
+        clearWeightAdjust(exerciseName);
+      }
       if (!silent) toasts.success(successMessage);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось сохранить';
@@ -538,6 +552,19 @@
     } finally {
       busyId = null;
     }
+  }
+
+  async function confirmSet(exerciseName: string, setIndex: number) {
+    if (protocolSkips.has(exerciseName)) return;
+    const preview = adjustedPreviewSets(exerciseName);
+    if (!preview) return;
+    const sets = preview.sets.slice(0, setIndex + 1);
+    const existing = entryByExercise.get(exerciseName);
+    const doneAll = sets.length >= preview.sets.length;
+    const message = doneAll
+      ? `Записано: ${exerciseName}`
+      : `Подход ${setIndex + 1} · ${exerciseName}`;
+    await saveSetsFor(exerciseName, preview.kind, sets, message, false, existing?.id);
   }
 
   async function confirmPlanned(exerciseName: string) {
@@ -550,7 +577,8 @@
       exerciseName,
       weightAdjust
     );
-    await saveSetsFor(exerciseName, input.kind, sets, `Записано: ${exerciseName}`);
+    const existing = entryByExercise.get(exerciseName);
+    await saveSetsFor(exerciseName, input.kind, sets, `Записано: ${exerciseName}`, false, existing?.id);
   }
 
   async function confirmAllPlanned() {
@@ -571,7 +599,14 @@
           weightAdjust
         );
         if (!sets.length) continue;
-        await saveSetsFor(exerciseName, input.kind, sets, '', true);
+        await saveSetsFor(
+          exerciseName,
+          input.kind,
+          sets,
+          '',
+          true,
+          entryByExercise.get(exerciseName)?.id
+        );
         if (!error) saved += 1;
         if (error) break;
       }
@@ -769,6 +804,22 @@
       <span>Σ {st.totalReps} повт</span>
       <span>объём {fmtNum(st.tonnage)} кг</span>
     </p>
+  {/if}
+{/snippet}
+
+{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, disabled: boolean)}
+  {#if done}
+    <span class="set-done-mark" aria-label="Подход {setIndex + 1} выполнен">✓</span>
+  {:else}
+    <button
+      type="button"
+      class="set-done-btn"
+      aria-label="Записать подход {setIndex + 1}"
+      {disabled}
+      onclick={() => confirmSet(exercise, setIndex)}
+    >
+      {disabled ? '…' : '✓'}
+    </button>
   {/if}
 {/snippet}
 
@@ -1130,8 +1181,8 @@
       <section class="card empty-state picker-empty">
         <h2>Тренировка не выбрана</h2>
         <p>
-          Выберите мезоцикл, микроцикл и сессию — ниже появится план с целевыми весами. Заполните
-          по кнопке «Готово» или отредактируйте уже записанные подходы.
+          Выберите мезоцикл, микроцикл и сессию — ниже появится план с целевыми весами. Отмечайте
+          подходы по одному (✓) или запишите всё сразу.
         </p>
       </section>
     {:else}
@@ -1149,7 +1200,7 @@
             {:else if loggedPlanned > 0}
               Записано {loggedPlanned} из {requiredSlotExercises.length}
             {:else}
-              {requiredSlotExercises.length} упражнений · «Готово» принимает план, «Изменить» — правки
+              {requiredSlotExercises.length} упражнений · отмечайте подходы по одному или «Записать всё»
             {/if}
           </p>
         </div>
@@ -1212,18 +1263,31 @@
           {@const entry = entryByExercise.get(exercise)}
           {@const hint = protocolHints.get(exercise)}
           {@const protocolSkip = protocolSkips.get(exercise)}
-          {@const previewSets = entry ? null : adjustedPreviewSets(exercise)}
+          {@const previewSets = adjustedPreviewSets(exercise)}
+          {@const fullyLogged = isExerciseFullyLogged(exercise, entry)}
+          {@const loggedCount = entry?.sets.length ?? 0}
           <article
             class="exercise-item"
-            class:complete={Boolean(entry)}
+            class:complete={fullyLogged}
+            class:in-progress={Boolean(entry) && !fullyLogged}
             class:protocol-skipped={Boolean(protocolSkip) && !entry}
           >
-            <div class="exercise-index">{entry ? '✓' : protocolSkip ? '—' : index + 1}</div>
+            <div class="exercise-index">
+              {#if fullyLogged}
+                ✓
+              {:else if loggedCount > 0 && previewSets}
+                {loggedCount}/{previewSets.sets.length}
+              {:else if protocolSkip}
+                —
+              {:else}
+                {index + 1}
+              {/if}
+            </div>
             <div class="exercise-content">
               <div class="exercise-heading">
                 <div>
                   <h3>{exercise}</h3>
-                  {#if entry}
+                  {#if fullyLogged && entry}
                     <div class="plan-meta logged">
                       <div class="plan-sets">
                         {#each entry.sets as set, setIndex}
@@ -1261,23 +1325,34 @@
                       {#if previewSets}
                         <div class="plan-sets-editable">
                           {#each previewSets.sets as set, setIndex}
-                            <div class="set-row">
+                            {@const setDone = setIndex < loggedCount}
+                            {@const setBusy = busyId === exercise}
+                            <div class="set-row" class:set-done={setDone}>
                               <span class="set-chip">
                                 <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
                               </span>
-                              {#if previewSets.kind === 'strength'}
-                                {@render setStepper(exercise, setIndex, busyId === exercise)}
+                              {#if previewSets.kind === 'strength' && !setDone}
+                                {@render setStepper(exercise, setIndex, setBusy)}
                               {/if}
+                              {@render setDoneButton(exercise, setIndex, setDone, setBusy)}
                             </div>
                           {/each}
                         </div>
-                        {@render specSub(previewSets.kind, previewSets.sets, hint?.anchor1rm ?? null, null, '')}
+                        {@render specSub(
+                          previewSets.kind,
+                          loggedCount > 0
+                            ? previewSets.sets.slice(0, loggedCount)
+                            : previewSets.sets,
+                          hint?.anchor1rm ?? null,
+                          null,
+                          ''
+                        )}
                       {/if}
                     </div>
                   {/if}
                 </div>
                 <div class="exercise-actions">
-                  {#if entry}
+                  {#if fullyLogged && entry}
                     <a class="button button-secondary" href={addUrl(exercise, entry?.id)}>Изменить</a>
                     {#if entry.id}
                       <button
@@ -1300,7 +1375,7 @@
                     >
                       {busyId === exercise ? 'Сохраняем…' : 'Готово'}
                     </button>
-                    <a class="button button-secondary" href={addUrl(exercise)}>Изменить</a>
+                    <a class="button button-secondary" href={addUrl(exercise, entry?.id)}>Изменить</a>
                   {/if}
                 </div>
               </div>
@@ -1969,6 +2044,14 @@
     border-color: var(--accent);
   }
 
+  .exercise-item.in-progress .exercise-index {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
   .exercise-heading {
     display: flex;
     align-items: flex-start;
@@ -2055,6 +2138,50 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+  }
+
+  .set-row.set-done .set-chip {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+
+  .set-done-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .set-done-btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .set-done-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .set-done-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, #0a0c10);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
   }
 
   .set-stepper {
