@@ -19,6 +19,7 @@
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
   let settingsOpen = $state(false);
+  let mobileMoreOpen = $state(false);
   let token = $state('');
 
   const navigation = [
@@ -29,6 +30,22 @@
     { href: `${base}/history`, route: '/history', label: 'Журнал', short: 'Журнал' },
     { href: `${base}/stats`, route: '/stats', label: 'Аналитика', short: 'Аналитика' },
     { href: `${base}/load`, route: '/load', label: 'Нагрузка', short: 'Нагрузка' }
+  ];
+
+  const mobilePrimary = [
+    { href: `${base}/`, route: '/', label: 'Обзор' },
+    { href: `${base}/cycles`, route: '/cycles', label: 'План' },
+    { href: `${base}/history`, route: '/history', label: 'Журнал' },
+    { href: `${base}/stats`, route: '/stats', label: 'Аналитика' }
+  ];
+
+  const mobileMore = [
+    { href: `${base}/protocols`, route: '/protocols', label: 'Протоколы' },
+    { href: `${base}/exercises`, route: '/exercises', label: 'Упражнения' },
+    { href: `${base}/load`, route: '/load', label: 'Нагрузка' },
+    { href: `${base}/add`, route: '/add', label: 'Запись' },
+    { href: `${base}/body`, route: '/body', label: 'Карта блоков' },
+    { href: `${base}/schema`, route: '/schema', label: 'Схема данных' }
   ];
 
   const path = $derived(page.url.pathname);
@@ -142,6 +159,21 @@
     return routePath.startsWith(route);
   }
 
+  const mobileMoreActive = $derived(mobileMore.some((item) => isActive(item.route)));
+
+  function toggleMobileMore() {
+    mobileMoreOpen = !mobileMoreOpen;
+  }
+
+  function closeMobileMore() {
+    mobileMoreOpen = false;
+  }
+
+  function openSettingsFromMobile() {
+    closeMobileMore();
+    settingsOpen = true;
+  }
+
   function stopPropagation(event: Event) {
     event.stopPropagation();
   }
@@ -213,12 +245,49 @@
   </main>
 
   <nav class="mobile-nav" aria-label="Мобильная навигация">
-    {#each navigation as item (item.route)}
-      <a href={item.href} class:active={isActive(item.route)}>{item.short}</a>
+    {#each mobilePrimary as item (item.route)}
+      <a href={item.href} class:active={isActive(item.route)} onclick={closeMobileMore}>{item.label}</a>
     {/each}
-    <a href={`${base}/add`} class:active={routePath.startsWith('/add')}>Запись</a>
+    <button
+      type="button"
+      class="more-toggle"
+      class:active={mobileMoreActive || mobileMoreOpen}
+      aria-expanded={mobileMoreOpen}
+      aria-controls="mobile-more-menu"
+      onclick={toggleMobileMore}
+    >
+      Ещё
+    </button>
   </nav>
 </div>
+
+{#if mobileMoreOpen}
+  <button
+    type="button"
+    class="mobile-more-backdrop"
+    aria-label="Закрыть меню"
+    onclick={closeMobileMore}
+  ></button>
+  <div id="mobile-more-menu" class="mobile-more-sheet" role="menu">
+    <div class="mobile-more-head">
+      <span>Разделы</span>
+      <button type="button" class="more-settings" onclick={closeMobileMore}>Закрыть</button>
+    </div>
+    {#each mobileMore as item (item.route)}
+      <a
+        href={item.href}
+        role="menuitem"
+        class:active={isActive(item.route)}
+        onclick={closeMobileMore}
+      >
+        {item.label}
+      </a>
+    {/each}
+    <button type="button" class="more-settings" role="menuitem" onclick={openSettingsFromMobile}>
+      Настройки
+    </button>
+  </div>
+{/if}
 
 <Toaster />
 

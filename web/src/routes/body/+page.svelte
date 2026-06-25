@@ -88,7 +88,7 @@
 						<h3>{selectedOverview.block.label}</h3>
 						<p class="muted">{selectedOverview.block.description}</p>
 					</div>
-					<button type="button" class="ghost" onclick={() => (selectedBlock = null)}>Закрыть</button>
+					<button type="button" class="button button-ghost button-sm" onclick={() => (selectedBlock = null)}>Закрыть</button>
 				</div>
 
 				<div class="exercise-cards">
@@ -270,14 +270,6 @@
 	.history-link {
 		font-size: 0.85rem;
 		white-space: nowrap;
-	}
-
-	button.ghost {
-		background: transparent;
-		border: 1px solid var(--border);
-		border-radius: 0;
-		color: var(--text);
-		padding: 0.45rem 0.75rem;
 	}
 
 	.overview h3 {

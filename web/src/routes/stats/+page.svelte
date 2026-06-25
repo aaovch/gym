@@ -96,7 +96,7 @@
   );
   const max1rm = $derived(Math.max(...strongest.map((item) => item.best1rm.value), 1));
   const maxSessions = $derived(Math.max(...mostPracticed.map((item) => item.sessions), 1));
-  const chartColor = $derived(selectedExercise ? exerciseColor(selectedExercise) : '#6ee7a8');
+  const chartColor = $derived(selectedExercise ? exerciseColor(selectedExercise) : '#ccff33');
   const insights = $derived(buildAnalyticsInsights({ recentDays, strongest }));
 
   function setExerciseParam(name: string | null) {

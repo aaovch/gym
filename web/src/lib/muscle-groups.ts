@@ -25,7 +25,7 @@ export const MOVEMENT_BLOCKS: MovementBlock[] = [
 		label: 'Коленодоминантные',
 		shortLabel: 'Колено',
 		description: 'Приседы, сплиты, прыжковая работа — основная нагрузка через колено.',
-		color: '#6ee7a8'
+		color: '#ccff33'
 	},
 	{
 		id: 'hip_dominant',

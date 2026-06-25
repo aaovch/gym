@@ -97,7 +97,7 @@
 		</span>
 	</div>
 	<div class="maint-actions">
-		<button type="button" class="primary" disabled={repairing} onclick={runRepair}>
+		<button type="button" class="button button-primary" disabled={repairing} onclick={runRepair}>
 			{repairing ? 'Восстанавливаем…' : 'Восстановить связи логов'}
 		</button>
 	</div>
@@ -268,20 +268,6 @@
 		flex-wrap: wrap;
 	}
 
-	button.primary {
-		border-radius: 0;
-		padding: 0.55rem 0.9rem;
-		border: 1px solid rgba(110, 231, 168, 0.45);
-		background: rgba(110, 231, 168, 0.16);
-		color: var(--accent);
-		cursor: pointer;
-	}
-
-	button.primary:disabled {
-		opacity: 0.6;
-		cursor: wait;
-	}
-
 	.maint-note {
 		margin: 0.65rem 0 0;
 		font-size: 0.85rem;
@@ -350,7 +336,7 @@
 	}
 
 	.groups button.active {
-		border-color: rgba(110, 231, 168, 0.35);
+		border-color: var(--accent-a35);
 	}
 
 	.group-label {
@@ -415,7 +401,7 @@
 	}
 
 	.entity:not(.dimmed) {
-		border-color: rgba(110, 231, 168, 0.25);
+		border-color: var(--accent-a25);
 	}
 
 	.entity-head {
@@ -450,8 +436,8 @@
 
 	.badge.stored {
 		color: var(--accent);
-		border-color: rgba(110, 231, 168, 0.35);
-		background: rgba(110, 231, 168, 0.08);
+		border-color: var(--accent-a35);
+		background: var(--accent-a08);
 	}
 
 	.badge.derived {

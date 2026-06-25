@@ -60,9 +60,9 @@
 	<div class="row-head">
 		<strong>{label}</strong>
 		<div class="row-actions">
-			<button type="button" class="ghost" onclick={addSet}>+ подход</button>
+			<button type="button" class="button button-ghost button-sm" onclick={addSet}>+ подход</button>
 			{#if onremove}
-				<button type="button" class="ghost danger" onclick={onremove}>Удалить блок</button>
+				<button type="button" class="button button-ghost button-danger button-sm" onclick={onremove}>Удалить блок</button>
 			{/if}
 		</div>
 	</div>
@@ -89,7 +89,7 @@
             onkeydown={(event) => onFieldKey(event, 'second', index)}
           />
         </label>
-        <button type="button" class="ghost danger" onclick={() => removeSet(index)} aria-label="Удалить подход">
+        <button type="button" class="button button-ghost button-danger set-remove" onclick={() => removeSet(index)} aria-label="Удалить подход">
           ×
         </button>
       </div>
@@ -167,20 +167,9 @@
     font-size: 16px;
   }
 
-  .set-item .ghost.danger {
+  .set-remove {
     min-height: 46px;
     min-width: 46px;
+    padding: 0;
   }
-
-	button.ghost {
-		background: transparent;
-		border: 1px solid var(--border);
-		border-radius: 0;
-		color: var(--text);
-		padding: 0.45rem 0.65rem;
-	}
-
-	button.danger {
-		color: var(--danger);
-	}
 </style>

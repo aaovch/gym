@@ -438,7 +438,7 @@ const BALANCE_DEFS: BalanceDef[] = [
 		rightLabel: 'Верх',
 		leftIds: ['knee_dominant', 'hip_dominant'],
 		rightIds: ['horizontal_push', 'vertical_push', 'horizontal_pull', 'vertical_pull', 'arms'],
-		leftColor: '#6ee7a8',
+		leftColor: '#ccff33',
 		rightColor: '#a78bfa',
 		judge: false
 	}

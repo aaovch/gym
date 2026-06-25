@@ -46,7 +46,7 @@ export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 	{ key: 'name', label: 'А–Я' }
 ];
 
-const EXERCISE_COLORS = ['#6ee7a8', '#5b9dff', '#fbbf24', '#f472b6', '#a78bfa', '#fb923c'] as const;
+const EXERCISE_COLORS = ['#ccff33', '#5bb0ff', '#ffb627', '#f472b6', '#a78bfa', '#ff9f43'] as const;
 
 export function exerciseColor(name: string): string {
 	let hash = 0;

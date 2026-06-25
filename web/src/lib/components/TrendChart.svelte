@@ -16,7 +16,7 @@
 	let {
 		title,
 		points,
-		color = '#6ee7a8',
+		color = '#ccff33',
 		compact = false,
 		gapDays = TRAINING_GAP_DAYS,
 		range = null,
@@ -442,14 +442,14 @@
 	}
 
 	.range-band {
-		fill: color-mix(in srgb, var(--accent, #6ee7a8) 16%, transparent);
-		stroke: color-mix(in srgb, var(--accent, #6ee7a8) 45%, transparent);
+		fill: color-mix(in srgb, var(--accent, #ccff33) 16%, transparent);
+		stroke: color-mix(in srgb, var(--accent, #ccff33) 45%, transparent);
 		stroke-width: 1.5;
 		pointer-events: none;
 	}
 
 	.range-band.draft {
-		fill: color-mix(in srgb, var(--accent, #6ee7a8) 24%, transparent);
+		fill: color-mix(in srgb, var(--accent, #ccff33) 24%, transparent);
 		stroke-dasharray: 4 3;
 	}
 
@@ -615,7 +615,7 @@
 	}
 
 	.hover-guide {
-		stroke: color-mix(in srgb, var(--accent, #6ee7a8) 70%, white);
+		stroke: color-mix(in srgb, var(--accent, #ccff33) 70%, white);
 		stroke-width: 1.5;
 		stroke-dasharray: 3 3;
 		pointer-events: none;

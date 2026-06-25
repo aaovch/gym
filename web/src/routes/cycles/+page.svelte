@@ -1061,7 +1061,7 @@
 			<div>
 				<h3 id="macro-constructor-title">Конструктор макроцикла</h3>
 			</div>
-			<button type="button" class="btn ghost-link" onclick={closeMacroConstructor}>Закрыть</button>
+			<button type="button" class="button button-ghost-link" onclick={closeMacroConstructor}>Закрыть</button>
 		</div>
 
 		<div class="constructor-meta">
@@ -1083,7 +1083,7 @@
 		<div class="macro-blocks">
 			<div class="macro-blocks-head">
 				<h4>Мезо-блоки в макро</h4>
-				<button type="button" class="btn small" onclick={addMacroBlock}>+ Блок</button>
+				<button type="button" class="button button-sm button-secondary" onclick={addMacroBlock}>+ Блок</button>
 			</div>
 			{#each macroBlocks as block, index (block.id)}
 				<article class="macro-block-card">
@@ -1125,7 +1125,7 @@
 						{#if macroBlocks.length > 1}
 							<button
 								type="button"
-								class="btn small danger"
+								class="button button-sm button-danger"
 								onclick={() => removeMacroBlock(block.id)}
 							>
 								Удалить
@@ -1217,7 +1217,7 @@
 																{#if !(slot === 0 ? block.sessionB : block.sessionA).includes(exercise)}
 																	<button
 																		type="button"
-																		class="btn small ghost-link"
+																		class="button button-sm button-ghost-link"
 																		title="Добавить в день {sessionColumnTitle(slot === 0 ? 1 : 0)}"
 																		onclick={() =>
 																			copyMacroExerciseToOtherSession(block.id, slot, exercise)}
@@ -1227,7 +1227,7 @@
 																{/if}
 																<button
 																	type="button"
-																	class="btn small danger"
+																	class="button button-sm button-danger"
 																	onclick={() =>
 																		removeExerciseFromMacroSession(block.id, slot, exercise)}
 																>
@@ -1391,10 +1391,10 @@
 		{/if}
 
 		<div class="constructor-actions">
-			<button type="button" class="btn" onclick={closeMacroConstructor}>Отмена</button>
+			<button type="button" class="button button-secondary" onclick={closeMacroConstructor}>Отмена</button>
 			<button
 				type="button"
-				class="btn primary"
+				class="button button-primary"
 				disabled={!macroBlocksReady || macroBlocks.length === 0}
 				onclick={confirmMacroConstructor}
 			>
@@ -1428,7 +1428,7 @@
 					{/if}
 				</p>
 			</div>
-			<button type="button" class="btn ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
+			<button type="button" class="button button-ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
 		</div>
 
 		<div class="constructor-meta">
@@ -1535,7 +1535,7 @@
 													{#if !(slot === 0 ? constructorSessionB : constructorSessionA).includes(exercise)}
 														<button
 															type="button"
-															class="btn small ghost-link"
+															class="button button-sm button-ghost-link"
 															title="Добавить в день {sessionColumnTitle(slot === 0 ? 1 : 0)}"
 															onclick={() => copyMesoExerciseToOtherSession(slot, exercise)}
 														>
@@ -1544,7 +1544,7 @@
 													{/if}
 													<button
 														type="button"
-														class="btn small danger"
+														class="button button-sm button-danger"
 														onclick={() => removeExerciseFromMesoSession(slot, exercise)}
 													>
 														×
@@ -1668,8 +1668,8 @@
 		{/if}
 
 		<div class="constructor-actions">
-			<button type="button" class="btn" onclick={closeMesoConstructor}>Отмена</button>
-			<button type="button" class="btn primary" onclick={confirmMesoConstructor}>
+			<button type="button" class="button button-secondary" onclick={closeMesoConstructor}>Отмена</button>
+			<button type="button" class="button button-primary" onclick={confirmMesoConstructor}>
 				{mesoConstructorEditId ? 'Сохранить изменения' : 'Создать мезоцикл'}
 			</button>
 		</div>
@@ -1688,16 +1688,16 @@
 		</p>
 	</div>
 	<div class="head-actions">
-		<button type="button" class="btn primary" onclick={openMacroConstructor}>Создать макроцикл</button>
+		<button type="button" class="button button-primary" onclick={openMacroConstructor}>Создать макроцикл</button>
 		<button
 			type="button"
-			class="btn"
+			class="button button-secondary"
 			onclick={() => openMesoConstructor(selectedMacro?.plan.id ?? null)}
 		>
 			Добавить мезоцикл
 		</button>
 		{#if !usingManual}
-			<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
+			<button type="button" class="button button-secondary" onclick={handleImport}>Импорт из авто</button>
 		{/if}
 	</div>
 </section>
@@ -1729,7 +1729,7 @@
 				Здесь появятся шаблоны тренировок A/B, справочники по объёму и описания методов — после
 				импорта тренировок или настройки <code>data/training-theses.json</code>.
 			</p>
-			<a class="btn" href="{base}/protocols">Шаблоны протоколов</a>
+			<a class="button button-secondary" href="{base}/protocols">Шаблоны протоколов</a>
 		</section>
 	{:else}
 	<section class="card help-card">
@@ -1954,10 +1954,10 @@
 		<h3>Нет данных о циклах</h3>
 		<p class="muted">Создай макроцикл в конструкторе или импортируй автоопределение из тренировок.</p>
 		<div class="empty-actions">
-			<button type="button" class="btn primary" onclick={openMacroConstructor}>Конструктор макроцикла</button>
-			<button type="button" class="btn" onclick={() => openMesoConstructor()}>Один мезо-блок</button>
+			<button type="button" class="button button-primary" onclick={openMacroConstructor}>Конструктор макроцикла</button>
+			<button type="button" class="button button-secondary" onclick={() => openMesoConstructor()}>Один мезо-блок</button>
 			{#if !usingManual}
-				<button type="button" class="btn" onclick={handleImport}>Импорт из авто</button>
+				<button type="button" class="button button-secondary" onclick={handleImport}>Импорт из авто</button>
 			{/if}
 		</div>
 	</section>
@@ -1973,11 +1973,11 @@
 			{#if usingManual}
 				<div class="picker-head-actions">
 					{#if displayMacros.length > 0}
-						<button type="button" class="btn small primary" onclick={openMacroConstructor}>+ Макро</button>
+						<button type="button" class="button button-sm button-primary" onclick={openMacroConstructor}>+ Макро</button>
 					{/if}
 					<button
 						type="button"
-						class="btn small"
+						class="button button-sm button-secondary"
 						onclick={() => openMesoConstructor(selectedMacro?.plan.id ?? null)}
 					>
 						+ Мезо
@@ -2023,7 +2023,7 @@
 						/>
 						<button
 							type="button"
-							class="btn small danger"
+							class="button button-sm button-danger"
 							onclick={() => handleRemoveMacro(selectedMacro.plan.id)}
 						>
 							Удалить макро
@@ -2123,7 +2123,7 @@
 				<div class="detail-actions">
 					{#if nextMicroToLog}
 						<a
-							class="btn small primary"
+							class="button button-sm button-primary"
 							href={todayWorkoutUrl(selectedMeso.plan.id, nextMicroToLog.plan.id)}
 						>
 							Записать тренировку
@@ -2132,17 +2132,17 @@
 					{#if usingManual && plan}
 						<button
 							type="button"
-							class="btn small"
+							class="button button-sm button-secondary"
 							onclick={() => openMesoConstructorForEdit(selectedMeso)}
 						>
 							Редактировать план
 						</button>
-						<button type="button" class="btn small" onclick={() => handleAddMicro(selectedMeso.plan.id)}>
+						<button type="button" class="button button-sm button-secondary" onclick={() => handleAddMicro(selectedMeso.plan.id)}>
 							+ μ
 						</button>
 						<button
 							type="button"
-							class="btn small danger"
+							class="button button-sm button-danger"
 							onclick={() => handleRemoveMeso(selectedMeso.plan.id)}
 						>
 							Удалить мезо
@@ -2337,8 +2337,8 @@
 										<option value={name}>{name}</option>
 									{/each}
 								</select>
-								<a class="btn small ghost-link" href="{base}/exercises">Каталог</a>
-								<button type="button" class="btn small" onclick={() => handleSyncExercises(selectedMeso)}>
+								<a class="button button-sm button-ghost-link" href="{base}/exercises">Каталог</a>
+								<button type="button" class="button button-sm button-secondary" onclick={() => handleSyncExercises(selectedMeso)}>
 									Подтянуть из тренировок
 								</button>
 							</div>
@@ -2380,7 +2380,7 @@
 									</label>
 									<button
 										type="button"
-										class="btn small danger"
+										class="button button-sm button-danger"
 										onclick={() => handleRemoveExercise(selectedMeso, exercise)}
 									>
 										×
@@ -2399,7 +2399,7 @@
 										<strong>μ{micro.plan.indexInMeso}</strong>
 										<button
 											type="button"
-											class="btn small danger"
+											class="button button-sm button-danger"
 											onclick={() => handleRemoveMicro(selectedMeso.plan.id, micro.plan.id)}
 										>
 											×
@@ -2516,58 +2516,6 @@
 		flex-wrap: wrap;
 		gap: 0.45rem;
 		align-items: center;
-	}
-
-	.btn {
-		border-radius: 0;
-		padding: 0.5rem 0.85rem;
-		border: 1px solid var(--line-strong);
-		background: var(--surface-2);
-		color: var(--text);
-		font-family: var(--font-mono);
-		font-size: 0.78rem;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		cursor: pointer;
-		transition: border-color 120ms ease, background 120ms ease;
-	}
-
-	.btn:hover {
-		border-color: var(--accent);
-	}
-
-	.btn.primary {
-		background: var(--accent);
-		border-color: var(--accent);
-		color: var(--accent-ink);
-	}
-
-	.btn.primary:hover {
-		background: var(--accent-strong);
-	}
-
-	.btn.small {
-		padding: 0.3rem 0.55rem;
-		font-size: 0.72rem;
-	}
-
-	.btn.danger,
-	.btn.small.danger {
-		color: var(--danger);
-		background: rgba(255, 92, 82, 0.1);
-		border-color: rgba(255, 92, 82, 0.28);
-	}
-
-	.btn.ghost-link {
-		background: transparent;
-		border-color: transparent;
-		color: var(--muted);
-	}
-
-	.btn.ghost-link:hover {
-		color: var(--accent);
-		border-color: transparent;
 	}
 
 	.ab-grid {
@@ -2747,7 +2695,7 @@
 		margin-bottom: 0.35rem;
 	}
 
-	.empty-state .btn {
+	.empty-state .button {
 		margin-top: 1rem;
 	}
 
@@ -2907,7 +2855,7 @@
 		text-align: right;
 	}
 
-	.constructor-table .row-actions .btn {
+	.constructor-table .row-actions .button {
 		min-width: 1.75rem;
 		padding: 0.15rem 0.35rem;
 	}
@@ -2974,7 +2922,7 @@
 	}
 
 	.constructor-session-block.session-b .constructor-session-title {
-		color: #6ee7a8;
+		color: var(--accent);
 	}
 
 	.constructor-session-empty {
@@ -3046,8 +2994,8 @@
 	}
 
 	.preview-badge.active {
-		background: rgb(46 160 96 / 18%);
-		color: #6ee7a8;
+		background: var(--accent-a16);
+		color: var(--accent);
 	}
 
 	.preview-badge.skipped {
@@ -3385,7 +3333,7 @@
 	}
 
 	.session-plan-block.session-b .session-plan-title {
-		color: #6ee7a8;
+		color: var(--accent);
 	}
 
 	.session-plan-block .matrix {
@@ -3480,7 +3428,7 @@
 	}
 
 	.matrix .pct.match {
-		background: rgba(110, 231, 168, 0.08);
+		background: var(--accent-a08);
 	}
 
 	.matrix .cell-plan,
@@ -3572,7 +3520,7 @@
 	}
 
 	.day-link.b {
-		background: rgba(110, 231, 168, 0.1);
+		background: var(--accent-a10);
 		color: var(--text);
 	}
 
@@ -3587,7 +3535,7 @@
 		height: 1.1rem;
 		place-items: center;
 		color: var(--accent);
-		background: rgba(110, 231, 168, 0.1);
+		background: var(--accent-a10);
 		text-decoration: none;
 		font-size: 0.85rem;
 		font-weight: 800;

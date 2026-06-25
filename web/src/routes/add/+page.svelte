@@ -256,7 +256,7 @@
 			</p>
 		</div>
 		{#if editingId}
-			<button type="button" class="ghost" onclick={resetForm}>Новая запись</button>
+			<button type="button" class="button button-ghost" onclick={resetForm}>Новая запись</button>
 		{/if}
 	</div>
 
@@ -293,10 +293,10 @@
 		{/each}
 
 		<div class="form-actions">
-			<button type="button" class="ghost" onclick={addExtraRow}>+ блок</button>
+			<button type="button" class="button button-ghost" onclick={addExtraRow}>+ блок</button>
 			<button
 				type="submit"
-				class="primary"
+				class="button button-primary"
 				title="Ctrl/⌘ + S"
 				disabled={!previewLog || busy || workoutStore.sync.syncing}
 			>
@@ -353,28 +353,6 @@
 		justify-content: space-between;
 		gap: 0.75rem;
 		flex-wrap: wrap;
-	}
-
-	button {
-		border-radius: 0;
-		padding: 0.55rem 0.9rem;
-		border: 1px solid var(--border);
-		background: var(--surface-2);
-		color: var(--text);
-	}
-
-	button.primary {
-		background: rgba(110, 231, 168, 0.16);
-		border-color: rgba(110, 231, 168, 0.45);
-		color: var(--accent);
-	}
-
-	button.ghost {
-		background: transparent;
-	}
-
-	button:disabled {
-		opacity: 0.55;
 	}
 
 	.success {

@@ -186,7 +186,7 @@
 		margin: 0 auto;
 		display: block;
 		background:
-			radial-gradient(circle at 50% 20%, rgba(110, 231, 168, 0.06), transparent 45%),
+			radial-gradient(circle at 50% 20%, var(--accent-a06), transparent 45%),
 			var(--surface-2);
 		border: 1px solid var(--border);
 		border-radius: 0;

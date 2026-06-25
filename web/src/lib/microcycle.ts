@@ -344,7 +344,7 @@ export function sessionIndexLabel(indexInMicro: number): string {
 
 export function sessionIndexColor(indexInMicro: number): string {
 	if (indexInMicro === 0) return '#5b9dff';
-	if (indexInMicro === 1) return '#6ee7a8';
+	if (indexInMicro === 1) return '#ccff33';
 	return '#94a3b8';
 }
 
