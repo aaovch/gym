@@ -481,7 +481,7 @@ function compactMesocycle(meso: MesocyclePlan): StoredMesocyclePlan {
 	if (meso.exerciseProtocols && Object.keys(meso.exerciseProtocols).length) {
 		stored.exerciseProtocols = meso.exerciseProtocols;
 	}
-	if (meso.exerciseSessions && Object.keys(meso.exerciseSessions).length) {
+	if (meso.exerciseSessions !== undefined) {
 		stored.exerciseSessions = meso.exerciseSessions;
 	}
 	return stored;
