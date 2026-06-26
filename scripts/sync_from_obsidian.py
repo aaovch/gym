@@ -248,20 +248,27 @@ def sync_cycle_plan_sessions(
 ) -> list[str]:
     by_name = {e["n"]: e["id"] for e in exercises}
     _, block_by_id, _ = build_obsidian_index(md, by_name)
-
-    exercise_sessions: dict[str, list[int]] = {}
-    for ex_name, data in md.items():
-        ex_id = resolve_exercise_id(ex_name, by_name)
-        sessions = BLOCK_SESSIONS[data["block"]]
-        exercise_sessions[ex_id] = sessions
-
-    desired = {ex_id: slots for ex_id, slots in exercise_sessions.items()}
     changes: list[str] = []
     for meso in plan.get("mesocycles", []):
+        meso_dates = {
+            session.get("date")
+            for micro in meso.get("microcycles", [])
+            for session in micro.get("sessions", [])
+            if session.get("date")
+        }
+        desired: dict[str, list[int]] = {}
+        for ex_name, data in md.items():
+            if not any(date in meso_dates for date in data["dates"]):
+                continue
+            ex_id = resolve_exercise_id(ex_name, by_name)
+            desired[ex_id] = BLOCK_SESSIONS[data["block"]]
+
         if meso.get("exerciseSessions") == desired:
             continue
         meso["exerciseSessions"] = desired.copy()
-        changes.append(f"{meso.get('label', meso.get('id'))}: exerciseSessions from Obsidian blocks")
+        changes.append(
+            f"{meso.get('label', meso.get('id'))}: {len(desired)} exerciseSessions from Obsidian dates"
+        )
     return changes
 
 
@@ -279,18 +286,22 @@ def run(md_path: Path, dry_run: bool) -> dict:
     plan_changes = sync_cycle_plan_sessions(md, plan, raw["exercises"], dry_run)
 
     if not dry_run and (workout_changes or plan_changes):
-        validate_workout_v4(raw)
-        raw["revision"] = int(raw.get("revision", 0)) + 1
-        raw["updatedAt"] = (
+        updated_at = (
             datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         )
-        plan["revision"] = int(plan.get("revision", 0)) + 1
-        plan["updatedAt"] = raw["updatedAt"]
-        save_json(DEFAULT_JSON, raw)
-        save_json(CYCLE_PLAN, plan)
-        if STATIC_JSON.parent.exists():
-            save_json(STATIC_JSON, raw)
-            save_json(STATIC_PLAN, plan)
+        if workout_changes:
+            validate_workout_v4(raw)
+            raw["revision"] = int(raw.get("revision", 0)) + 1
+            raw["updatedAt"] = updated_at
+            save_json(DEFAULT_JSON, raw)
+            if STATIC_JSON.parent.exists():
+                save_json(STATIC_JSON, raw)
+        if plan_changes:
+            plan["revision"] = int(plan.get("revision", 0)) + 1
+            plan["updatedAt"] = updated_at
+            save_json(CYCLE_PLAN, plan)
+            if STATIC_PLAN.parent.exists():
+                save_json(STATIC_PLAN, plan)
 
     return {
         "missing": len(missing),
