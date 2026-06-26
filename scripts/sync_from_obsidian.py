@@ -244,18 +244,20 @@ def sync_workouts(md: dict[str, dict], raw: dict, dry_run: bool) -> list[str]:
 
 
 def sync_cycle_plan_sessions(
-    md: dict[str, dict], plan: dict, exercises: list[dict], dry_run: bool
+    md: dict[str, dict], plan: dict, exercises: list[dict], logs: list[dict], dry_run: bool
 ) -> list[str]:
     by_name = {e["n"]: e["id"] for e in exercises}
     _, block_by_id, _ = build_obsidian_index(md, by_name)
     changes: list[str] = []
     for meso in plan.get("mesocycles", []):
-        meso_dates = {
-            session.get("date")
-            for micro in meso.get("microcycles", [])
-            for session in micro.get("sessions", [])
-            if session.get("date")
-        }
+        dates_by_slot: dict[int, set[str]] = {0: set(), 1: set()}
+        for micro in meso.get("microcycles", []):
+            for session in micro.get("sessions", []):
+                date = session.get("date")
+                slot = session.get("indexInMicro")
+                if date and slot in (0, 1):
+                    dates_by_slot[slot].add(date)
+        meso_dates = dates_by_slot[0] | dates_by_slot[1]
         desired: dict[str, list[int]] = {}
         for ex_name, data in md.items():
             if not any(date in meso_dates for date in data["dates"]):
@@ -263,11 +265,24 @@ def sync_cycle_plan_sessions(
             ex_id = resolve_exercise_id(ex_name, by_name)
             desired[ex_id] = BLOCK_SESSIONS[data["block"]]
 
+        if not desired:
+            slots_by_exercise: dict[str, set[int]] = {}
+            for log in logs:
+                for slot, dates in dates_by_slot.items():
+                    if log.get("date") in dates:
+                        slots_by_exercise.setdefault(log["exerciseId"], set()).add(slot)
+            desired = {
+                ex_id: sorted(slots)
+                for ex_id, slots in sorted(slots_by_exercise.items())
+                if slots
+            }
+
         if meso.get("exerciseSessions") == desired:
             continue
         meso["exerciseSessions"] = desired.copy()
         changes.append(
-            f"{meso.get('label', meso.get('id'))}: {len(desired)} exerciseSessions from Obsidian dates"
+            f"{meso.get('label', meso.get('id'))}: {len(desired)} exerciseSessions from "
+            f"{'workout logs' if not any(date in meso_dates for data in md.values() for date in data['dates']) else 'Obsidian dates'}"
         )
     return changes
 
@@ -283,7 +298,7 @@ def run(md_path: Path, dry_run: bool) -> dict:
 
     missing, mismatch, extra = compare(md, raw)
     workout_changes = sync_workouts(md, raw, dry_run)
-    plan_changes = sync_cycle_plan_sessions(md, plan, raw["exercises"], dry_run)
+    plan_changes = sync_cycle_plan_sessions(md, plan, raw["exercises"], raw["logs"], dry_run)
 
     if not dry_run and (workout_changes or plan_changes):
         updated_at = (
