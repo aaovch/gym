@@ -1,4 +1,4 @@
-"""Sync workouts.json from Obsidian markdown source of truth."""
+"""Sync workouts.json and cycle-plan exerciseSessions from Obsidian markdown."""
 
 from __future__ import annotations
 
@@ -9,19 +9,31 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from workout_data import validate_workout_v4  # noqa: E402
+
 DEFAULT_MD = Path(
     r"c:\Users\aaovc\Documents\my-obsidian-vault\Personal Notes\План тренировок в качалке.md"
 )
-DEFAULT_JSON = Path(__file__).resolve().parent.parent / "data" / "workouts.json"
-STATIC_JSON = Path(__file__).resolve().parent.parent / "web" / "static" / "data" / "workouts.json"
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_JSON = ROOT / "data" / "workouts.json"
+STATIC_JSON = ROOT / "web" / "static" / "data" / "workouts.json"
+CYCLE_PLAN = ROOT / "data" / "cycle-plan.json"
+STATIC_PLAN = ROOT / "web" / "static" / "data" / "cycle-plan.json"
 
-# Obsidian heading -> workouts.json exercise id
 EXERCISE_ALIASES: dict[str, str] = {
     "Приседания со штангой на спине": "prisedaniya-so-shtangoy-na-spine",
     "Скоростные прыжки на тумбу": "skorostnye-pryzhki-na-tumbu-napryzhka",
 }
 
 BODYWEIGHT_KG = 100
+
+# Obsidian block → session index (A=0, B=1)
+BLOCK_SESSIONS: dict[int, list[int]] = {
+    1: [0],
+    2: [1],
+    0: [0, 1],  # общий блок (бег)
+}
 
 
 def _parse_number(text: str) -> float:
@@ -39,7 +51,7 @@ SET_TOKEN_RE = re.compile(
 )
 
 
-def parse_sets_cell(cell: str, kind: str) -> list[tuple[float, float]]:
+def parse_sets_cell(cell: str) -> list[tuple[float, float]]:
     cell = re.sub(r"\([^)]*\)", "", cell).strip().rstrip("?")
     sets: list[tuple[float, float]] = []
     for match in SET_TOKEN_RE.finditer(cell):
@@ -61,8 +73,17 @@ def parse_markdown(path: Path) -> dict[str, dict]:
     exercises: dict[str, dict] = {}
     current_exercise: str | None = None
     current_kind = "strength"
+    current_block = 1
 
     for line in text.splitlines():
+        block_heading = re.match(r"^## (\d+) блок", line)
+        if block_heading:
+            current_block = int(block_heading.group(1))
+            continue
+        if line.strip() == "## Общий блок":
+            current_block = 0
+            continue
+
         heading = re.match(r"^### (.+)$", line)
         if heading:
             name = heading.group(1).strip()
@@ -75,16 +96,20 @@ def parse_markdown(path: Path) -> dict[str, dict]:
             elif name == "Бег":
                 current_exercise = "Бег"
                 current_kind = "run"
+                current_block = 0
             else:
                 current_exercise = name
                 current_kind = "strength"
-            exercises.setdefault(current_exercise, {"kind": current_kind, "dates": {}})
+            exercises.setdefault(
+                current_exercise,
+                {"kind": current_kind, "block": current_block, "dates": {}},
+            )
             continue
 
         row = re.match(r"^\| (\d{4}-\d{2}-\d{2}) \| (.+?) \|", line)
         if row and current_exercise:
             date = row.group(1)
-            sets = parse_sets_cell(row.group(2), current_kind)
+            sets = parse_sets_cell(row.group(2))
             if sets:
                 exercises[current_exercise]["dates"][date] = sets
 
@@ -100,7 +125,7 @@ def norm_sets(sets: list[tuple[float, float]]) -> list[tuple[float, float]]:
     return out
 
 
-def resolve_exercise_id(name: str, by_name: dict[str, str], by_id: dict[str, dict]) -> str:
+def resolve_exercise_id(name: str, by_name: dict[str, str]) -> str:
     if name in EXERCISE_ALIASES:
         return EXERCISE_ALIASES[name]
     if name in by_name:
@@ -136,21 +161,41 @@ def sets_to_blocks(kind: str, sets: list[tuple[float, float]]) -> list[dict]:
     return [{"kind": kind, "sets": stored_sets}]
 
 
-def compare(md: dict[str, dict], raw: dict) -> tuple[list, list]:
+def build_obsidian_index(
+    md: dict[str, dict], by_name: dict[str, str]
+) -> tuple[set[tuple[str, str]], dict[str, int], set[str]]:
+    valid_keys: set[tuple[str, str]] = set()
+    block_by_id: dict[str, int] = {}
+    tracked_ids: set[str] = set()
+
+    for ex_name, data in md.items():
+        ex_id = resolve_exercise_id(ex_name, by_name)
+        tracked_ids.add(ex_id)
+        block_by_id[ex_id] = data["block"]
+        for date in data["dates"]:
+            valid_keys.add((ex_id, date))
+
+    return valid_keys, block_by_id, tracked_ids
+
+
+def compare(
+    md: dict[str, dict], raw: dict
+) -> tuple[list, list, list]:
     by_id = {e["id"]: e for e in raw["exercises"]}
     by_name = {e["n"]: e["id"] for e in raw["exercises"]}
+    valid_keys, _, tracked_ids = build_obsidian_index(md, by_name)
 
     json_by_key: dict[tuple[str, str], tuple[dict, list]] = {}
     for log in raw["logs"]:
-        sets = log_sets(log, by_id)
-        json_by_key[(log["exerciseId"], log["date"])] = (log, sets)
+        key = (log["exerciseId"], log["date"])
+        json_by_key[key] = (log, log_sets(log, by_id))
 
     missing: list[tuple[str, str, str, list]] = []
     mismatch: list[tuple[str, str, str, list, list]] = []
+    extra: list[tuple[str, str, list]] = []
 
     for ex_name, data in md.items():
-        ex_id = resolve_exercise_id(ex_name, by_name, by_id)
-        kind = data["kind"]
+        ex_id = resolve_exercise_id(ex_name, by_name)
         for date, md_sets in data["dates"].items():
             md_norm = norm_sets(md_sets)
             key = (ex_id, date)
@@ -159,28 +204,28 @@ def compare(md: dict[str, dict], raw: dict) -> tuple[list, list]:
             elif json_by_key[key][1] != md_norm:
                 mismatch.append((ex_name, ex_id, date, md_norm, json_by_key[key][1]))
 
-    return missing, mismatch
+    for key, (_, sets) in json_by_key.items():
+        ex_id, date = key
+        if ex_id in tracked_ids and key not in valid_keys:
+            name = by_id.get(ex_id, {}).get("n", ex_id)
+            extra.append((name, date, sets))
+
+    return missing, mismatch, extra
 
 
-def sync(md_path: Path, json_path: Path, dry_run: bool = False) -> dict:
-    md = parse_markdown(md_path)
-    raw = json.loads(json_path.read_text(encoding="utf-8"))
-    by_id = {e["id"]: e for e in raw["exercises"]}
+def sync_workouts(md: dict[str, dict], raw: dict, dry_run: bool) -> list[str]:
     by_name = {e["n"]: e["id"] for e in raw["exercises"]}
-
-    missing, mismatch = compare(md, raw)
+    valid_keys, _, tracked_ids = build_obsidian_index(md, by_name)
+    missing, mismatch, extra = compare(md, raw)
     changes: list[str] = []
 
-    logs_by_key: dict[tuple[str, str], dict] = {
-        (log["exerciseId"], log["date"]): log for log in raw["logs"]
-    }
+    logs_by_key = {(log["exerciseId"], log["date"]): log for log in raw["logs"]}
 
     for ex_name, ex_id, date, md_sets, _ in mismatch:
         kind = md[ex_name]["kind"]
-        log = logs_by_key.get((ex_id, date))
-        if log:
-            log["blocks"] = sets_to_blocks(kind, md_sets)
-            changes.append(f"updated {ex_name} @ {date}: {md_sets}")
+        log = logs_by_key[(ex_id, date)]
+        log["blocks"] = sets_to_blocks(kind, md_sets)
+        changes.append(f"updated {ex_name} @ {date}")
 
     for ex_name, ex_id, date, md_sets in missing:
         kind = md[ex_name]["kind"]
@@ -192,54 +237,95 @@ def sync(md_path: Path, json_path: Path, dry_run: bool = False) -> dict:
         }
         raw["logs"].append(new_log)
         logs_by_key[(ex_id, date)] = new_log
-        changes.append(f"added {ex_name} @ {date}: {md_sets}")
+        changes.append(f"added {ex_name} @ {date}")
+
+    extra_keys = {
+        (log["exerciseId"], log["date"])
+        for log in raw["logs"]
+        if log["exerciseId"] in tracked_ids
+        and (log["exerciseId"], log["date"]) not in valid_keys
+    }
+    if extra_keys:
+        raw["logs"] = [
+            log for log in raw["logs"] if (log["exerciseId"], log["date"]) not in extra_keys
+        ]
+        for ex_id, date in sorted(extra_keys):
+            name = next((e["n"] for e in raw["exercises"] if e["id"] == ex_id), ex_id)
+            changes.append(f"removed {name} @ {date}")
 
     raw["logs"].sort(key=lambda log: (log["date"], log["exerciseId"]))
+    return changes
 
-    if changes and not dry_run:
+
+def sync_cycle_plan_sessions(
+    md: dict[str, dict], plan: dict, exercises: list[dict], dry_run: bool
+) -> list[str]:
+    by_name = {e["n"]: e["id"] for e in exercises}
+    _, block_by_id, _ = build_obsidian_index(md, by_name)
+
+    exercise_sessions: dict[str, list[int]] = {}
+    for ex_name, data in md.items():
+        ex_id = resolve_exercise_id(ex_name, by_name)
+        sessions = BLOCK_SESSIONS[data["block"]]
+        exercise_sessions[ex_id] = sessions
+
+    changes: list[str] = []
+    for meso in plan.get("mesocycles", []):
+        meso["exerciseSessions"] = {
+            ex_id: slots for ex_id, slots in exercise_sessions.items()
+        }
+    changes.append(f"exerciseSessions: {len(exercise_sessions)} exercises from Obsidian blocks")
+    return changes
+
+
+def save_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+
+def run(md_path: Path, dry_run: bool) -> dict:
+    md = parse_markdown(md_path)
+    raw = json.loads(DEFAULT_JSON.read_text(encoding="utf-8"))
+    plan = json.loads(CYCLE_PLAN.read_text(encoding="utf-8"))
+
+    missing, mismatch, extra = compare(md, raw)
+    workout_changes = sync_workouts(md, raw, dry_run)
+    plan_changes = sync_cycle_plan_sessions(md, plan, raw["exercises"], dry_run)
+
+    if not dry_run and (workout_changes or plan_changes):
+        validate_workout_v4(raw)
         raw["revision"] = int(raw.get("revision", 0)) + 1
         raw["updatedAt"] = (
             datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         )
-        text = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
-        json_path.write_text(text, encoding="utf-8")
+        plan["revision"] = int(plan.get("revision", 0)) + 1
+        plan["updatedAt"] = raw["updatedAt"]
+        save_json(DEFAULT_JSON, raw)
+        save_json(CYCLE_PLAN, plan)
         if STATIC_JSON.parent.exists():
-            STATIC_JSON.write_text(text, encoding="utf-8")
+            save_json(STATIC_JSON, raw)
+            save_json(STATIC_PLAN, plan)
 
-    return {"missing": len(missing), "mismatch": len(mismatch), "changes": changes, "dry_run": dry_run}
+    return {
+        "missing": len(missing),
+        "mismatch": len(mismatch),
+        "extra": len(extra),
+        "workout_changes": workout_changes,
+        "plan_changes": plan_changes,
+        "dry_run": dry_run,
+    }
 
 
 def main() -> None:
     dry_run = "--dry-run" in sys.argv
-    md_path = DEFAULT_MD
-    json_path = DEFAULT_JSON
+    md_path = Path(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else DEFAULT_MD
 
-    missing, mismatch = compare(parse_markdown(md_path), json.loads(json_path.read_text(encoding="utf-8")))
-
-    report_path = Path(__file__).resolve().parent.parent / "sync_report.txt"
-    lines = [
-        f"Missing in JSON: {len(missing)}",
-        f"Mismatch: {len(mismatch)}",
-        "",
-    ]
-    for ex_name, ex_id, date, sets in missing:
-        lines.append(f"  + {ex_name} @ {date}: {sets}")
-    for ex_name, ex_id, date, md_sets, js_sets in mismatch:
-        lines.append(f"  ~ {ex_name} @ {date}")
-        lines.append(f"      MD:   {md_sets}")
-        lines.append(f"      JSON: {js_sets}")
-
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-
-    result = sync(md_path, json_path, dry_run=dry_run)
-    summary = (
-        f"Dry run — would apply {len(result['changes'])} changes"
-        if dry_run
-        else f"Applied {len(result['changes'])} changes"
+    result = run(md_path, dry_run)
+    print(
+        f"{'Dry run' if dry_run else 'Applied'}: "
+        f"missing={result['missing']} mismatch={result['mismatch']} extra={result['extra']}"
     )
-    report_path.write_text("\n".join(lines) + "\n\n" + summary + "\n", encoding="utf-8")
-    print(summary)
-    print(f"Report: {report_path}")
+    for line in result["workout_changes"] + result["plan_changes"]:
+        print(f"  {line}")
 
 
 if __name__ == "__main__":
