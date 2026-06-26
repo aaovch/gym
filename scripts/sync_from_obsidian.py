@@ -239,20 +239,6 @@ def sync_workouts(md: dict[str, dict], raw: dict, dry_run: bool) -> list[str]:
         logs_by_key[(ex_id, date)] = new_log
         changes.append(f"added {ex_name} @ {date}")
 
-    extra_keys = {
-        (log["exerciseId"], log["date"])
-        for log in raw["logs"]
-        if log["exerciseId"] in tracked_ids
-        and (log["exerciseId"], log["date"]) not in valid_keys
-    }
-    if extra_keys:
-        raw["logs"] = [
-            log for log in raw["logs"] if (log["exerciseId"], log["date"]) not in extra_keys
-        ]
-        for ex_id, date in sorted(extra_keys):
-            name = next((e["n"] for e in raw["exercises"] if e["id"] == ex_id), ex_id)
-            changes.append(f"removed {name} @ {date}")
-
     raw["logs"].sort(key=lambda log: (log["date"], log["exerciseId"]))
     return changes
 
@@ -269,12 +255,13 @@ def sync_cycle_plan_sessions(
         sessions = BLOCK_SESSIONS[data["block"]]
         exercise_sessions[ex_id] = sessions
 
+    desired = {ex_id: slots for ex_id, slots in exercise_sessions.items()}
     changes: list[str] = []
     for meso in plan.get("mesocycles", []):
-        meso["exerciseSessions"] = {
-            ex_id: slots for ex_id, slots in exercise_sessions.items()
-        }
-    changes.append(f"exerciseSessions: {len(exercise_sessions)} exercises from Obsidian blocks")
+        if meso.get("exerciseSessions") == desired:
+            continue
+        meso["exerciseSessions"] = desired.copy()
+        changes.append(f"{meso.get('label', meso.get('id'))}: exerciseSessions from Obsidian blocks")
     return changes
 
 

@@ -180,6 +180,7 @@
   );
   function isExerciseFullyLogged(exerciseName: string, entry?: WorkoutEntry): boolean {
     if (!entry?.sets.length) return false;
+    if (entry.date !== todayIso()) return true;
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return true;
     return entry.sets.length >= preview.sets.length;
