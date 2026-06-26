@@ -932,7 +932,7 @@ export function exercisesForMicroSession(
 			.filter(([, slots]) => slots.includes(indexInMicro))
 			.map(([exerciseId]) => keyMaps.nameById.get(exerciseId) ?? exerciseId)
 			.filter((exercise) => inMeso.has(exercise));
-		if (fromPlan.length) return pickMesoExercises(fromPlan);
+		return pickMesoExercises(fromPlan);
 	}
 	const template = templates.find((item) => item.indexInMicro === indexInMicro);
 	if (!template) return [];
