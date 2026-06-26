@@ -521,17 +521,20 @@
     sets: ExerciseSet[],
     successMessage: string,
     silent = false,
-    existingId?: string
+    existingId?: string,
+    failedSets?: number[]
   ) {
     if (!mesocycle || !microcycle || activeIndex == null) return;
     busyId = exerciseName;
     error = '';
     try {
+      const row: import('$lib/types').SessionRow = { kind, sets, comment: null };
+      if (failedSets?.length) row.failedSets = failedSets;
       const { db, log } = createLog(
         workoutStore.database,
         exerciseName,
         workoutDate,
-        [{ kind, sets, comment: null }],
+        [row],
         existingId ?? crypto.randomUUID()
       );
       workoutStore.database = db;
@@ -560,11 +563,29 @@
     if (!preview) return;
     const sets = preview.sets.slice(0, setIndex + 1);
     const existing = entryByExercise.get(exerciseName);
+    // Preserve existing failedSets for earlier indices
+    const prevFailed = existing?.failedSets?.filter((i) => i < setIndex) ?? [];
     const doneAll = sets.length >= preview.sets.length;
     const message = doneAll
       ? `Записано: ${exerciseName}`
       : `Подход ${setIndex + 1} · ${exerciseName}`;
-    await saveSetsFor(exerciseName, preview.kind, sets, message, false, existing?.id);
+    await saveSetsFor(exerciseName, preview.kind, sets, message, false, existing?.id, prevFailed.length ? prevFailed : undefined);
+  }
+
+  async function failSet(exerciseName: string, setIndex: number) {
+    if (protocolSkips.has(exerciseName)) return;
+    const preview = adjustedPreviewSets(exerciseName);
+    if (!preview) return;
+    const sets = preview.sets.slice(0, setIndex + 1);
+    const existing = entryByExercise.get(exerciseName);
+    // Collect existing failedSets + add this one
+    const prevFailed = existing?.failedSets?.filter((i) => i < setIndex) ?? [];
+    const failedSets = [...prevFailed, setIndex];
+    const doneAll = sets.length >= preview.sets.length;
+    const message = doneAll
+      ? `Записано: ${exerciseName}`
+      : `✗ Подход ${setIndex + 1} · ${exerciseName}`;
+    await saveSetsFor(exerciseName, preview.kind, sets, message, false, existing?.id, failedSets);
   }
 
   async function confirmPlanned(exerciseName: string) {
@@ -807,19 +828,32 @@
   {/if}
 {/snippet}
 
-{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, disabled: boolean)}
-  {#if done}
+{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, failed: boolean, disabled: boolean)}
+  {#if done && failed}
+    <span class="set-failed-mark" aria-label="Подход {setIndex + 1} не выполнен">✗</span>
+  {:else if done}
     <span class="set-done-mark" aria-label="Подход {setIndex + 1} выполнен">✓</span>
   {:else}
-    <button
-      type="button"
-      class="set-done-btn"
-      aria-label="Записать подход {setIndex + 1}"
-      {disabled}
-      onclick={() => confirmSet(exercise, setIndex)}
-    >
-      {disabled ? '…' : '✓'}
-    </button>
+    <div class="set-action-pair">
+      <button
+        type="button"
+        class="set-done-btn"
+        aria-label="Записать подход {setIndex + 1}"
+        {disabled}
+        onclick={() => confirmSet(exercise, setIndex)}
+      >
+        {disabled ? '…' : '✓'}
+      </button>
+      <button
+        type="button"
+        class="set-fail-btn"
+        aria-label="Отметить подход {setIndex + 1} как невыполненный"
+        {disabled}
+        onclick={() => failSet(exercise, setIndex)}
+      >
+        {disabled ? '…' : '✗'}
+      </button>
+    </div>
   {/if}
 {/snippet}
 
@@ -1326,15 +1360,16 @@
                         <div class="plan-sets-editable">
                           {#each previewSets.sets as set, setIndex}
                             {@const setDone = setIndex < loggedCount}
+                            {@const setFailed = Boolean(entry?.failedSets?.includes(setIndex))}
                             {@const setBusy = busyId === exercise}
-                            <div class="set-row" class:set-done={setDone}>
+                            <div class="set-row" class:set-done={setDone && !setFailed} class:set-failed={setDone && setFailed}>
                               <span class="set-chip">
                                 <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
                               </span>
                               {#if previewSets.kind === 'strength' && !setDone}
                                 {@render setStepper(exercise, setIndex, setBusy)}
                               {/if}
-                              {@render setDoneButton(exercise, setIndex, setDone, setBusy)}
+                              {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy)}
                             </div>
                           {/each}
                         </div>
@@ -2182,6 +2217,55 @@
     font-size: 14px;
     font-weight: 800;
     line-height: 1;
+  }
+
+  .set-row.set-failed .set-chip {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  }
+
+  .set-failed-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, #0a0c10);
+    border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .set-action-pair {
+    display: inline-flex;
+    gap: 4px;
+  }
+
+  .set-fail-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: #fff;
+    background: var(--danger);
+    border: 1px solid var(--danger);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .set-fail-btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .set-fail-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .set-stepper {

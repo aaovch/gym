@@ -49,9 +49,9 @@ type StoredRunSet = { durationMin: number; speedKmh: number };
 type StoredJumpSet = { setCount: number; repsPerSet: number };
 
 type StoredSetBlock =
-	| { kind: 'strength'; sets: StoredStrengthSet[]; comment?: string }
-	| { kind: 'run'; sets: StoredRunSet[]; comment?: string }
-	| { kind: 'jumps'; sets: StoredJumpSet[]; comment?: string };
+	| { kind: 'strength'; sets: StoredStrengthSet[]; comment?: string; failedSets?: number[] }
+	| { kind: 'run'; sets: StoredRunSet[]; comment?: string; failedSets?: number[] }
+	| { kind: 'jumps'; sets: StoredJumpSet[]; comment?: string; failedSets?: number[] };
 
 type StoredExerciseLog = {
 	id: string;
@@ -114,6 +114,7 @@ function roundNum(n: number): number {
 
 function compactBlock(row: SetBlock): StoredSetBlock {
 	const comment = row.comment?.trim() || undefined;
+	const failedSets = row.failedSets?.length ? row.failedSets : undefined;
 	if (row.kind === 'run') {
 		return {
 			kind: 'run',
@@ -121,7 +122,8 @@ function compactBlock(row: SetBlock): StoredSetBlock {
 				durationMin: roundNum(durationMin),
 				speedKmh: roundNum(speedKmh)
 			})),
-			...(comment ? { comment } : {})
+			...(comment ? { comment } : {}),
+			...(failedSets ? { failedSets } : {})
 		};
 	}
 	if (row.kind === 'jumps') {
@@ -131,7 +133,8 @@ function compactBlock(row: SetBlock): StoredSetBlock {
 				setCount: roundNum(setCount),
 				repsPerSet: roundNum(repsPerSet)
 			})),
-			...(comment ? { comment } : {})
+			...(comment ? { comment } : {}),
+			...(failedSets ? { failedSets } : {})
 		};
 	}
 	return {
@@ -140,7 +143,8 @@ function compactBlock(row: SetBlock): StoredSetBlock {
 			weightKg: roundNum(weightKg),
 			reps: roundNum(reps)
 		})),
-		...(comment ? { comment } : {})
+		...(comment ? { comment } : {}),
+		...(failedSets ? { failedSets } : {})
 	};
 }
 
@@ -153,7 +157,8 @@ function expandBlock(row: StoredSetBlock): SetBlock {
 	} else {
 		sets = row.sets.map(({ weightKg, reps }) => [weightKg, reps]);
 	}
-	return { kind: row.kind, sets, comment: row.comment ?? null };
+	const failedSets = row.failedSets?.length ? row.failedSets : undefined;
+	return { kind: row.kind, sets, comment: row.comment ?? null, ...(failedSets ? { failedSets } : {}) };
 }
 
 function compactExercise(exercise: Exercise): StoredExercise {

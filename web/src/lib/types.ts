@@ -9,6 +9,8 @@ export type SessionRow = {
 	kind: ExerciseKind;
 	sets: ExerciseSet[];
 	comment?: string | null;
+	/** Индексы подходов, помеченных как невыполненные (failed). */
+	failedSets?: number[];
 };
 
 /** Блок подходов внутри записи по упражнению. */
@@ -59,6 +61,8 @@ export type WorkoutEntry = {
 	parts: string[];
 	sets: ExerciseSet[];
 	microSessionId?: string;
+	/** Индексы подходов, помеченных как невыполненные (failed). */
+	failedSets?: number[];
 };
 
 export type StrengthSummary = {

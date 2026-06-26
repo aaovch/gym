@@ -44,11 +44,19 @@ export function rowInputToSessionRow(row: RowInput, kind: ExerciseKind = 'streng
 export function sessionToEntry(session: WorkoutSession): WorkoutEntry {
 	const parts: string[] = [];
 	const sets: ExerciseSet[] = [];
+	const failedSets: number[] = [];
 
+	let globalSetIndex = 0;
 	for (const row of session.rows) {
 		if (row.sets.length === 0) continue;
 		parts.push(formatSetsCell(row.sets, row.comment));
-		sets.push(...row.sets);
+		for (let i = 0; i < row.sets.length; i++) {
+			sets.push(row.sets[i]);
+			if (row.failedSets?.includes(i)) {
+				failedSets.push(globalSetIndex);
+			}
+			globalSetIndex++;
+		}
 	}
 
 	return {
@@ -59,7 +67,8 @@ export function sessionToEntry(session: WorkoutSession): WorkoutEntry {
 		date: session.date,
 		parts,
 		sets,
-		microSessionId: session.microSessionId
+		microSessionId: session.microSessionId,
+		...(failedSets.length ? { failedSets } : {})
 	};
 }
 
