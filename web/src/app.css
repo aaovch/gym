@@ -728,8 +728,8 @@ label {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgb(4 6 10 / 72%);
-  backdrop-filter: blur(10px);
+  background: rgb(4 6 10 / 82%);
+  backdrop-filter: blur(14px);
 }
 
 .settings-panel {
@@ -857,6 +857,38 @@ label {
   justify-content: flex-end;
   gap: 9px;
   margin-top: 24px;
+}
+
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgb(255 92 82 / 22%);
+}
+
+.danger-zone h3,
+.danger-zone p {
+  margin: 0;
+}
+
+.danger-zone h3 {
+  color: #ffd4d4;
+  font-size: 13px;
+}
+
+.danger-zone p {
+  max-width: 320px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.danger-zone .button {
+  flex: 0 0 auto;
 }
 
 .mobile-nav {
@@ -1074,6 +1106,11 @@ td:first-child {
 
   .page-header {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .danger-zone {
+    align-items: stretch;
     flex-direction: column;
   }
 

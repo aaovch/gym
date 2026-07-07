@@ -912,7 +912,16 @@
     </div>
   </header>
 
-  {#if mesocycles.length === 0}
+  {#if !workoutStore.bootstrapped}
+    <section class="card empty-state onboarding" aria-busy="true">
+      <div class="eyebrow">Загрузка</div>
+      <h2>Собираю текущую тренировку</h2>
+      <p>
+        Подтягиваю журнал, план и ближайшую незаполненную сессию. После загрузки здесь появится
+        следующий рабочий шаг.
+      </p>
+    </section>
+  {:else if mesocycles.length === 0}
     <section class="card empty-state onboarding">
       <div class="eyebrow">Первый шаг</div>
       <h2>Соберите первый тренировочный цикл</h2>
@@ -2182,8 +2191,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     color: var(--accent-ink);
     background: var(--accent);
@@ -2245,8 +2254,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     color: #fff;
     background: var(--danger);
@@ -2269,13 +2278,13 @@
   .set-stepper {
     display: inline-flex;
     align-items: center;
-    height: 32px;
+    height: 36px;
     border: 1px solid var(--line);
     background: #0a0c10;
   }
 
   .set-stepper button {
-    width: 28px;
+    width: 34px;
     height: 100%;
     color: var(--text);
     background: transparent;
@@ -2611,6 +2620,25 @@
       grid-template-columns: 30px minmax(0, 1fr);
       gap: 10px;
       padding: 14px;
+    }
+
+    .set-action-pair {
+      gap: 6px;
+    }
+
+    .set-done-btn,
+    .set-fail-btn,
+    .set-stepper {
+      height: 44px;
+    }
+
+    .set-done-btn,
+    .set-fail-btn {
+      width: 44px;
+    }
+
+    .set-stepper button {
+      width: 40px;
     }
 
     .exercise-index {

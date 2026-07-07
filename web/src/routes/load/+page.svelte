@@ -799,8 +799,17 @@
 	}
 
 	.insights {
-		padding: 20px;
-		margin-bottom: 14px;
+		padding: 22px;
+		margin-bottom: 16px;
+		background:
+			linear-gradient(135deg, rgb(204 255 51 / 10%), transparent 34%),
+			linear-gradient(150deg, rgb(28 31 38 / 98%), rgb(17 19 24 / 98%));
+		border-color: color-mix(in srgb, var(--accent) 34%, var(--line-strong));
+		box-shadow: 0 18px 50px rgb(0 0 0 / 32%), inset 3px 0 0 var(--accent);
+	}
+
+	.insights .panel-head h2 {
+		font-size: 22px;
 	}
 
 	.insight-list {
@@ -814,12 +823,12 @@
 	.insight {
 		display: grid;
 		grid-template-columns: auto 1fr;
-		gap: 10px;
+		gap: 12px;
 		align-items: start;
-		padding: 10px 12px;
-		background: #0a0c10;
-		border: 1px solid var(--line);
-		border-left: 3px solid var(--muted);
+		padding: 12px 14px;
+		background: rgb(10 12 16 / 82%);
+		border: 1px solid var(--line-strong);
+		border-left: 4px solid var(--muted);
 	}
 
 	.insight-warn {
@@ -856,12 +865,12 @@
 
 	.insight strong {
 		display: block;
-		font-size: 13px;
+		font-size: 14px;
 	}
 
 	.insight p {
-		margin: 2px 0 0;
-		color: var(--muted);
+		margin: 4px 0 0;
+		color: var(--muted-strong);
 		font-size: 12px;
 		line-height: 1.4;
 	}

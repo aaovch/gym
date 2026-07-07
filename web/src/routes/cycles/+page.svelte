@@ -1687,17 +1687,19 @@
 			<a href="{base}/protocols">Протоколы</a>.
 		</p>
 	</div>
-	<div class="head-actions">
-		<button type="button" class="button button-primary" onclick={openMacroConstructor}>Создать макроцикл</button>
+	<div class="head-actions" aria-label="Действия планирования">
 		<button
 			type="button"
-			class="button button-secondary"
+			class="button button-primary"
 			onclick={() => openMesoConstructor(selectedMacro?.plan.id ?? null)}
 		>
 			Добавить мезоцикл
 		</button>
+		<button type="button" class="button button-secondary" onclick={openMacroConstructor}>
+			Создать макроцикл
+		</button>
 		{#if !usingManual}
-			<button type="button" class="button button-secondary" onclick={handleImport}>Импорт из авто</button>
+			<button type="button" class="button button-ghost" onclick={handleImport}>Импорт из авто</button>
 		{/if}
 	</div>
 </section>
@@ -2516,6 +2518,8 @@
 		flex-wrap: wrap;
 		gap: 0.45rem;
 		align-items: center;
+		justify-content: flex-end;
+		max-width: 25rem;
 	}
 
 	.ab-grid {

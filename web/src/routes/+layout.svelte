@@ -338,17 +338,6 @@
       </div>
 
       <div class="panel-actions">
-        <button
-          class="button button-danger"
-          type="button"
-          onclick={() => {
-            resetToBundled(data.bundled);
-            closeSettings();
-            toasts.success(workoutStore.sync.message || 'Локальные данные сброшены.');
-          }}
-        >
-          Сбросить локальные
-        </button>
         {#if token.trim()}
           <button
             class="button button-secondary"
@@ -373,6 +362,25 @@
             {/if}
           </button>
         {/if}
+      </div>
+
+      <div class="danger-zone">
+        <div>
+          <h3>Опасная зона</h3>
+          <p>Сброс заменит данные в браузере на данные сборки. GitHub и файлы проекта не меняются.</p>
+        </div>
+        <button
+          class="button button-danger"
+          type="button"
+          onclick={() => {
+            if (!confirm('Сбросить локальные данные браузера к данным сборки?')) return;
+            resetToBundled(data.bundled);
+            closeSettings();
+            toasts.success(workoutStore.sync.message || 'Локальные данные сброшены.');
+          }}
+        >
+          Сбросить локальные
+        </button>
       </div>
     </div>
   </div>
