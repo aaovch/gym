@@ -439,6 +439,15 @@
     return fmtSet(first, second);
   }
 
+  function entryComments(entry: WorkoutEntry): string[] {
+    const session = entry.id ? view.sessions.find((item) => item.id === entry.id) : null;
+    return (
+      session?.rows
+        .map((row) => row.comment?.trim())
+        .filter((comment): comment is string => Boolean(comment)) ?? []
+    );
+  }
+
   function planStats(sets: ExerciseSet[]) {
     const count = sets.length;
     const totalReps = sets.reduce((sum, [, reps]) => sum + reps, 0);
@@ -1307,6 +1316,7 @@
           {@const previewSets = adjustedPreviewSets(exercise)}
           {@const fullyLogged = isExerciseFullyLogged(exercise, entry)}
           {@const loggedCount = entry?.sets.length ?? 0}
+          {@const comments = entry ? entryComments(entry) : []}
           <article
             class="exercise-item"
             class:complete={fullyLogged}
@@ -1337,6 +1347,13 @@
                           </span>
                         {/each}
                       </div>
+                      {#if comments.length}
+                        <div class="entry-comments">
+                          {#each comments as comment}
+                            <p>{comment}</p>
+                          {/each}
+                        </div>
+                      {/if}
                       {@render specSub(entry.kind, entry.sets, hint?.anchor1rm ?? null, hint?.maxPct ?? null, 'макс')}
                     </div>
                   {:else if protocolSkip}
@@ -1444,6 +1461,7 @@
     </div>
     <section class="day-log card">
       {#each outOfPlanEntries as entry (entry.id ?? `${entry.exercise}-${entry.date}`)}
+        {@const comments = entryComments(entry)}
         <article>
           <div>
             <strong>{entry.exercise}</strong>
@@ -1452,6 +1470,13 @@
                 <span>{setLabel(entry.kind, set)}</span>
               {/each}
             </div>
+            {#if comments.length}
+              <div class="entry-comments compact">
+                {#each comments as comment}
+                  <p>{comment}</p>
+                {/each}
+              </div>
+            {/if}
           </div>
           <div class="log-actions">
             {#if entry.id}
@@ -2352,6 +2377,27 @@
   .exercise-item.complete .set-chip {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+
+  .entry-comments {
+    display: grid;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .entry-comments p {
+    margin: 0;
+    color: var(--muted-strong);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .entry-comments.compact {
+    margin-top: 8px;
+  }
+
+  .entry-comments.compact p {
+    font-size: 10px;
   }
 
   .rx {

@@ -225,11 +225,16 @@
                   </a>
                   <span>{kind === 'strength' ? 'Силовое' : kind === 'run' ? 'Кардио' : 'Прыжки'}</span>
                 </div>
-                <div class="sets">
+                <div class="session-details">
                   {#each session.rows as row}
-                    {#each row.sets as set}
-                      <span>{setLabel(kind, set)}</span>
-                    {/each}
+                    <div class="sets">
+                      {#each row.sets as set}
+                        <span>{setLabel(kind, set)}</span>
+                      {/each}
+                    </div>
+                    {#if row.comment?.trim()}
+                      <p class="session-comment">{row.comment.trim()}</p>
+                    {/if}
                   {/each}
                 </div>
                 <a class="edit-link" href="{base}/add?id={session.id}">Изменить</a>
@@ -363,6 +368,12 @@
     font-size: 9px;
   }
 
+  .session-details {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+  }
+
   .sets {
     display: flex;
     flex-wrap: wrap;
@@ -376,6 +387,13 @@
     border: 1px solid var(--line);
     border-radius: 0;
     font-size: 10px;
+  }
+
+  .session-comment {
+    margin: 0;
+    color: var(--muted-strong);
+    font-size: 11px;
+    line-height: 1.45;
   }
 
   .edit-link {
