@@ -14,6 +14,7 @@ export {
 	resetToBundled,
 	saveCyclePlanState,
 	saveExercise,
+	saveExerciseLog,
 	saveLog,
 	saveSession,
 	workoutStore

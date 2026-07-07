@@ -21,7 +21,7 @@
 		suggestPlannedSets
 	} from '$lib/planned-sets';
 	import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
-	import { saveLog, workoutStore } from '$lib/workout-store';
+	import { saveExerciseLog, workoutStore } from '$lib/workout-store';
 	import type { ExerciseLog, RowInput, WorkoutSession } from '$lib/types';
 
 	let exercise = $state('');
@@ -191,15 +191,6 @@
 		error = '';
 		status = '';
 		try {
-			const { db, log } = createLog(
-				workoutStore.database,
-				exercise.trim(),
-				date,
-				previewLog.blocks,
-				previewLog.id,
-				previewLog.microSessionId
-			);
-			workoutStore.database = db;
 			const sessionIndex = urlSession != null ? Number(urlSession) : undefined;
 			const context =
 				urlMeso && urlMicro && trainingContext
@@ -210,7 +201,14 @@
 						}
 					: undefined;
 			const savedName = exercise.trim();
-			await saveLog(log, context);
+			await saveExerciseLog({
+				exerciseName: savedName,
+				date,
+				rows: previewLog.blocks,
+				id: previewLog.id,
+				microSessionId: previewLog.microSessionId,
+				context
+			});
 			status = editingId ? 'Тренировка обновлена.' : 'Тренировка сохранена.';
 			toasts.success(editingId ? `Обновлено: ${savedName}` : `Сохранено: ${savedName}`);
 			if (!editingId) {

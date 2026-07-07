@@ -13,7 +13,6 @@
     type EnrichedMicrocycle
   } from '$lib/cycle-plan';
   import { sessionPlanByIndex } from '$lib/micro-plan';
-  import { createLog } from '$lib/database';
   import { mesoProtocolId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, fmtSet, todayIso } from '$lib/format';
   import {
@@ -31,7 +30,7 @@
   import { thesesStore } from '$lib/training-theses';
   import type { ExerciseKind, ExerciseLog, ExerciseSet, WorkoutEntry } from '$lib/types';
   import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
-  import { deleteSession, saveCyclePlanState, saveLog, workoutStore } from '$lib/workout-store';
+  import { deleteSession, saveCyclePlanState, saveExerciseLog, saveLog, workoutStore } from '$lib/workout-store';
   import { toasts } from '$lib/toast.svelte';
 
   let datePick = $state(todayIso());
@@ -531,18 +530,16 @@
     try {
       const row: import('$lib/types').SessionRow = { kind, sets, comment: null };
       if (failedSets?.length) row.failedSets = failedSets;
-      const { db, log } = createLog(
-        workoutStore.database,
+      await saveExerciseLog({
         exerciseName,
-        workoutDate,
-        [row],
-        existingId ?? crypto.randomUUID()
-      );
-      workoutStore.database = db;
-      await saveLog(log, {
-        mesoId: mesocycle.plan.id,
-        microId: microcycle.plan.id,
-        indexInMicro: activeIndex
+        date: workoutDate,
+        rows: [row],
+        id: existingId ?? crypto.randomUUID(),
+        context: {
+          mesoId: mesocycle.plan.id,
+          microId: microcycle.plan.id,
+          indexInMicro: activeIndex
+        }
       });
       const preview = adjustedPreviewSets(exerciseName);
       if (preview && sets.length >= preview.sets.length) {

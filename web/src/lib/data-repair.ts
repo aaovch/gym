@@ -9,49 +9,69 @@ export type WorkoutLinkRepairResult = {
 	database: WorkoutDatabase;
 	plan: CyclePlan | null;
 	logsLinked: number;
+	logsUnlinked: number;
 	planImported: boolean;
 	planDatesRepaired: boolean;
 	anchorsRefreshed: boolean;
 };
 
-function microSessionLookup(plan: CyclePlan | null): Map<string, string> {
-	const map = new Map<string, string>();
-	if (!plan) return map;
+function microSessionLookup(plan: CyclePlan | null): {
+	byDate: Map<string, string>;
+	byDateSlot: Map<string, string>;
+	sessionIds: Set<string>;
+} {
+	const byDate = new Map<string, string>();
+	const byDateSlot = new Map<string, string>();
+	const sessionIds = new Set<string>();
+	if (!plan) return { byDate, byDateSlot, sessionIds };
 
 	for (const meso of plan.mesocycles) {
 		for (const micro of meso.microcycles) {
 			for (const session of micro.sessions) {
+				sessionIds.add(session.id);
 				if (!session.date) continue;
-				map.set(`${session.date}:${session.indexInMicro}`, session.id);
+				byDate.set(session.date, session.id);
+				byDateSlot.set(`${session.date}:${session.indexInMicro}`, session.id);
 			}
 		}
 	}
 
-	return map;
+	return { byDate, byDateSlot, sessionIds };
 }
 
 export function repairLogMicroSessionIds(
 	db: WorkoutDatabase,
 	plan: CyclePlan | null,
 	overview: MicrocycleOverview
-): { database: WorkoutDatabase; linked: number } {
+): { database: WorkoutDatabase; linked: number; unlinked: number } {
 	const lookup = microSessionLookup(plan);
 	let linked = 0;
+	let unlinked = 0;
 
 	const logs = db.logs.map((log) => {
-		if (log.microSessionId && lookup.size === 0) return log;
+		if (log.microSessionId && lookup.sessionIds.size === 0) return log;
 
 		const day = overview.byDate.get(log.date);
-		if (!day || day.indexInMicro < 0) return log;
-
-		const msId = lookup.get(`${log.date}:${day.indexInMicro}`);
-		if (!msId || log.microSessionId === msId) return log;
+		const msId =
+			lookup.byDate.get(log.date) ??
+			(day && day.indexInMicro >= 0
+				? lookup.byDateSlot.get(`${log.date}:${day.indexInMicro}`)
+				: undefined);
+		if (!msId) {
+			if (log.microSessionId && !lookup.sessionIds.has(log.microSessionId)) {
+				const { microSessionId: _microSessionId, ...cleanLog } = log;
+				unlinked += 1;
+				return cleanLog;
+			}
+			return log;
+		}
+		if (log.microSessionId === msId) return log;
 
 		linked += 1;
 		return { ...log, microSessionId: msId };
 	});
 
-	return { database: { ...db, logs }, linked };
+	return { database: { ...db, logs }, linked, unlinked };
 }
 
 export function countLogsWithoutMicroSession(db: WorkoutDatabase): number {
@@ -89,7 +109,11 @@ export function repairWorkoutLinks(
 		nextPlan = repairedPlan;
 	}
 
-	const { database: linkedDb, linked: logsLinked } = repairLogMicroSessionIds(database, nextPlan, overview);
+	const {
+		database: linkedDb,
+		linked: logsLinked,
+		unlinked: logsUnlinked
+	} = repairLogMicroSessionIds(database, nextPlan, overview);
 
 	let anchorsRefreshed = false;
 	if (nextPlan) {
@@ -103,6 +127,7 @@ export function repairWorkoutLinks(
 		database: linkedDb,
 		plan: nextPlan,
 		logsLinked,
+		logsUnlinked,
 		planImported,
 		planDatesRepaired,
 		anchorsRefreshed
