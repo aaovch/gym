@@ -448,11 +448,69 @@
 
 	function initConstructorSessions() {
 		const start = constructorStart || defaultMesoStartDate(view.entries);
-		const split = createBlockSessionSplit(constructorProtocolId, undefined, start);
+		const previous = previousMesoForConstructor(mesoConstructorMacroId);
+		if (previous) {
+			constructorProtocolId = previous.plan.templateId;
+		}
+		const split = previous
+			? createMesoSessionSplit(previous, start)
+			: createBlockSessionSplit(constructorProtocolId, undefined, start);
 		constructorSessionA = split.sessionA;
 		constructorSessionB = split.sessionB;
 		constructorData = split.data;
-		refreshConstructorAnchors(false);
+		refreshConstructorAnchors(Boolean(previous));
+	}
+
+	function previousMesoForConstructor(macroId: string | null): EnrichedMesocycle | null {
+		if (macroId) {
+			const macro = displayMacros.find((item) => item.plan.id === macroId);
+			const previousInMacro = macro?.mesocycles[macro.mesocycles.length - 1];
+			if (previousInMacro) return previousInMacro;
+		}
+		return displayMesos[displayMesos.length - 1] ?? null;
+	}
+
+	function createMesoSessionSplit(
+		meso: EnrichedMesocycle,
+		start: string
+	): Pick<MacroBlockDraft, 'sessionA' | 'sessionB' | 'data'> {
+		const sessionA: string[] = [];
+		const sessionB: string[] = [];
+		const data = new Map<string, ConstructorRow>();
+		const configuredIds = Object.keys(meso.plan.exerciseSessions ?? {});
+		const exercises = (configuredIds.length
+			? configuredIds.map((id) => keyMaps.nameById.get(id) ?? id)
+			: Object.keys(meso.anchorInfo)
+		)
+			.filter((exercise) => meso.anchorInfo[exercise] != null)
+			.sort((a, b) => a.localeCompare(b, 'ru'));
+
+		for (const exercise of exercises) {
+			const info = meso.anchorInfo[exercise];
+			const sessions = meso.plan.exerciseSessions?.[toExerciseId(exercise, keyMaps)];
+			const inA = sessions
+				? sessions.includes(0)
+				: planMatrixForSession(meso.protocolMatrix, 0).some((row) => row.exercise === exercise);
+			const inB = sessions
+				? sessions.includes(1)
+				: planMatrixForSession(meso.protocolMatrix, 1).some((row) => row.exercise === exercise);
+
+			data.set(
+				exercise,
+				makeConstructorRow(exercise, start, {
+					enabled: true,
+					protocolId: exerciseTemplateId(meso, exercise),
+					anchor1rm: info.anchor,
+					manual: info.manual,
+					defaultProtocolId: constructorProtocolId
+				})
+			);
+			if (inA) sessionA.push(exercise);
+			if (inB) sessionB.push(exercise);
+			if (!inA && !inB) sessionA.push(exercise);
+		}
+
+		return { sessionA, sessionB, data };
 	}
 
 	function addExerciseToMacroSession(blockId: string, session: SessionSlot, exerciseName: string) {
