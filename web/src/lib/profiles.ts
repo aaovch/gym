@@ -2,6 +2,7 @@ export type ProfileDefinition = {
 	id: string;
 	name: string;
 	initials: string;
+	urlSlug: string;
 	workoutsPath: string;
 	cyclePlanPath: string;
 };
@@ -24,6 +25,7 @@ export const DEFAULT_PROFILE: ProfileDefinition = {
 	id: DEFAULT_PROFILE_ID,
 	name: 'Александр',
 	initials: 'А',
+	urlSlug: 'alexander',
 	workoutsPath: 'data/workouts.json',
 	cyclePlanPath: 'data/cycle-plan.json'
 };
@@ -45,9 +47,10 @@ export function validateProfilesManifest(raw: unknown): ProfilesManifest {
 	if (raw.profiles.length === 0) throw new Error('profiles.json: нужен хотя бы один профиль');
 
 	const ids = new Set<string>();
+	const urlSlugs = new Set<string>();
 	const profiles = raw.profiles.map((item, index): ProfileDefinition => {
 		if (!isObject(item)) throw new Error(`profiles.json: profiles[${index}] должен быть объектом`);
-		const { id, name, initials, workoutsPath, cyclePlanPath } = item;
+		const { id, name, initials, urlSlug, workoutsPath, cyclePlanPath } = item;
 		if (typeof id !== 'string' || !/^[a-z0-9-]+$/.test(id) || ids.has(id)) {
 			throw new Error(`profiles.json: некорректный или повторный id profiles[${index}]`);
 		}
@@ -57,6 +60,9 @@ export function validateProfilesManifest(raw: unknown): ProfilesManifest {
 		if (typeof initials !== 'string' || !initials.trim()) {
 			throw new Error(`profiles.json: initials profiles[${index}] обязательны`);
 		}
+		if (typeof urlSlug !== 'string' || !/^[a-z0-9-]+$/.test(urlSlug) || urlSlugs.has(urlSlug)) {
+			throw new Error(`profiles.json: некорректный или повторный urlSlug profiles[${index}]`);
+		}
 		if (!isSafeDataPath(workoutsPath, 'workouts.json')) {
 			throw new Error(`profiles.json: небезопасный workoutsPath profiles[${index}]`);
 		}
@@ -64,7 +70,8 @@ export function validateProfilesManifest(raw: unknown): ProfilesManifest {
 			throw new Error(`profiles.json: небезопасный cyclePlanPath profiles[${index}]`);
 		}
 		ids.add(id);
-		return { id, name, initials, workoutsPath, cyclePlanPath };
+		urlSlugs.add(urlSlug);
+		return { id, name, initials, urlSlug, workoutsPath, cyclePlanPath };
 	});
 
 	if (typeof raw.defaultProfileId !== 'string' || !ids.has(raw.defaultProfileId)) {

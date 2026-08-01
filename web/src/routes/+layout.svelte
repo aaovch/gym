@@ -2,6 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
+  import { afterNavigate, replaceState } from '$app/navigation';
   import { base } from '$app/paths';
   import { page } from '$app/state';
   import { getGitHubToken, setGitHubToken } from '$lib/auth';
@@ -14,7 +15,7 @@
   import { thesesStore } from '$lib/training-theses';
   import Toaster from '$lib/components/Toaster.svelte';
   import { toasts } from '$lib/toast.svelte';
-  import { loadActiveProfileId, saveActiveProfileId } from '$lib/storage';
+  import { saveActiveProfileId } from '$lib/storage';
   import type { LayoutData } from './$types';
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
@@ -96,23 +97,60 @@
   );
   const pendingGitHubSync = $derived(Boolean(token.trim()) && sync.source === 'local' && !sync.syncing);
 
+  function bundleByProfileId(profileId: string | null) {
+    return data.profileBundles.find((item) => item.profile.id === profileId);
+  }
+
+  function bundleByUrlSlug(urlSlug: string | null) {
+    return data.profileBundles.find((item) => item.profile.urlSlug === urlSlug);
+  }
+
+  function urlForProfile(url: URL, urlSlug: string): URL {
+    const next = new URL(url);
+    next.searchParams.set('profile', urlSlug);
+    return next;
+  }
+
+  function hrefForActiveProfile(href: string): string {
+    const separator = href.includes('?') ? '&' : '?';
+    return `${href}${separator}profile=${encodeURIComponent(activeProfile.urlSlug)}`;
+  }
+
+  function ensureProfileInUrl(urlSlug: string) {
+    if (page.url.searchParams.get('profile') === urlSlug) return;
+    replaceState(urlForProfile(page.url, urlSlug), page.state);
+  }
+
+  afterNavigate(({ to }) => {
+    if (!workoutStore.bootstrapped || !to) return;
+    const requestedBundle = bundleByUrlSlug(to.url.searchParams.get('profile'));
+    if (!requestedBundle) {
+      ensureProfileInUrl(workoutStore.profile.urlSlug);
+      return;
+    }
+    if (requestedBundle.profile.id !== workoutStore.profile.id) {
+      void activateProfile(requestedBundle.profile.id, false);
+    }
+  });
+
   onMount(() => {
-    const preferredProfileId = loadActiveProfileId() ?? data.profiles.defaultProfileId;
+    const urlBundle = bundleByUrlSlug(page.url.searchParams.get('profile'));
+    const preferredProfileId = urlBundle?.profile.id ?? data.profiles.defaultProfileId;
     const bundle =
-      data.profileBundles.find((item) => item.profile.id === preferredProfileId) ??
-      data.profileBundles.find((item) => item.profile.id === data.profiles.defaultProfileId) ??
+      bundleByProfileId(preferredProfileId) ??
+      bundleByProfileId(data.profiles.defaultProfileId) ??
       data.profileBundles[0];
     workoutStore.bootstrap(bundle.profile, bundle.workouts, bundle.cyclePlan);
     saveActiveProfileId(bundle.profile.id);
+    ensureProfileInUrl(bundle.profile.urlSlug);
     thesesStore.bootstrap(data.theses);
     workoutStore.connectIfTokenSaved();
     token = getGitHubToken();
   });
 
-  async function switchProfile(event: Event) {
-    const profileId = (event.currentTarget as HTMLSelectElement).value;
+  async function activateProfile(profileId: string, notify = true) {
     if (profileId === workoutStore.profile.id || profileSwitching) return;
-    const bundle = data.profileBundles.find((item) => item.profile.id === profileId);
+    const bundle = bundleByProfileId(profileId);
     if (!bundle) return;
 
     profileSwitching = true;
@@ -120,12 +158,23 @@
     workoutStore.bootstrap(bundle.profile, bundle.workouts, bundle.cyclePlan);
     try {
       if (token.trim()) await workoutStore.connectGitHub(token.trim());
-      toasts.success(`Профиль: ${bundle.profile.name}`);
+      if (notify) toasts.success(`Профиль: ${bundle.profile.name}`);
     } catch {
       toasts.error(workoutStore.sync.error || `Не удалось синхронизировать профиль ${bundle.profile.name}`);
     } finally {
       profileSwitching = false;
+      const requestedBundle = bundleByUrlSlug(page.url.searchParams.get('profile'));
+      if (requestedBundle && requestedBundle.profile.id !== workoutStore.profile.id) {
+        void activateProfile(requestedBundle.profile.id, false);
+      }
     }
+  }
+
+  function switchProfile(event: Event) {
+    const profileId = (event.currentTarget as HTMLSelectElement).value;
+    const bundle = bundleByProfileId(profileId);
+    if (!bundle || profileId === workoutStore.profile.id || profileSwitching) return;
+    window.location.assign(urlForProfile(page.url, bundle.profile.urlSlug).toString());
   }
 
   function persistToken(): boolean {
@@ -221,7 +270,7 @@
 
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href={`${base}/`} aria-label="На главную">
+    <a class="brand" href={hrefForActiveProfile(`${base}/`)} aria-label="На главную">
       <span class="brand-mark">{activeProfile.initials}</span>
       <span>
         <strong>Gym Planner</strong>
@@ -252,7 +301,7 @@
 
     <nav class="primary-nav" aria-label="Основная навигация">
       {#each navigation as item (item.route)}
-        <a href={item.href} class:active={isActive(item.route)}>
+        <a href={hrefForActiveProfile(item.href)} class:active={isActive(item.route)}>
           <span class="nav-marker"></span>
           {item.label}
         </a>
@@ -291,7 +340,7 @@
 
   <nav class="mobile-nav" aria-label="Мобильная навигация">
     {#each mobilePrimary as item (item.route)}
-      <a href={item.href} class:active={isActive(item.route)} onclick={closeMobileMore}>{item.label}</a>
+      <a href={hrefForActiveProfile(item.href)} class:active={isActive(item.route)} onclick={closeMobileMore}>{item.label}</a>
     {/each}
     <button
       type="button"
@@ -320,7 +369,7 @@
     </div>
     {#each mobileMore as item (item.route)}
       <a
-        href={item.href}
+        href={hrefForActiveProfile(item.href)}
         role="menuitem"
         class:active={isActive(item.route)}
         onclick={closeMobileMore}
@@ -378,8 +427,8 @@
       </div>
 
       <div class="settings-links">
-        <a href={`${base}/schema`} onclick={() => closeSettings()}>Структура данных</a>
-        <a href={`${base}/body`} onclick={() => closeSettings()}>Карта нагрузки</a>
+        <a href={hrefForActiveProfile(`${base}/schema`)} onclick={() => closeSettings()}>Структура данных</a>
+        <a href={hrefForActiveProfile(`${base}/body`)} onclick={() => closeSettings()}>Карта нагрузки</a>
       </div>
 
       <div class="panel-actions">

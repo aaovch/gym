@@ -47,9 +47,16 @@ def validate_profiles(name: str, raw: dict) -> None:
     ids = {item.get("id") for item in profiles if isinstance(item, dict)}
     if raw.get("defaultProfileId") not in ids:
         raise SystemExit(f"{name}: defaultProfileId must reference an existing profile")
+    url_slugs: set[str] = set()
     for profile in profiles:
         if not isinstance(profile, dict):
             raise SystemExit(f"{name}: every profile must be an object")
+        url_slug = profile.get("urlSlug")
+        if not isinstance(url_slug, str) or not url_slug or url_slug in url_slugs:
+            raise SystemExit(f"{name}: invalid or duplicate urlSlug for profile {profile.get('id')!r}")
+        if any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in url_slug):
+            raise SystemExit(f"{name}: invalid urlSlug for profile {profile.get('id')!r}")
+        url_slugs.add(url_slug)
         for key, file_name in (("workoutsPath", "workouts.json"), ("cyclePlanPath", "cycle-plan.json")):
             value = profile.get(key)
             if not isinstance(value, str) or not value.startswith("data/") or not value.endswith(file_name):
