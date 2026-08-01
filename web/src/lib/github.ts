@@ -6,6 +6,7 @@ import {
 } from './storage';
 import type { CyclePlan } from './cycle-plan';
 import type { WorkoutDatabase } from './types';
+import type { ProfileDefinition } from './profiles';
 
 export const GITHUB_OWNER = 'aaovch';
 export const GITHUB_REPO = 'gym';
@@ -13,6 +14,11 @@ export const WORKOUTS_PATH = 'data/workouts.json';
 export const CYCLE_PLAN_PATH = 'data/cycle-plan.json';
 
 const API = 'https://api.github.com';
+
+function repoContentUrl(path: string): string {
+	const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+	return `${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodedPath}`;
+}
 
 class ShaConflictError extends Error {
 	constructor(message: string) {
@@ -47,7 +53,7 @@ function base64ToUtf8(base64: string): string {
 
 async function fetchRepoFile(token: string, path: string): Promise<{ content: string; sha: string } | null> {
 	const response = await fetch(
-		`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+		repoContentUrl(path),
 		{ headers: authHeaders(token) }
 	);
 
@@ -82,7 +88,7 @@ async function saveRepoFile(
 		if (currentSha) body.sha = currentSha;
 
 		const response = await fetch(
-			`${API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+			repoContentUrl(path),
 			{
 				method: 'PUT',
 				headers: {
@@ -130,9 +136,10 @@ export async function verifyGitHubToken(token: string): Promise<string> {
 }
 
 export async function fetchWorkoutDatabase(
-	token: string
+	token: string,
+	profile?: ProfileDefinition
 ): Promise<{ db: WorkoutDatabase; sha: string }> {
-	const file = await fetchRepoFile(token, WORKOUTS_PATH);
+	const file = await fetchRepoFile(token, profile?.workoutsPath ?? WORKOUTS_PATH);
 	if (!file) throw new Error('workouts.json не найден в репозитории');
 	return { db: parseWorkoutDatabase(file.content), sha: file.sha };
 }
@@ -141,15 +148,17 @@ export async function saveWorkoutDatabase(
 	token: string,
 	db: WorkoutDatabase,
 	sha: string | null,
-	message: string
+	message: string,
+	profile?: ProfileDefinition
 ): Promise<string> {
-	return saveRepoFile(token, WORKOUTS_PATH, serializeWorkoutDatabase(db), sha, message);
+	return saveRepoFile(token, profile?.workoutsPath ?? WORKOUTS_PATH, serializeWorkoutDatabase(db), sha, message);
 }
 
 export async function fetchCyclePlan(
-	token: string
+	token: string,
+	profile?: ProfileDefinition
 ): Promise<{ plan: CyclePlan | null; sha: string | null }> {
-	const file = await fetchRepoFile(token, CYCLE_PLAN_PATH);
+	const file = await fetchRepoFile(token, profile?.cyclePlanPath ?? CYCLE_PLAN_PATH);
 	if (!file) return { plan: null, sha: null };
 	return { plan: parseCyclePlan(file.content), sha: file.sha };
 }
@@ -158,9 +167,10 @@ export async function saveCyclePlanRemote(
 	token: string,
 	plan: CyclePlan,
 	sha: string | null,
-	message: string
+	message: string,
+	profile?: ProfileDefinition
 ): Promise<string> {
-	return saveRepoFile(token, CYCLE_PLAN_PATH, serializeCyclePlan(plan), sha, message);
+	return saveRepoFile(token, profile?.cyclePlanPath ?? CYCLE_PLAN_PATH, serializeCyclePlan(plan), sha, message);
 }
 
 /** @deprecated use WORKOUTS_PATH */

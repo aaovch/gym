@@ -14,6 +14,7 @@
   import { thesesStore } from '$lib/training-theses';
   import Toaster from '$lib/components/Toaster.svelte';
   import { toasts } from '$lib/toast.svelte';
+  import { loadActiveProfileId, saveActiveProfileId } from '$lib/storage';
   import type { LayoutData } from './$types';
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
@@ -21,6 +22,7 @@
   let settingsOpen = $state(false);
   let mobileMoreOpen = $state(false);
   let token = $state('');
+  let profileSwitching = $state(false);
 
   const navigation = [
     { href: `${base}/`, route: '/', label: 'Обзор', short: 'Обзор' },
@@ -51,6 +53,11 @@
   const path = $derived(page.url.pathname);
   const routePath = $derived(base && path.startsWith(base) ? path.slice(base.length) || '/' : path);
   const view = $derived(workoutStore.view);
+  const activeProfile = $derived(workoutStore.profile);
+  const activeBundle = $derived(
+    data.profileBundles.find((bundle) => bundle.profile.id === activeProfile.id) ??
+      data.profileBundles[0]
+  );
   const macrocycles = $derived(view.cyclePlanView.macrocycles);
   const mesocycles = $derived(view.cyclePlanView.mesocycles);
   const activeMeso = $derived(mesocycles.length ? mesocycles[mesocycles.length - 1] : null);
@@ -90,11 +97,36 @@
   const pendingGitHubSync = $derived(Boolean(token.trim()) && sync.source === 'local' && !sync.syncing);
 
   onMount(() => {
-    workoutStore.bootstrap(data.bundled, data.bundledCyclePlan ?? null);
+    const preferredProfileId = loadActiveProfileId() ?? data.profiles.defaultProfileId;
+    const bundle =
+      data.profileBundles.find((item) => item.profile.id === preferredProfileId) ??
+      data.profileBundles.find((item) => item.profile.id === data.profiles.defaultProfileId) ??
+      data.profileBundles[0];
+    workoutStore.bootstrap(bundle.profile, bundle.workouts, bundle.cyclePlan);
+    saveActiveProfileId(bundle.profile.id);
     thesesStore.bootstrap(data.theses);
     workoutStore.connectIfTokenSaved();
     token = getGitHubToken();
   });
+
+  async function switchProfile(event: Event) {
+    const profileId = (event.currentTarget as HTMLSelectElement).value;
+    if (profileId === workoutStore.profile.id || profileSwitching) return;
+    const bundle = data.profileBundles.find((item) => item.profile.id === profileId);
+    if (!bundle) return;
+
+    profileSwitching = true;
+    saveActiveProfileId(profileId);
+    workoutStore.bootstrap(bundle.profile, bundle.workouts, bundle.cyclePlan);
+    try {
+      if (token.trim()) await workoutStore.connectGitHub(token.trim());
+      toasts.success(`Профиль: ${bundle.profile.name}`);
+    } catch {
+      toasts.error(workoutStore.sync.error || `Не удалось синхронизировать профиль ${bundle.profile.name}`);
+    } finally {
+      profileSwitching = false;
+    }
+  }
 
   function persistToken(): boolean {
     const trimmed = token.trim();
@@ -190,12 +222,25 @@
 <div class="app-shell">
   <aside class="sidebar">
     <a class="brand" href={`${base}/`} aria-label="На главную">
-      <span class="brand-mark">GP</span>
+      <span class="brand-mark">{activeProfile.initials}</span>
       <span>
         <strong>Gym Planner</strong>
         <small>личный тренерский штаб</small>
       </span>
     </a>
+    <label class="profile-switcher">
+      <span>Профиль</span>
+      <select
+        value={activeProfile.id}
+        disabled={profileSwitching || sync.syncing}
+        aria-label="Текущий профиль"
+        onchange={switchProfile}
+      >
+        {#each data.profiles.profiles as profile (profile.id)}
+          <option value={profile.id}>{profile.name}</option>
+        {/each}
+      </select>
+    </label>
     <button
       class="mobile-settings"
       type="button"
@@ -322,7 +367,7 @@
       <div class="settings-section">
         <h3>Синхронизация с GitHub</h3>
         <p>
-          Необязательно. Без токена данные хранятся только в браузере. Токен сохраняется при
+          Сейчас синхронизируется только профиль «{activeProfile.name}». Без токена данные хранятся только в браузере. Токен сохраняется при
           закрытии настроек. «Подтянуть из GitHub» загружает данные из репозитория, «Отправить в
           GitHub» — отправляет локальные правки.
         </p>
@@ -374,7 +419,7 @@
           type="button"
           onclick={() => {
             if (!confirm('Сбросить локальные данные браузера к данным сборки?')) return;
-            resetToBundled(data.bundled);
+            resetToBundled(activeBundle.workouts);
             closeSettings();
             toasts.success(workoutStore.sync.message || 'Локальные данные сброшены.');
           }}

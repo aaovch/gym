@@ -9,14 +9,20 @@ import {
 	stringifyCompact
 } from './json-store';
 import type { WorkoutDatabase } from './types';
+import { DEFAULT_PROFILE_ID } from './profiles';
 
 const DB_KEY = 'gym_workout_db';
 const CYCLE_PLAN_KEY = 'gym_cycle_plan';
+const ACTIVE_PROFILE_KEY = 'gym_active_profile';
 
-export function loadLocalDatabase(): WorkoutDatabase | null {
+function profileStorageKey(baseKey: string, profileId: string): string {
+	return profileId === DEFAULT_PROFILE_ID ? baseKey : `${baseKey}:${profileId}`;
+}
+
+export function loadLocalDatabase(profileId = DEFAULT_PROFILE_ID): WorkoutDatabase | null {
 	if (!browser) return null;
 	try {
-		const raw = localStorage.getItem(DB_KEY);
+		const raw = localStorage.getItem(profileStorageKey(DB_KEY, profileId));
 		if (!raw) return null;
 		return normalizeWorkoutDatabase(JSON.parse(raw));
 	} catch (error) {
@@ -25,20 +31,20 @@ export function loadLocalDatabase(): WorkoutDatabase | null {
 	}
 }
 
-export function saveLocalDatabase(db: WorkoutDatabase) {
+export function saveLocalDatabase(db: WorkoutDatabase, profileId = DEFAULT_PROFILE_ID) {
 	if (!browser) return;
-	localStorage.setItem(DB_KEY, stringifyCompact(compactWorkoutDatabase(db)));
+	localStorage.setItem(profileStorageKey(DB_KEY, profileId), stringifyCompact(compactWorkoutDatabase(db)));
 }
 
-export function clearLocalDatabase() {
+export function clearLocalDatabase(profileId = DEFAULT_PROFILE_ID) {
 	if (!browser) return;
-	localStorage.removeItem(DB_KEY);
+	localStorage.removeItem(profileStorageKey(DB_KEY, profileId));
 }
 
-export function loadCyclePlan(): CyclePlan | null {
+export function loadCyclePlan(profileId = DEFAULT_PROFILE_ID): CyclePlan | null {
 	if (!browser) return null;
 	try {
-		const raw = localStorage.getItem(CYCLE_PLAN_KEY);
+		const raw = localStorage.getItem(profileStorageKey(CYCLE_PLAN_KEY, profileId));
 		if (!raw) return null;
 		const plan = normalizeStoredCyclePlan(JSON.parse(raw));
 		if (!plan) return null;
@@ -49,15 +55,28 @@ export function loadCyclePlan(): CyclePlan | null {
 	}
 }
 
-export function saveCyclePlan(plan: CyclePlan) {
+export function saveCyclePlan(plan: CyclePlan, profileId = DEFAULT_PROFILE_ID) {
 	if (!browser) return;
 	const normalized = dedupeMesocyclesInPlan(normalizeCyclePlan(plan));
-	localStorage.setItem(CYCLE_PLAN_KEY, stringifyCompact(compactCyclePlan(normalized)));
+	localStorage.setItem(
+		profileStorageKey(CYCLE_PLAN_KEY, profileId),
+		stringifyCompact(compactCyclePlan(normalized))
+	);
 }
 
-export function clearCyclePlan() {
+export function clearCyclePlan(profileId = DEFAULT_PROFILE_ID) {
 	if (!browser) return;
-	localStorage.removeItem(CYCLE_PLAN_KEY);
+	localStorage.removeItem(profileStorageKey(CYCLE_PLAN_KEY, profileId));
+}
+
+export function loadActiveProfileId(): string | null {
+	if (!browser) return null;
+	return localStorage.getItem(ACTIVE_PROFILE_KEY);
+}
+
+export function saveActiveProfileId(profileId: string) {
+	if (!browser) return;
+	localStorage.setItem(ACTIVE_PROFILE_KEY, profileId);
 }
 
 export function pickNewerCyclePlan(a: CyclePlan, b: CyclePlan | null): CyclePlan {

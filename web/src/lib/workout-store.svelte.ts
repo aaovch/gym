@@ -32,6 +32,7 @@ import {
 } from './storage';
 import { buildWorkoutData } from './stats';
 import { buildMicrocycleOverview } from './microcycle';
+import { DEFAULT_PROFILE, type ProfileDefinition } from './profiles';
 import type { Exercise, ExerciseLog, SessionRow, WorkoutDatabase, WorkoutEntry, WorkoutSession } from './types';
 
 type SyncState = {
@@ -101,12 +102,13 @@ function emptyDatabase(): WorkoutDatabase {
 
 function normalizeLoadedCyclePlan(
 	plan: CyclePlan | null,
+	profileId: string,
 	byDate?: Map<string, import('./microcycle').TrainingDay>
 ): CyclePlan | null {
 	if (!plan) return null;
 	const merged = normalizeCyclePlan(plan, byDate);
 	const changed = JSON.stringify(merged) !== JSON.stringify(plan);
-	if (changed) saveCyclePlan(merged);
+	if (changed) saveCyclePlan(merged, profileId);
 	return merged;
 }
 
@@ -155,7 +157,8 @@ function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 
 class WorkoutStore {
 	database = $state.raw<WorkoutDatabase>(emptyDatabase());
-	cyclePlan = $state.raw<CyclePlan | null>(normalizeLoadedCyclePlan(loadCyclePlan()));
+	cyclePlan = $state.raw<CyclePlan | null>(null);
+	profile = $state.raw<ProfileDefinition>(DEFAULT_PROFILE);
 	sync = $state<SyncState>({
 		workoutsSha: null,
 		cyclePlanSha: null,
@@ -176,19 +179,36 @@ class WorkoutStore {
 		this.sync = { ...this.sync, ...patch };
 	}
 
-	bootstrap(bundled: WorkoutDatabase, bundledCyclePlan: CyclePlan | null = null) {
-		const local = loadLocalDatabase();
+	bootstrap(
+		profile: ProfileDefinition,
+		bundled: WorkoutDatabase,
+		bundledCyclePlan: CyclePlan | null = null
+	) {
+		this.githubConnectGeneration += 1;
+		this.profile = profile;
+		const local = loadLocalDatabase(profile.id);
 		const initial = pickNewerDatabase(bundled, local);
 		const source =
 			local && Date.parse(local.updatedAt) > Date.parse(bundled.updatedAt || '0') ? 'local' : 'bundled';
 		this.applyDatabase(initial, source);
 
-		const localPlan = loadCyclePlan();
+		const localPlan = loadCyclePlan(profile.id);
 		const mergedPlan = mergeCyclePlans(localPlan, bundledCyclePlan);
 		if (mergedPlan.mesocycles.length > 0 || localPlan || bundledCyclePlan) {
-			this.cyclePlan = normalizeLoadedCyclePlan(mergedPlan, this.view.microcycles.byDate);
+			this.cyclePlan = normalizeLoadedCyclePlan(mergedPlan, profile.id, this.view.microcycles.byDate);
+		} else {
+			this.cyclePlan = null;
 		}
 
+		this.sync = {
+			workoutsSha: null,
+			cyclePlanSha: null,
+			githubLogin: null,
+			syncing: false,
+			error: '',
+			message: '',
+			source
+		};
 		this.bootstrapped = true;
 	}
 
@@ -215,7 +235,7 @@ class WorkoutStore {
 			updatedAt: new Date().toISOString()
 		};
 		this.database = next;
-		saveLocalDatabase(next);
+		saveLocalDatabase(next, this.profile.id);
 		this.patchSync({ source: 'local' });
 		return next;
 	}
@@ -225,21 +245,9 @@ class WorkoutStore {
 			{ ...plan, updatedAt: new Date().toISOString() },
 			this.view.microcycles.byDate
 		);
-		saveCyclePlan(next);
+		saveCyclePlan(next, this.profile.id);
 		this.cyclePlan = next;
 		this.patchSync({ source: 'local' });
-	}
-
-	private async persistCyclePlanToGitHub(token: string, plan: CyclePlan) {
-		const { sha } = await fetchCyclePlan(token);
-		const nextSha = await saveCyclePlanRemote(token, plan, sha, 'Sync cycle plan from app');
-		this.patchSync({ cyclePlanSha: nextSha });
-	}
-
-	private async persistToGitHub(token: string, db: WorkoutDatabase, message: string) {
-		const { sha } = await fetchWorkoutDatabase(token);
-		const nextSha = await saveWorkoutDatabase(token, db, sha, message);
-		this.patchSync({ workoutsSha: nextSha });
 	}
 
 	private persistDatabase() {
@@ -402,8 +410,8 @@ class WorkoutStore {
 	}
 
 	resetToBundled(bundled: WorkoutDatabase) {
-		clearLocalDatabase();
-		clearCyclePlan();
+		clearLocalDatabase(this.profile.id);
+		clearCyclePlan(this.profile.id);
 		this.cyclePlan = null;
 		this.applyDatabase(bundled, 'bundled');
 		this.patchSync({
@@ -495,7 +503,7 @@ class WorkoutStore {
 	}
 
 	clearCyclePlanState() {
-		clearCyclePlan();
+		clearCyclePlan(this.profile.id);
 		this.cyclePlan = null;
 		this.patchSync({
 			message: 'Ручной план сброшен. Снова используется автоопределение.',
@@ -505,28 +513,29 @@ class WorkoutStore {
 
 	async connectGitHub(token: string) {
 		const generation = ++this.githubConnectGeneration;
+		const profile = this.profile;
 		this.patchSync({ syncing: true, error: '', message: '' });
 		try {
 			const login = await verifyGitHubToken(token);
 			const [{ db: remote, sha: workoutsSha }, { plan: remotePlan, sha: cyclePlanSha }] =
-				await Promise.all([fetchWorkoutDatabase(token), fetchCyclePlan(token)]);
+				await Promise.all([fetchWorkoutDatabase(token, profile), fetchCyclePlan(token, profile)]);
 			if (generation !== this.githubConnectGeneration) return;
 
-			const local = loadLocalDatabase();
-			const localPlan = loadCyclePlan();
+			const local = loadLocalDatabase(profile.id);
+			const localPlan = loadCyclePlan(profile.id);
 			const current = this.database;
 			const best = [current, local, remote]
 				.filter((item): item is WorkoutDatabase => item !== null)
 				.reduce((winner, item) => pickNewerDatabase(winner, item));
 
 			this.applyDatabase(best, best === remote ? 'github' : this.sync.source);
-			saveLocalDatabase(best);
+			saveLocalDatabase(best, profile.id);
 
 			const mergedPlan = mergeCyclePlans(this.cyclePlan, localPlan, remotePlan);
 			if (mergedPlan.mesocycles.length > 0 || this.cyclePlan || localPlan || remotePlan) {
-				const normalized = normalizeLoadedCyclePlan(mergedPlan, this.view.microcycles.byDate);
+				const normalized = normalizeLoadedCyclePlan(mergedPlan, profile.id, this.view.microcycles.byDate);
 				this.cyclePlan = normalized;
-				if (normalized) saveCyclePlan(normalized);
+				if (normalized) saveCyclePlan(normalized, profile.id);
 			}
 
 			if (generation !== this.githubConnectGeneration) return;
@@ -565,21 +574,22 @@ class WorkoutStore {
 		if (this.sync.syncing) return;
 
 		const generation = ++this.githubConnectGeneration;
+		const profile = this.profile;
 		this.patchSync({ syncing: true, error: '', message: 'Загрузка из GitHub…' });
 		try {
 			const login = await verifyGitHubToken(token);
 			const [{ db: remote, sha: workoutsSha }, { plan: remotePlan, sha: cyclePlanSha }] =
-				await Promise.all([fetchWorkoutDatabase(token), fetchCyclePlan(token)]);
+				await Promise.all([fetchWorkoutDatabase(token, profile), fetchCyclePlan(token, profile)]);
 			if (generation !== this.githubConnectGeneration) return;
 
 			this.applyDatabase(remote, 'github');
-			saveLocalDatabase(remote);
+			saveLocalDatabase(remote, profile.id);
 
 			if (remotePlan) {
-				const normalized = normalizeLoadedCyclePlan(remotePlan, this.view.microcycles.byDate);
+				const normalized = normalizeLoadedCyclePlan(remotePlan, profile.id, this.view.microcycles.byDate);
 				if (normalized) {
 					this.cyclePlan = normalized;
-					saveCyclePlan(normalized);
+					saveCyclePlan(normalized, profile.id);
 				}
 			}
 
@@ -608,13 +618,30 @@ class WorkoutStore {
 	async pushToGitHub(token: string) {
 		if (this.sync.syncing) return;
 
+		const profile = this.profile;
 		this.patchSync({ syncing: true, error: '', message: 'Отправка журнала тренировок…' });
 		try {
-			await this.persistToGitHub(token, this.database, 'Sync workouts from app');
+			const { sha } = await fetchWorkoutDatabase(token, profile);
+			const workoutsSha = await saveWorkoutDatabase(
+				token,
+				this.database,
+				sha,
+				`Sync ${profile.name} workouts from app`,
+				profile
+			);
+			this.patchSync({ workoutsSha });
 			if (this.cyclePlan) {
 				this.patchSync({ message: 'Отправка плана циклов…' });
-				await this.persistCyclePlanToGitHub(token, this.cyclePlan);
-				saveCyclePlan(this.cyclePlan);
+				const { sha: cyclePlanSha } = await fetchCyclePlan(token, profile);
+				const nextCyclePlanSha = await saveCyclePlanRemote(
+					token,
+					this.cyclePlan,
+					cyclePlanSha,
+					`Sync ${profile.name} cycle plan from app`,
+					profile
+				);
+				this.patchSync({ cyclePlanSha: nextCyclePlanSha });
+				saveCyclePlan(this.cyclePlan, profile.id);
 			}
 			this.patchSync({
 				syncing: false,
@@ -639,8 +666,12 @@ export async function connectGitHub(token: string) {
 	await workoutStore.connectGitHub(token);
 }
 
-export function bootstrapWorkoutStore(bundled: WorkoutDatabase, bundledCyclePlan: CyclePlan | null = null) {
-	workoutStore.bootstrap(bundled, bundledCyclePlan);
+export function bootstrapWorkoutStore(
+	bundled: WorkoutDatabase,
+	bundledCyclePlan: CyclePlan | null = null,
+	profile: ProfileDefinition = DEFAULT_PROFILE
+) {
+	workoutStore.bootstrap(profile, bundled, bundledCyclePlan);
 }
 
 export async function pullFromGitHub(token = getGitHubToken()) {

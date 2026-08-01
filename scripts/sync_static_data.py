@@ -1,4 +1,4 @@
-"""Sync data/*.json → web/static/data/ (v4, minified)."""
+"""Sync shared and per-profile JSON data → web/static/data/ (minified)."""
 
 from __future__ import annotations
 
@@ -37,7 +37,28 @@ def validate_theses(name: str, raw: dict) -> None:
     _check_unique_ids(name, "thesis id", all_theses)
 
 
-def minify_json(path: Path) -> dict:
+def validate_profiles(name: str, raw: dict) -> None:
+    if raw.get("version") != 1:
+        raise SystemExit(f"{name}: expected version 1, got {raw.get('version')!r}")
+    profiles = raw.get("profiles")
+    if not isinstance(profiles, list) or not profiles:
+        raise SystemExit(f"{name}: profiles must be a non-empty list")
+    _check_unique_ids(name, "profile id", profiles)
+    ids = {item.get("id") for item in profiles if isinstance(item, dict)}
+    if raw.get("defaultProfileId") not in ids:
+        raise SystemExit(f"{name}: defaultProfileId must reference an existing profile")
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            raise SystemExit(f"{name}: every profile must be an object")
+        for key, file_name in (("workoutsPath", "workouts.json"), ("cyclePlanPath", "cycle-plan.json")):
+            value = profile.get(key)
+            if not isinstance(value, str) or not value.startswith("data/") or not value.endswith(file_name):
+                raise SystemExit(f"{name}: invalid {key} for profile {profile.get('id')!r}")
+            if ".." in value or "\\" in value:
+                raise SystemExit(f"{name}: unsafe {key} for profile {profile.get('id')!r}")
+
+
+def minify_json(path: Path, relative_path: Path | None = None) -> dict:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if path.name == "workouts.json" and raw.get("version") != 4:
         raise SystemExit(f"{path.name}: expected version 4, got {raw.get('version')!r}")
@@ -45,10 +66,13 @@ def minify_json(path: Path) -> dict:
         raise SystemExit(f"{path.name}: expected version 4, got {raw.get('version')!r}")
     if path.name == "training-theses.json":
         validate_theses(path.name, raw)
+    if path.name == "profiles.json":
+        validate_profiles(path.name, raw)
     text = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
     path.write_text(text, encoding="utf-8")
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    out = STATIC_DIR / path.name
+    out = STATIC_DIR / (relative_path or Path(path.name))
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     return raw
 
@@ -75,12 +99,20 @@ def main() -> None:
             encoding="utf-8",
         )
 
+    profiles_path = DATA_DIR / "profiles.json"
+    if not profiles_path.exists():
+        raise SystemExit(f"Missing profile manifest: {profiles_path}")
+    profiles = minify_json(profiles_path)
+    print(f"profiles.json: {len(profiles['profiles'])} profiles -> {STATIC_DIR / 'profiles.json'}")
+
+    synced_paths: set[Path] = {Path("profiles.json")}
     for name in ("workouts.json", "training-theses.json", "cycle-plan.json"):
         src = DATA_DIR / name
         if not src.exists():
             print(f"skip missing {name}")
             continue
         raw = minify_json(src)
+        synced_paths.add(Path(name))
         if name == "workouts.json":
             print(
                 f"{name}: v4, {len(raw.get('exercises', []))} exercises, "
@@ -88,6 +120,18 @@ def main() -> None:
             )
         else:
             print(f"{name} -> {STATIC_DIR / name}")
+
+    for profile in profiles["profiles"]:
+        for key in ("workoutsPath", "cyclePlanPath"):
+            relative = Path(profile[key]).relative_to("data")
+            if relative in synced_paths:
+                continue
+            src = DATA_DIR / relative
+            if not src.exists():
+                raise SystemExit(f"Missing profile data file: {src}")
+            minify_json(src, relative)
+            synced_paths.add(relative)
+            print(f"{profile['id']}: {relative} -> {STATIC_DIR / relative}")
 
 
 if __name__ == "__main__":
