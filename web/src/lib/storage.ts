@@ -14,6 +14,7 @@ import { DEFAULT_PROFILE_ID } from './profiles';
 const DB_KEY = 'gym_workout_db';
 const CYCLE_PLAN_KEY = 'gym_cycle_plan';
 const ACTIVE_PROFILE_KEY = 'gym_active_profile';
+const EXERCISE_CATALOG_KEY = 'gym_exercise_catalog';
 
 function profileStorageKey(baseKey: string, profileId: string): string {
 	return profileId === DEFAULT_PROFILE_ID ? baseKey : `${baseKey}:${profileId}`;
@@ -39,6 +40,27 @@ export function saveLocalDatabase(db: WorkoutDatabase, profileId = DEFAULT_PROFI
 export function clearLocalDatabase(profileId = DEFAULT_PROFILE_ID) {
 	if (!browser) return;
 	localStorage.removeItem(profileStorageKey(DB_KEY, profileId));
+}
+
+export function loadLocalExerciseCatalog(): WorkoutDatabase | null {
+	if (!browser) return null;
+	try {
+		const raw = localStorage.getItem(EXERCISE_CATALOG_KEY);
+		if (!raw) return null;
+		const catalog = normalizeWorkoutDatabase(JSON.parse(raw));
+		return { ...catalog, logs: [] };
+	} catch (error) {
+		console.error('Не удалось загрузить локальный каталог упражнений:', error);
+		return null;
+	}
+}
+
+export function saveLocalExerciseCatalog(catalog: WorkoutDatabase) {
+	if (!browser) return;
+	localStorage.setItem(
+		EXERCISE_CATALOG_KEY,
+		stringifyCompact(compactWorkoutDatabase({ ...catalog, logs: [] }))
+	);
 }
 
 export function loadCyclePlan(profileId = DEFAULT_PROFILE_ID): CyclePlan | null {

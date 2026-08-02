@@ -26,6 +26,10 @@ export const load: LayoutLoad = async ({ fetch }) => {
 		? validateTrainingThesesDoc(await thesesRes.json())
 		: { version: 1, updatedAt: '', groups: [], matrices: [], volumeGuides: [], protocolGuides: [] };
 
+	const exerciseCatalogRes = await fetch(`${base}/${profiles.exerciseCatalogPath}`);
+	if (!exerciseCatalogRes.ok) throw new Error('Не удалось загрузить общий каталог упражнений');
+	const exerciseCatalog = normalizeWorkoutDatabase(await exerciseCatalogRes.json());
+
 	const profileBundles: Array<ProfileBundle<WorkoutDatabase, CyclePlan>> = await Promise.all(
 		profiles.profiles.map(async (profile) => {
 			const [workoutsRes, cyclePlanRes] = await Promise.all([
@@ -41,5 +45,5 @@ export const load: LayoutLoad = async ({ fetch }) => {
 		})
 	);
 
-	return { profiles, profileBundles, theses };
+	return { profiles, profileBundles, exerciseCatalog, theses };
 };

@@ -53,7 +53,7 @@ export const SCHEMA_ENTITIES: SchemaEntity[] = [
 		title: 'Exercise',
 		group: 'workouts',
 		stored: true,
-		source: 'workouts.json → exercises[]',
+		source: 'общий каталог → workouts.json → exercises[]',
 		description: 'Справочник упражнения. Id стабилен; имя может меняться.',
 		fields: [
 			{ name: 'id', type: 'string', description: 'Slug, напр. bench-press' },

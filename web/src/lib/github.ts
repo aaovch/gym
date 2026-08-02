@@ -6,7 +6,7 @@ import {
 } from './storage';
 import type { CyclePlan } from './cycle-plan';
 import type { WorkoutDatabase } from './types';
-import type { ProfileDefinition } from './profiles';
+import { DEFAULT_EXERCISE_CATALOG_PATH, type ProfileDefinition } from './profiles';
 
 export const GITHUB_OWNER = 'aaovch';
 export const GITHUB_REPO = 'gym';
@@ -152,6 +152,25 @@ export async function saveWorkoutDatabase(
 	profile?: ProfileDefinition
 ): Promise<string> {
 	return saveRepoFile(token, profile?.workoutsPath ?? WORKOUTS_PATH, serializeWorkoutDatabase(db), sha, message);
+}
+
+export async function fetchExerciseCatalog(
+	token: string,
+	path = DEFAULT_EXERCISE_CATALOG_PATH
+): Promise<{ db: WorkoutDatabase; sha: string }> {
+	const file = await fetchRepoFile(token, path);
+	if (!file) throw new Error('Общий каталог упражнений не найден в репозитории');
+	return { db: parseWorkoutDatabase(file.content), sha: file.sha };
+}
+
+export async function saveExerciseCatalog(
+	token: string,
+	db: WorkoutDatabase,
+	sha: string | null,
+	message: string,
+	path = DEFAULT_EXERCISE_CATALOG_PATH
+): Promise<string> {
+	return saveRepoFile(token, path, serializeWorkoutDatabase(db), sha, message);
 }
 
 export async function fetchCyclePlan(

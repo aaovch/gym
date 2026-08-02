@@ -47,6 +47,15 @@ def validate_profiles(name: str, raw: dict) -> None:
     ids = {item.get("id") for item in profiles if isinstance(item, dict)}
     if raw.get("defaultProfileId") not in ids:
         raise SystemExit(f"{name}: defaultProfileId must reference an existing profile")
+    exercise_catalog_path = raw.get("exerciseCatalogPath")
+    if (
+        not isinstance(exercise_catalog_path, str)
+        or not exercise_catalog_path.startswith("data/")
+        or not exercise_catalog_path.endswith("workouts.json")
+        or ".." in exercise_catalog_path
+        or "\\" in exercise_catalog_path
+    ):
+        raise SystemExit(f"{name}: invalid exerciseCatalogPath")
     url_slugs: set[str] = set()
     for profile in profiles:
         if not isinstance(profile, dict):

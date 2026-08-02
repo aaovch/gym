@@ -140,7 +140,13 @@
       bundleByProfileId(preferredProfileId) ??
       bundleByProfileId(data.profiles.defaultProfileId) ??
       data.profileBundles[0];
-    workoutStore.bootstrap(bundle.profile, bundle.workouts, bundle.cyclePlan);
+    workoutStore.bootstrap(
+      bundle.profile,
+      bundle.workouts,
+      bundle.cyclePlan,
+      data.exerciseCatalog,
+      data.profiles.exerciseCatalogPath
+    );
     saveActiveProfileId(bundle.profile.id);
     ensureProfileInUrl(bundle.profile.urlSlug);
     thesesStore.bootstrap(data.theses);
@@ -155,7 +161,13 @@
 
     profileSwitching = true;
     saveActiveProfileId(profileId);
-    workoutStore.bootstrap(bundle.profile, bundle.workouts, bundle.cyclePlan);
+    workoutStore.bootstrap(
+      bundle.profile,
+      bundle.workouts,
+      bundle.cyclePlan,
+      data.exerciseCatalog,
+      data.profiles.exerciseCatalogPath
+    );
     try {
       if (token.trim()) await workoutStore.connectGitHub(token.trim());
       if (notify) toasts.success(`Профиль: ${bundle.profile.name}`);
@@ -416,7 +428,7 @@
       <div class="settings-section">
         <h3>Синхронизация с GitHub</h3>
         <p>
-          Сейчас синхронизируется только профиль «{activeProfile.name}». Без токена данные хранятся только в браузере. Токен сохраняется при
+          Сейчас синхронизируются профиль «{activeProfile.name}» и общий каталог упражнений. Без токена данные хранятся только в браузере. Токен сохраняется при
           закрытии настроек. «Подтянуть из GitHub» загружает данные из репозитория, «Отправить в
           GitHub» — отправляет локальные правки.
         </p>

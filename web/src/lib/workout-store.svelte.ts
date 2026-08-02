@@ -18,21 +18,35 @@ import { removeExerciseFromCatalog, upsertExercise } from './exercises';
 import { buildWorkoutKeyMaps } from './exercise-keys';
 import { sessionPlanByIndex } from './micro-plan';
 import { createLog, sessionsToEntries } from './database';
-import { fetchCyclePlan, fetchWorkoutDatabase, saveCyclePlanRemote, saveWorkoutDatabase, verifyGitHubToken } from './github';
+import {
+	fetchCyclePlan,
+	fetchExerciseCatalog,
+	fetchWorkoutDatabase,
+	saveCyclePlanRemote,
+	saveExerciseCatalog,
+	saveWorkoutDatabase,
+	verifyGitHubToken
+} from './github';
 import { logsToSessions as expandLogs, validateDatabasePlanLinks } from './json-store';
 import {
 	clearCyclePlan,
 	clearLocalDatabase,
 	loadCyclePlan,
+	loadLocalExerciseCatalog,
 	loadLocalDatabase,
 	mergeCyclePlans,
 	pickNewerDatabase,
 	saveCyclePlan,
+	saveLocalExerciseCatalog,
 	saveLocalDatabase
 } from './storage';
 import { buildWorkoutData } from './stats';
 import { buildMicrocycleOverview } from './microcycle';
-import { DEFAULT_PROFILE, type ProfileDefinition } from './profiles';
+import {
+	DEFAULT_EXERCISE_CATALOG_PATH,
+	DEFAULT_PROFILE,
+	type ProfileDefinition
+} from './profiles';
 import type { Exercise, ExerciseLog, SessionRow, WorkoutDatabase, WorkoutEntry, WorkoutSession } from './types';
 
 type SyncState = {
@@ -100,6 +114,46 @@ function emptyDatabase(): WorkoutDatabase {
 	return { version: 4, revision: 0, updatedAt: '', exercises: [], logs: [] };
 }
 
+function cloneExercise(exercise: Exercise): Exercise {
+	return { ...exercise, movementBlocks: [...exercise.movementBlocks] };
+}
+
+function cloneExercises(exercises: Exercise[]): Exercise[] {
+	return exercises.map(cloneExercise);
+}
+
+function exerciseCatalogFrom(database: WorkoutDatabase): WorkoutDatabase {
+	return { ...database, exercises: cloneExercises(database.exercises), logs: [] };
+}
+
+function mergeExerciseCatalogs(
+	sharedCandidates: Array<WorkoutDatabase | null | undefined>,
+	referenceDatabases: Array<WorkoutDatabase | null | undefined> = []
+): WorkoutDatabase {
+	const candidates = sharedCandidates.filter((item): item is WorkoutDatabase => item != null);
+	const base = candidates.length
+		? candidates.reduce((winner, item) => pickNewerDatabase(winner, item))
+		: emptyDatabase();
+	const exercises = cloneExercises(base.exercises);
+	const knownIds = new Set(exercises.map((exercise) => exercise.id));
+
+	for (const database of referenceDatabases) {
+		if (!database) continue;
+		const referencedIds = new Set(database.logs.map((log) => log.exerciseId));
+		for (const exercise of database.exercises) {
+			if (!referencedIds.has(exercise.id) || knownIds.has(exercise.id)) continue;
+			exercises.push(cloneExercise(exercise));
+			knownIds.add(exercise.id);
+		}
+	}
+
+	return { ...exerciseCatalogFrom(base), exercises };
+}
+
+function sameExercises(a: Exercise[], b: Exercise[]): boolean {
+	return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function normalizeLoadedCyclePlan(
 	plan: CyclePlan | null,
 	profileId: string,
@@ -157,8 +211,10 @@ function buildView(database: WorkoutDatabase, cyclePlan: CyclePlan | null) {
 
 class WorkoutStore {
 	database = $state.raw<WorkoutDatabase>(emptyDatabase());
+	exerciseCatalog = $state.raw<WorkoutDatabase>(emptyDatabase());
 	cyclePlan = $state.raw<CyclePlan | null>(null);
 	profile = $state.raw<ProfileDefinition>(DEFAULT_PROFILE);
+	exerciseCatalogPath = DEFAULT_EXERCISE_CATALOG_PATH;
 	sync = $state<SyncState>({
 		workoutsSha: null,
 		cyclePlanSha: null,
@@ -182,11 +238,19 @@ class WorkoutStore {
 	bootstrap(
 		profile: ProfileDefinition,
 		bundled: WorkoutDatabase,
-		bundledCyclePlan: CyclePlan | null = null
+		bundledCyclePlan: CyclePlan | null = null,
+		bundledExerciseCatalog: WorkoutDatabase = bundled,
+		exerciseCatalogPath = DEFAULT_EXERCISE_CATALOG_PATH
 	) {
 		this.githubConnectGeneration += 1;
 		this.profile = profile;
+		this.exerciseCatalogPath = exerciseCatalogPath;
 		const local = loadLocalDatabase(profile.id);
+		this.exerciseCatalog = mergeExerciseCatalogs(
+			[this.exerciseCatalog, bundledExerciseCatalog, loadLocalExerciseCatalog()],
+			[bundled, local]
+		);
+		saveLocalExerciseCatalog(this.exerciseCatalog);
 		const initial = pickNewerDatabase(bundled, local);
 		const source =
 			local && Date.parse(local.updatedAt) > Date.parse(bundled.updatedAt || '0') ? 'local' : 'bundled';
@@ -224,8 +288,31 @@ class WorkoutStore {
 	}
 
 	applyDatabase(db: WorkoutDatabase, source: SyncState['source']) {
-		this.database = structuredClone(db);
+		this.database = {
+			...structuredClone(db),
+			exercises: cloneExercises(this.exerciseCatalog.exercises)
+		};
 		this.patchSync({ source });
+	}
+
+	private persistSharedExercises(exercises: Exercise[]) {
+		const next = {
+			...this.exerciseCatalog,
+			revision: this.exerciseCatalog.revision + 1,
+			updatedAt: new Date().toISOString(),
+			exercises: cloneExercises(exercises),
+			logs: []
+		};
+		this.exerciseCatalog = next;
+		this.database = { ...this.database, exercises: cloneExercises(next.exercises) };
+		saveLocalExerciseCatalog(next);
+	}
+
+	private reconcileSharedExercises() {
+		const merged = mergeExerciseCatalogs([this.exerciseCatalog], [this.database]);
+		if (!sameExercises(merged.exercises, this.exerciseCatalog.exercises)) {
+			this.persistSharedExercises(merged.exercises);
+		}
 	}
 
 	private persistLocally(db: WorkoutDatabase) {
@@ -251,6 +338,7 @@ class WorkoutStore {
 	}
 
 	private persistDatabase() {
+		this.reconcileSharedExercises();
 		this.persistLocally(this.database);
 		this.patchSync({
 			error: '',
@@ -380,11 +468,7 @@ class WorkoutStore {
 	}
 
 	saveExercise(exercise: Exercise) {
-		const db = this.database;
-		this.database = {
-			...db,
-			exercises: upsertExercise(db.exercises, exercise)
-		};
+		this.persistSharedExercises(upsertExercise(this.exerciseCatalog.exercises, exercise));
 		this.persistDatabase();
 	}
 
@@ -397,10 +481,7 @@ class WorkoutStore {
 			);
 		}
 
-		this.database = {
-			...db,
-			exercises: removeExerciseFromCatalog(db.exercises, exerciseId)
-		};
+		this.persistSharedExercises(removeExerciseFromCatalog(this.exerciseCatalog.exercises, exerciseId));
 		this.persistDatabase();
 
 		const plan = this.cyclePlan;
@@ -517,19 +598,35 @@ class WorkoutStore {
 		this.patchSync({ syncing: true, error: '', message: '' });
 		try {
 			const login = await verifyGitHubToken(token);
-			const [{ db: remote, sha: workoutsSha }, { plan: remotePlan, sha: cyclePlanSha }] =
-				await Promise.all([fetchWorkoutDatabase(token, profile), fetchCyclePlan(token, profile)]);
+			const [
+				{ db: remote, sha: workoutsSha },
+				{ plan: remotePlan, sha: cyclePlanSha },
+				{ db: remoteExerciseCatalog }
+			] = await Promise.all([
+				fetchWorkoutDatabase(token, profile),
+				fetchCyclePlan(token, profile),
+				fetchExerciseCatalog(token, this.exerciseCatalogPath)
+			]);
 			if (generation !== this.githubConnectGeneration) return;
 
 			const local = loadLocalDatabase(profile.id);
 			const localPlan = loadCyclePlan(profile.id);
 			const current = this.database;
+			this.exerciseCatalog = mergeExerciseCatalogs(
+				[this.exerciseCatalog, loadLocalExerciseCatalog(), remoteExerciseCatalog],
+				[current, local, remote]
+			);
+			const catalogAheadOfRemote = !sameExercises(
+				this.exerciseCatalog.exercises,
+				remoteExerciseCatalog.exercises
+			);
+			saveLocalExerciseCatalog(this.exerciseCatalog);
 			const best = [current, local, remote]
 				.filter((item): item is WorkoutDatabase => item !== null)
 				.reduce((winner, item) => pickNewerDatabase(winner, item));
 
 			this.applyDatabase(best, best === remote ? 'github' : this.sync.source);
-			saveLocalDatabase(best, profile.id);
+			saveLocalDatabase(this.database, profile.id);
 
 			const mergedPlan = mergeCyclePlans(this.cyclePlan, localPlan, remotePlan);
 			if (mergedPlan.mesocycles.length > 0 || this.cyclePlan || localPlan || remotePlan) {
@@ -554,10 +651,10 @@ class WorkoutStore {
 				syncing: false,
 				error: '',
 				message:
-					best === remote && !planAheadOfRemote
+					best === remote && !planAheadOfRemote && !catalogAheadOfRemote
 						? 'Подключено к GitHub. Загружены данные из репозитория.'
 						: 'Подключено к GitHub. Локальные данные новее — отправьте их кнопкой «Отправить в GitHub».',
-				source: best === remote && !planAheadOfRemote ? 'github' : 'local'
+				source: best === remote && !planAheadOfRemote && !catalogAheadOfRemote ? 'github' : 'local'
 			};
 		} catch (error) {
 			if (generation !== this.githubConnectGeneration) return;
@@ -578,12 +675,21 @@ class WorkoutStore {
 		this.patchSync({ syncing: true, error: '', message: 'Загрузка из GitHub…' });
 		try {
 			const login = await verifyGitHubToken(token);
-			const [{ db: remote, sha: workoutsSha }, { plan: remotePlan, sha: cyclePlanSha }] =
-				await Promise.all([fetchWorkoutDatabase(token, profile), fetchCyclePlan(token, profile)]);
+			const [
+				{ db: remote, sha: workoutsSha },
+				{ plan: remotePlan, sha: cyclePlanSha },
+				{ db: remoteExerciseCatalog }
+			] = await Promise.all([
+				fetchWorkoutDatabase(token, profile),
+				fetchCyclePlan(token, profile),
+				fetchExerciseCatalog(token, this.exerciseCatalogPath)
+			]);
 			if (generation !== this.githubConnectGeneration) return;
 
+			this.exerciseCatalog = mergeExerciseCatalogs([remoteExerciseCatalog], [remote]);
+			saveLocalExerciseCatalog(this.exerciseCatalog);
 			this.applyDatabase(remote, 'github');
-			saveLocalDatabase(remote, profile.id);
+			saveLocalDatabase(this.database, profile.id);
 
 			if (remotePlan) {
 				const normalized = normalizeLoadedCyclePlan(remotePlan, profile.id, this.view.microcycles.byDate);
@@ -621,6 +727,34 @@ class WorkoutStore {
 		const profile = this.profile;
 		this.patchSync({ syncing: true, error: '', message: 'Отправка журнала тренировок…' });
 		try {
+			if (profile.workoutsPath !== this.exerciseCatalogPath) {
+				this.patchSync({ message: 'Отправка общего каталога упражнений…' });
+				const { db: remoteCatalogFile, sha: exerciseCatalogSha } = await fetchExerciseCatalog(
+					token,
+					this.exerciseCatalogPath
+				);
+				if (!sameExercises(remoteCatalogFile.exercises, this.exerciseCatalog.exercises)) {
+					const nextCatalogFile: WorkoutDatabase = {
+						...remoteCatalogFile,
+						revision: Math.max(remoteCatalogFile.revision, this.exerciseCatalog.revision) + 1,
+						updatedAt: new Date().toISOString(),
+						exercises: cloneExercises(this.exerciseCatalog.exercises)
+					};
+					await saveExerciseCatalog(
+						token,
+						nextCatalogFile,
+						exerciseCatalogSha,
+						'Sync shared exercise catalog from app',
+						this.exerciseCatalogPath
+					);
+					this.exerciseCatalog = exerciseCatalogFrom(nextCatalogFile);
+				} else {
+					this.exerciseCatalog = exerciseCatalogFrom(remoteCatalogFile);
+				}
+				saveLocalExerciseCatalog(this.exerciseCatalog);
+			}
+
+			this.patchSync({ message: 'Отправка журнала тренировок…' });
 			const { sha } = await fetchWorkoutDatabase(token, profile);
 			const workoutsSha = await saveWorkoutDatabase(
 				token,
@@ -630,6 +764,10 @@ class WorkoutStore {
 				profile
 			);
 			this.patchSync({ workoutsSha });
+			if (profile.workoutsPath === this.exerciseCatalogPath) {
+				this.exerciseCatalog = exerciseCatalogFrom(this.database);
+				saveLocalExerciseCatalog(this.exerciseCatalog);
+			}
 			if (this.cyclePlan) {
 				this.patchSync({ message: 'Отправка плана циклов…' });
 				const { sha: cyclePlanSha } = await fetchCyclePlan(token, profile);
@@ -669,9 +807,17 @@ export async function connectGitHub(token: string) {
 export function bootstrapWorkoutStore(
 	bundled: WorkoutDatabase,
 	bundledCyclePlan: CyclePlan | null = null,
-	profile: ProfileDefinition = DEFAULT_PROFILE
+	profile: ProfileDefinition = DEFAULT_PROFILE,
+	bundledExerciseCatalog: WorkoutDatabase = bundled,
+	exerciseCatalogPath = DEFAULT_EXERCISE_CATALOG_PATH
 ) {
-	workoutStore.bootstrap(profile, bundled, bundledCyclePlan);
+	workoutStore.bootstrap(
+		profile,
+		bundled,
+		bundledCyclePlan,
+		bundledExerciseCatalog,
+		exerciseCatalogPath
+	);
 }
 
 export async function pullFromGitHub(token = getGitHubToken()) {

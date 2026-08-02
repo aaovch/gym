@@ -10,6 +10,7 @@ export type ProfileDefinition = {
 export type ProfilesManifest = {
 	version: 1;
 	defaultProfileId: string;
+	exerciseCatalogPath: string;
 	profiles: ProfileDefinition[];
 };
 
@@ -20,6 +21,7 @@ export type ProfileBundle<TWorkoutDatabase, TCyclePlan> = {
 };
 
 export const DEFAULT_PROFILE_ID = 'alexander';
+export const DEFAULT_EXERCISE_CATALOG_PATH = 'data/workouts.json';
 
 export const DEFAULT_PROFILE: ProfileDefinition = {
 	id: DEFAULT_PROFILE_ID,
@@ -45,6 +47,9 @@ export function validateProfilesManifest(raw: unknown): ProfilesManifest {
 		throw new Error('profiles.json: ожидается manifest version 1');
 	}
 	if (raw.profiles.length === 0) throw new Error('profiles.json: нужен хотя бы один профиль');
+	if (!isSafeDataPath(raw.exerciseCatalogPath, 'workouts.json')) {
+		throw new Error('profiles.json: небезопасный exerciseCatalogPath');
+	}
 
 	const ids = new Set<string>();
 	const urlSlugs = new Set<string>();
@@ -81,6 +86,7 @@ export function validateProfilesManifest(raw: unknown): ProfilesManifest {
 	return {
 		version: 1,
 		defaultProfileId: raw.defaultProfileId,
+		exerciseCatalogPath: raw.exerciseCatalogPath,
 		profiles
 	};
 }
