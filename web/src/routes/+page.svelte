@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { base } from '$app/paths';
   import { browser } from '$app/environment';
   import { page } from '$app/state';
   import {
+    assignSessionDate,
     exerciseProtocolSkipOnMicro,
     exerciseTargetOnMicro,
     exercisesForMicroSession,
@@ -119,6 +121,19 @@
     if (!microcycle || activeIndex == null) return null;
     return sessionPlanByIndex(microcycle.plan, activeIndex)?.id ?? null;
   });
+
+  function planEditorUrl(scope: 'plan' | 'session'): string {
+    const params = new URLSearchParams({
+      profile: workoutStore.profile.urlSlug
+    });
+    if (mesocycle) params.set('meso', mesocycle.plan.id);
+    params.set('edit', scope);
+    if (scope === 'session' && microcycle && activeIndex != null) {
+      params.set('micro', microcycle.plan.id);
+      params.set('session', String(activeIndex));
+    }
+    return `${base}/cycles?${params.toString()}`;
+  }
   const entriesForSession = $derived.by(() => {
     if (!sessionReady || !microcycle || activeIndex == null) return [];
 
@@ -153,6 +168,7 @@
   });
   const sessionSkipped = $derived(Boolean(activeSessionPlan?.skipped));
   let skipBusy = $state(false);
+  let plannedDateBusy = $state(false);
 
   function sessionSkippedFor(micro: EnrichedMicrocycle, index: 0 | 1): boolean {
     return Boolean(sessionPlanByIndex(micro.plan, index)?.skipped);
@@ -800,6 +816,41 @@
     }
   }
 
+  async function changePlannedSessionDate(nextDate: string) {
+    if (!nextDate || !mesocycle || !microcycle || activeIndex == null) return;
+    if (nextDate === plannedSessionDate) return;
+    if (!usingManualPlan) {
+      toasts.error('Сначала откройте и сохраните план в разделе «План».');
+      return;
+    }
+    const basePlan = workoutStore.view.cyclePlanView.plan;
+    if (!basePlan) {
+      toasts.error('Сначала откройте и сохраните план в разделе «План».');
+      return;
+    }
+    const mesoId = mesocycle.plan.id;
+    const microId = microcycle.plan.id;
+    const idx = activeIndex;
+    plannedDateBusy = true;
+    error = '';
+    try {
+      saveCyclePlanState(assignSessionDate(basePlan, mesoId, microId, nextDate, idx));
+      datePick = nextDate;
+      if (browser && urlDate) {
+        const nextUrl = new URL(page.url);
+        nextUrl.searchParams.set('date', nextDate);
+        await goto(nextUrl, { replaceState: true, noScroll: true, keepFocus: true });
+      }
+      toasts.success(`Дата тренировки изменена: ${formatDateRu(nextDate)}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось изменить дату тренировки';
+      error = message;
+      toasts.error(message);
+    } finally {
+      plannedDateBusy = false;
+    }
+  }
+
   async function removeEntry(id: string | undefined) {
     if (!id) return;
     const snapshot: ExerciseLog | undefined = workoutStore.database.logs.find((item) => item.id === id);
@@ -973,11 +1024,16 @@
                 <span class="deck-part deck-slot">{slotLabel(activeSlot)}</span>
               </h2>
               <div class="deck-meta">
-                {#if plannedSessionDate}
-                  <span>{formatDateRu(plannedSessionDate)}</span>
-                {:else}
-                  <span class="muted-date">дата не назначена</span>
-                {/if}
+                <label class="deck-plan-date" title="Изменить дату этой тренировки в плане">
+                  <span>Дата в плане</span>
+                  <input
+                    type="date"
+                    value={plannedSessionDate ?? ''}
+                    aria-label="Дата {slotLabel(activeSlot)} в плане"
+                    disabled={plannedDateBusy || !usingManualPlan}
+                    onchange={(event) => void changePlannedSessionDate(event.currentTarget.value)}
+                  />
+                </label>
                 {#if sessionSkipped}
                   <span class="skip-flag">пропущена</span>
                 {/if}
@@ -1024,6 +1080,23 @@
               >
                 Сменить
               </button>
+
+              <div class="deck-edit-actions" aria-label="Редактирование плана">
+                <a
+                  class="button button-ghost deck-edit"
+                  href={planEditorUrl('session')}
+                  title="Изменить состав тренировки {activeSlot} в текущем мезоцикле"
+                >
+                  Изменить {activeSlot}
+                </a>
+                <a
+                  class="button button-ghost deck-edit"
+                  href={planEditorUrl('plan')}
+                  title="Изменить весь текущий мезоцикл"
+                >
+                  Изменить план
+                </a>
+              </div>
 
               <div class="deck-nav-mobile">
                 <button
@@ -1097,16 +1170,21 @@
                 <span class="deck-sep" aria-hidden="true">·</span>
                 <span class="deck-part deck-slot">{slotLabel(activeSlot)}</span>
               </h2>
-              <p>
-                {#if plannedSessionDate}
-                  {formatDateRu(plannedSessionDate)}
-                {:else}
-                  дата не назначена
-                {/if}
+              <div class="training-plan-meta">
+                <label class="deck-plan-date" title="Изменить дату этой тренировки в плане">
+                  <span>Дата в плане</span>
+                  <input
+                    type="date"
+                    value={plannedSessionDate ?? ''}
+                    aria-label="Дата {slotLabel(activeSlot)} в плане"
+                    disabled={plannedDateBusy || !usingManualPlan}
+                    onchange={(event) => void changePlannedSessionDate(event.currentTarget.value)}
+                  />
+                </label>
                 {#if sessionSkipped}
-                  · <span class="skip-flag">пропущена</span>
+                  <span class="skip-flag">пропущена</span>
                 {/if}
-              </p>
+              </div>
             {:else}
               <h2>{mesocycle?.plan.label ?? 'Выберите мезоцикл'}</h2>
               {#if mesocycle && microcycle}
@@ -1446,7 +1524,9 @@
         <section class="card empty-state">
           <h2>Для этой сессии нет упражнений</h2>
           <p>Добавьте упражнения в мезоцикл или выберите другую сессию.</p>
-          <a class="button button-secondary" href="{base}/cycles">Открыть план</a>
+          <a class="button button-secondary" href={planEditorUrl('session')}>
+            Изменить тренировку {activeSlot}
+          </a>
         </section>
       {/if}
     {/if}
@@ -1660,8 +1740,53 @@
     font-weight: 600;
   }
 
-  .deck-meta .muted-date {
+  .deck-plan-date {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .deck-plan-date input {
+    width: 126px;
+    min-height: 0;
+    padding: 2px 4px;
+    color: var(--muted-strong);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px dashed color-mix(in srgb, var(--muted) 65%, transparent);
+    border-radius: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+  }
+
+  .deck-plan-date input:hover,
+  .deck-plan-date input:focus-visible {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+    outline: none;
+  }
+
+  .deck-plan-date input:disabled {
+    cursor: wait;
+    opacity: 0.55;
+  }
+
+  .training-plan-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    margin-top: 8px;
   }
 
   .deck-toolbar {
@@ -1735,6 +1860,16 @@
 
   .deck-change {
     align-self: flex-end;
+    white-space: nowrap;
+  }
+
+  .deck-edit-actions {
+    display: flex;
+    align-self: flex-end;
+    gap: 8px;
+  }
+
+  .deck-edit {
     white-space: nowrap;
   }
 
@@ -2636,6 +2771,16 @@
 
     .deck-change {
       width: 100%;
+    }
+
+    .deck-edit-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      width: 100%;
+    }
+
+    .deck-edit {
+      justify-content: center;
     }
 
     .session-toolbar {

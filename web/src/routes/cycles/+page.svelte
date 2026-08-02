@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { base } from '$app/paths';
+	import { page } from '$app/state';
 	import {
 		addExerciseToMeso,
 		addMicrocycle,
@@ -103,6 +104,8 @@
 	let constructorData = $state<Map<string, ConstructorRow>>(new Map());
 	let mesoAddExercisePick = $state('');
 	let constructorError = $state('');
+	let constructorFocusSession = $state<SessionSlot | null>(null);
+	let appliedEditorRequest = $state('');
 
 	const view = $derived(workoutStore.view);
 	const keyMaps = $derived(view.keyMaps);
@@ -123,6 +126,39 @@
 			thesesStore.volumeGuides.length > 0 ||
 			thesesStore.protocolGuides.length > 0
 	);
+
+	function visibleConstructorSessions(): SessionSlot[] {
+		return constructorFocusSession == null ? [0, 1] : [constructorFocusSession];
+	}
+
+	$effect(() => {
+		if (!workoutStore.bootstrapped || !plan) return;
+		const mesoId = page.url.searchParams.get('meso');
+		const edit = page.url.searchParams.get('edit');
+		if (!mesoId || (edit !== 'plan' && edit !== 'session')) return;
+
+		const target = displayMesos.find((meso) => meso.plan.id === mesoId);
+		if (!target) return;
+
+		const rawSession = page.url.searchParams.get('session');
+		const focusSession: SessionSlot | null =
+			edit === 'session' ? (rawSession === '1' ? 1 : 0) : null;
+		const requestKey = [
+			workoutStore.profile.id,
+			mesoId,
+			edit,
+			focusSession ?? 'all'
+		].join(':');
+		if (appliedEditorRequest === requestKey) return;
+
+		const ownerMacro = displayMacros.find((macro) => macro.plan.mesoIds.includes(mesoId));
+		planningTab = 'program';
+		macroPick = ownerMacro?.plan.id ?? null;
+		mesoPick = mesoId;
+		mesoTab = 'plan';
+		appliedEditorRequest = requestKey;
+		openMesoConstructorForEdit(target, focusSession);
+	});
 
 	const selectedMacro = $derived.by((): EnrichedMacrocycle | null => {
 		if (displayMacros.length === 0 || !macroPick) return null;
@@ -723,6 +759,7 @@
 		}
 		mesoConstructorEditId = null;
 		mesoConstructorMacroId = macroId;
+		constructorFocusSession = null;
 		constructorLabel = mesocycleDisplayLabel((workoutStore.cyclePlan?.mesocycles.length ?? 0) + 1);
 		constructorStart = defaultMesoStartDate(view.entries);
 		constructorMicroCount = 4;
@@ -730,7 +767,10 @@
 		showMesoConstructor = true;
 	}
 
-	function openMesoConstructorForEdit(meso: EnrichedMesocycle) {
+	function openMesoConstructorForEdit(
+		meso: EnrichedMesocycle,
+		focusSession: SessionSlot | null = null
+	) {
 		constructorError = '';
 		if (!ensurePlanForConstructor()) {
 			workoutStore.patchSync({ error: constructorError });
@@ -739,6 +779,7 @@
 
 		mesoConstructorEditId = meso.plan.id;
 		mesoConstructorMacroId = null;
+		constructorFocusSession = focusSession;
 		constructorLabel = meso.plan.label;
 		constructorStart = meso.plan.startDate || defaultMesoStartDate(view.entries);
 		constructorMicroCount = meso.microcycles.length;
@@ -782,6 +823,7 @@
 		showMesoConstructor = false;
 		mesoConstructorMacroId = null;
 		mesoConstructorEditId = null;
+		constructorFocusSession = null;
 	}
 
 	function confirmMesoConstructor() {
@@ -844,6 +886,7 @@
 		showMesoConstructor = false;
 		mesoConstructorMacroId = null;
 		mesoConstructorEditId = null;
+		constructorFocusSession = null;
 	}
 
 	function mesoExerciseNames(meso: EnrichedMesocycle): string[] {
@@ -1468,7 +1511,9 @@
 		<div class="constructor-head">
 			<div>
 				<h3 id="meso-constructor-title">
-					{#if mesoConstructorEditId}
+					{#if mesoConstructorEditId && constructorFocusSession != null}
+						Редактирование тренировки {sessionColumnTitle(constructorFocusSession)}
+					{:else if mesoConstructorEditId}
 						Редактирование мезоцикла
 					{:else if mesoConstructorMacroId}
 						Добавить мезо в макро
@@ -1477,7 +1522,11 @@
 					{/if}
 				</h3>
 				<p class="muted constructor-hint">
-					{#if mesoConstructorEditId}
+					{#if mesoConstructorEditId && constructorFocusSession != null}
+						Изменения состава применятся ко всем тренировкам
+						<strong>{sessionColumnTitle(constructorFocusSession)}</strong> этого мезоцикла. Вторая тренировка
+						останется без изменений.
+					{:else if mesoConstructorEditId}
 						Меняйте упражнения, методы, якоря и число μ. Назначенные дни сохраняются; при уменьшении μ
 						лишние блоки удаляются с конца.
 					{:else}
@@ -1489,6 +1538,7 @@
 			<button type="button" class="button button-ghost-link" onclick={closeMesoConstructor}>Закрыть</button>
 		</div>
 
+		{#if constructorFocusSession == null}
 		<div class="constructor-meta">
 			<label>
 				<span>Название блока</span>
@@ -1522,9 +1572,24 @@
 				</select>
 			</label>
 		</div>
+		{:else}
+			<div class="constructor-scope-note">
+				<div>
+					<span>Текущий раздел плана</span>
+					<strong>{constructorLabel} · Тренировка {sessionColumnTitle(constructorFocusSession)}</strong>
+				</div>
+				<button
+					type="button"
+					class="button button-secondary"
+					onclick={() => (constructorFocusSession = null)}
+				>
+					Редактировать весь план
+				</button>
+			</div>
+		{/if}
 
 		<div class="constructor-session-panels">
-			{#each [0, 1] as sessionIndex}
+			{#each visibleConstructorSessions() as sessionIndex}
 				{@const slot = sessionIndex as SessionSlot}
 				{@const sessionList = slot === 0 ? constructorSessionA : constructorSessionB}
 				<section
@@ -1650,7 +1715,7 @@
 					{/if}
 				</div>
 				<div class="plan-sessions preview-sessions">
-					{#each [0, 1] as sessionIndex}
+					{#each visibleConstructorSessions() as sessionIndex}
 						{@const slot = sessionIndex as 0 | 1}
 						{@const rows = planMatrixForSession(constructorPreview, slot)}
 						{#if rows.length > 0}
@@ -1728,7 +1793,11 @@
 		<div class="constructor-actions">
 			<button type="button" class="button button-secondary" onclick={closeMesoConstructor}>Отмена</button>
 			<button type="button" class="button button-primary" onclick={confirmMesoConstructor}>
-				{mesoConstructorEditId ? 'Сохранить изменения' : 'Создать мезоцикл'}
+				{mesoConstructorEditId && constructorFocusSession != null
+					? `Сохранить тренировку ${sessionColumnTitle(constructorFocusSession)}`
+					: mesoConstructorEditId
+						? 'Сохранить изменения'
+						: 'Создать мезоцикл'}
 			</button>
 		</div>
 	</section>
@@ -2816,6 +2885,34 @@
 		margin-bottom: 1rem;
 	}
 
+	.constructor-scope-note {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 1rem;
+		padding: 0.85rem 1rem;
+		border: 1px solid var(--line-strong);
+		background: var(--surface-2);
+	}
+
+	.constructor-scope-note div {
+		display: grid;
+		gap: 0.2rem;
+	}
+
+	.constructor-scope-note span {
+		color: var(--muted);
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.constructor-scope-note strong {
+		font-size: 0.95rem;
+	}
+
 	.macro-blocks {
 		display: grid;
 		gap: 0.65rem;
@@ -3744,6 +3841,11 @@
 	}
 
 	@media (max-width: 720px) {
+		.constructor-scope-note {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
 		.exercise-setting-row {
 			grid-template-columns: 1fr;
 		}
