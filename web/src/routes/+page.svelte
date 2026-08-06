@@ -49,7 +49,7 @@
   let bulkBusy = $state(false);
   let pickerOpen = $state(false);
   let error = $state('');
-  let weightAdjust = $state<Record<string, number>>({});
+  let planQuickBusy = $state<string | null>(null);
   type PlanExerciseDraft = {
     exercise: string;
     kind: ExerciseKind;
@@ -508,67 +508,68 @@
     };
   }
 
-  function applySetAdjustments(
-    sets: ExerciseSet[],
-    kind: ExerciseKind,
-    exerciseName: string,
-    adjustments: Record<string, number>
-  ): ExerciseSet[] {
-    if (kind !== 'strength') return sets;
-    return sets.map(([weight, reps], index) => {
-      const delta = adjustments[setAdjustKey(exerciseName, index)] ?? 0;
-      return delta ? [Math.max(0, weight + delta), reps] as ExerciseSet : [weight, reps];
-    });
-  }
-
-  function setAdjustKey(exerciseName: string, setIndex: number): string {
-    return `${exerciseName}:${setIndex}`;
-  }
-
-  function setAdjustDelta(exerciseName: string, setIndex: number): number {
-    return weightAdjust[setAdjustKey(exerciseName, setIndex)] ?? 0;
-  }
-
-  function clearWeightAdjust(exerciseName: string) {
-    const prefix = `${exerciseName}:`;
-    const next = { ...weightAdjust };
-    let changed = false;
-    for (const key of Object.keys(next)) {
-      if (key.startsWith(prefix)) {
-        delete next[key];
-        changed = true;
-      }
-    }
-    if (changed) weightAdjust = next;
-  }
-
-  function nudgeSetWeight(exerciseName: string, setIndex: number, direction: 1 | -1) {
-    const key = setAdjustKey(exerciseName, setIndex);
-    const current = weightAdjust[key] ?? 0;
-    weightAdjust = { ...weightAdjust, [key]: current + direction * WEIGHT_STEP };
-  }
-
   function adjustedPreviewSets(
     exerciseName: string
   ): { kind: ExerciseKind; sets: ExerciseSet[] } | null {
     const override = sessionExerciseOverride(exerciseName);
     if (override?.sets.length) {
-      return {
-        kind: override.kind,
-        sets: applySetAdjustments(override.sets, override.kind, exerciseName, weightAdjust)
-      };
+      return { kind: override.kind, sets: override.sets.map((set) => [...set] as ExerciseSet) };
     }
     if (protocolSkips.has(exerciseName)) return null;
     const input = plannedInput(exerciseName);
     if (!input) return null;
-    const sets = applySetAdjustments(
-      suggestPlannedSets(input),
-      input.kind,
-      exerciseName,
-      weightAdjust
-    );
+    const sets = suggestPlannedSets(input);
     if (!sets.length) return null;
     return { kind: input.kind, sets };
+  }
+
+  function saveQuickPlanSets(exerciseName: string, kind: ExerciseKind, sets: ExerciseSet[]) {
+    if (!mesocycle || !microcycle || activeIndex == null) return;
+    if (!usingManualPlan) {
+      toasts.error('Сначала откройте и сохраните план в разделе «План».');
+      return;
+    }
+    const basePlan = workoutStore.view.cyclePlanView.plan;
+    if (!basePlan) return;
+    planQuickBusy = exerciseName;
+    error = '';
+    try {
+      saveCyclePlanState(
+        updateSessionExercisePlan(
+          basePlan,
+          mesocycle.plan.id,
+          microcycle.plan.id,
+          activeIndex,
+          exerciseName,
+          { kind, sets },
+          view.keyMaps
+        )
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось изменить план';
+      error = message;
+      toasts.error(message);
+    } finally {
+      planQuickBusy = null;
+    }
+  }
+
+  function nudgePlannedSetWeight(exerciseName: string, setIndex: number, direction: 1 | -1) {
+    const preview = adjustedPreviewSets(exerciseName);
+    if (!preview || preview.kind !== 'strength' || !preview.sets[setIndex]) return;
+    const sets = preview.sets.map((set) => [...set] as ExerciseSet);
+    const [weight, reps] = sets[setIndex];
+    const nextWeight = Math.max(WEIGHT_STEP, Math.round((weight + direction * WEIGHT_STEP) * 2) / 2);
+    sets[setIndex] = [nextWeight, reps];
+    saveQuickPlanSets(exerciseName, preview.kind, sets);
+  }
+
+  function addPlannedSet(exerciseName: string) {
+    const preview = adjustedPreviewSets(exerciseName);
+    if (!preview) return;
+    const last = preview.sets.at(-1) ?? fallbackPlanSet(preview.kind);
+    const sets = [...preview.sets.map((set) => [...set] as ExerciseSet), [...last] as ExerciseSet];
+    saveQuickPlanSets(exerciseName, preview.kind, sets);
   }
 
   function fallbackPlanSet(kind: ExerciseKind): ExerciseSet {
@@ -699,7 +700,6 @@
         view.keyMaps
       );
       saveCyclePlanState(next);
-      clearWeightAdjust(planDraft.exercise);
       toasts.success(`План обновлён: ${planDraft.exercise}`);
       planDraft = null;
     } catch (err) {
@@ -753,10 +753,6 @@
           indexInMicro: activeIndex
         }
       });
-      const preview = adjustedPreviewSets(exerciseName);
-      if (preview && sets.length >= preview.sets.length) {
-        clearWeightAdjust(exerciseName);
-      }
       if (!silent) toasts.success(successMessage);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось сохранить';
@@ -800,16 +796,17 @@
 
   async function confirmPlanned(exerciseName: string) {
     if (protocolSkips.has(exerciseName)) return;
-    const input = plannedInput(exerciseName);
-    if (!input) return;
-    const sets = applySetAdjustments(
-      suggestPlannedSets(input),
-      input.kind,
-      exerciseName,
-      weightAdjust
-    );
+    const preview = adjustedPreviewSets(exerciseName);
+    if (!preview) return;
     const existing = entryByExercise.get(exerciseName);
-    await saveSetsFor(exerciseName, input.kind, sets, `Записано: ${exerciseName}`, false, existing?.id);
+    await saveSetsFor(
+      exerciseName,
+      preview.kind,
+      preview.sets,
+      `Записано: ${exerciseName}`,
+      false,
+      existing?.id
+    );
   }
 
   async function confirmAllPlanned() {
@@ -821,19 +818,12 @@
     let saved = 0;
     try {
       for (const exerciseName of targets) {
-        const input = plannedInput(exerciseName);
-        if (!input) continue;
-        const sets = applySetAdjustments(
-          suggestPlannedSets(input),
-          input.kind,
-          exerciseName,
-          weightAdjust
-        );
-        if (!sets.length) continue;
+        const preview = adjustedPreviewSets(exerciseName);
+        if (!preview?.sets.length) continue;
         await saveSetsFor(
           exerciseName,
-          input.kind,
-          sets,
+          preview.kind,
+          preview.sets,
           '',
           true,
           entryByExercise.get(exerciseName)?.id
@@ -1102,30 +1092,22 @@
   {/if}
 {/snippet}
 
-{#snippet setStepper(exercise: string, setIndex: number, disabled: boolean)}
-  {@const delta = setAdjustDelta(exercise, setIndex)}
-  <div class="set-stepper" role="group" aria-label="Поправка веса подхода {setIndex + 1}">
+{#snippet setStepper(exercise: string, setIndex: number, weight: number, disabled: boolean)}
+  <div class="set-stepper" role="group" aria-label="Вес по плану для подхода {setIndex + 1}">
     <button
       type="button"
-      aria-label="Меньше на {WEIGHT_STEP} кг"
+      aria-label="Уменьшить вес по плану на {WEIGHT_STEP} кг"
       {disabled}
-      onclick={() => nudgeSetWeight(exercise, setIndex, -1)}
+      onclick={() => nudgePlannedSetWeight(exercise, setIndex, -1)}
     >
       −
     </button>
-    <span class:dim={!delta}>
-      {#if delta === 0}
-        ±0
-      {:else}
-        {delta > 0 ? '+' : '−'}{fmtNum(Math.abs(delta))}
-      {/if}
-      <small>кг</small>
-    </span>
+    <span>{fmtNum(weight)}<small>кг</small></span>
     <button
       type="button"
-      aria-label="Больше на {WEIGHT_STEP} кг"
+      aria-label="Увеличить вес по плану на {WEIGHT_STEP} кг"
       {disabled}
-      onclick={() => nudgeSetWeight(exercise, setIndex, 1)}
+      onclick={() => nudgePlannedSetWeight(exercise, setIndex, 1)}
     >
       +
     </button>
@@ -1650,17 +1632,30 @@
                           {#each previewSets.sets as set, setIndex}
                             {@const setDone = setIndex < loggedCount}
                             {@const setFailed = Boolean(entry?.failedSets?.includes(setIndex))}
-                            {@const setBusy = busyId === exercise}
+                            {@const setBusy = busyId === exercise || planQuickBusy === exercise}
                             <div class="set-row" class:set-done={setDone && !setFailed} class:set-failed={setDone && setFailed}>
                               <span class="set-chip">
                                 <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
                               </span>
                               {#if previewSets.kind === 'strength' && !setDone}
-                                {@render setStepper(exercise, setIndex, setBusy)}
+                                {@render setStepper(exercise, setIndex, set[0], setBusy)}
                               {/if}
                               {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy)}
                             </div>
                           {/each}
+                        </div>
+                        <div class="quick-plan-actions">
+                          <button
+                            type="button"
+                            class="quick-plan-add"
+                            disabled={planQuickBusy === exercise || busyId === exercise}
+                            onclick={() => addPlannedSet(exercise)}
+                          >
+                            {planQuickBusy === exercise ? 'Сохраняем…' : '+ Подход по плану'}
+                          </button>
+                          {#if sessionExerciseOverride(exercise)}
+                            <span>точный план этой тренировки</span>
+                          {/if}
                         </div>
                         {@render specSub(
                           previewSets.kind,
@@ -2669,6 +2664,46 @@
     margin-top: 4px;
   }
 
+  .quick-plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-top: 2px;
+  }
+
+  .quick-plan-add {
+    min-height: 32px;
+    padding: 6px 10px;
+    color: var(--accent);
+    background: #0a0c10;
+    border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .quick-plan-add:hover:not(:disabled) {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-style: solid;
+  }
+
+  .quick-plan-add:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .quick-plan-actions > span {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+  }
+
   .set-row {
     display: flex;
     flex-wrap: wrap;
@@ -2814,10 +2849,6 @@
     color: var(--muted);
     font-size: 8px;
     font-weight: 600;
-  }
-
-  .set-stepper span.dim {
-    color: var(--muted);
   }
 
   .set-chip {
