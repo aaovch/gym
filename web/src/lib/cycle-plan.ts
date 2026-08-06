@@ -28,7 +28,8 @@ import {
 	normalizeMicrocycles,
 	sessionPlanByIndex,
 	type MicrocyclePlan,
-	type MicroSessionPlan
+	type MicroSessionPlan,
+	type PlannedExercisePlan
 } from './micro-plan';
 import {
 	buildExerciseKeyMapsFromEntries,
@@ -44,7 +45,7 @@ import type { Exercise, WorkoutEntry } from './types';
 export { buildExerciseKeyMapsFromEntries, buildWorkoutKeyMaps } from './exercise-keys';
 export type { ExerciseKeyMaps } from './exercise-keys';
 
-export type { MicrocyclePlan, MicroSessionPlan };
+export type { MicrocyclePlan, MicroSessionPlan, PlannedExercisePlan };
 export type { ProtocolPhase, ProtocolTemplate };
 export { DEFAULT_PROTOCOL_TEMPLATE, bundledProtocolTemplates, phaseForMicro, targetWeight } from './protocol';
 
@@ -1306,6 +1307,80 @@ export function updateExerciseProtocol(
 	});
 }
 
+/** Задать дни A/B упражнения на весь мезоцикл. */
+export function updateExerciseSessions(
+	plan: CyclePlan,
+	mesoId: string,
+	exercise: string,
+	sessions: (0 | 1)[],
+	keyMaps: ExerciseKeyMaps
+): CyclePlan {
+	if (sessions.length === 0) return plan;
+	const id = toExerciseId(exercise, keyMaps);
+	const normalized = [...new Set(sessions)].sort() as (0 | 1)[];
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			const microcycles = meso.microcycles.map((micro) => ({
+				...micro,
+				sessions: micro.sessions.map((session) => {
+					if (normalized.includes(session.indexInMicro)) return session;
+					const exercisePlans = { ...(session.exercisePlans ?? {}) };
+					delete exercisePlans[id];
+					return {
+						...session,
+						exercisePlans: Object.keys(exercisePlans).length ? exercisePlans : undefined
+					};
+				}) as MicrocyclePlan['sessions']
+			}));
+			return {
+				...meso,
+				microcycles,
+				exerciseSessions: { ...(meso.exerciseSessions ?? {}), [id]: normalized }
+			};
+		})
+	});
+}
+
+/** Сохранить или удалить точное задание упражнения в одной тренировке. */
+export function updateSessionExercisePlan(
+	plan: CyclePlan,
+	mesoId: string,
+	microId: string,
+	indexInMicro: 0 | 1,
+	exercise: string,
+	exercisePlan: PlannedExercisePlan | null,
+	keyMaps: ExerciseKeyMaps
+): CyclePlan {
+	const exerciseId = toExerciseId(exercise, keyMaps);
+	return touchPlan({
+		...plan,
+		mesocycles: plan.mesocycles.map((meso) => {
+			if (meso.id !== mesoId) return meso;
+			return {
+				...meso,
+				microcycles: meso.microcycles.map((micro) => {
+					if (micro.id !== microId) return micro;
+					return {
+						...micro,
+						sessions: micro.sessions.map((session) => {
+							if (session.indexInMicro !== indexInMicro) return session;
+							const exercisePlans = { ...(session.exercisePlans ?? {}) };
+							if (exercisePlan) exercisePlans[exerciseId] = exercisePlan;
+							else delete exercisePlans[exerciseId];
+							return {
+								...session,
+								exercisePlans: Object.keys(exercisePlans).length ? exercisePlans : undefined
+							};
+						}) as MicrocyclePlan['sessions']
+					};
+				})
+			};
+		})
+	});
+}
+
 export function syncMesoExercises(
 	plan: CyclePlan,
 	mesoId: string,
@@ -1409,7 +1484,18 @@ export function removeExerciseFromMeso(
 			delete exerciseProtocols[id];
 			const exerciseSessions = { ...(meso.exerciseSessions ?? {}) };
 			delete exerciseSessions[id];
-			return { ...meso, anchor1rm, anchor1rmManual, exerciseProtocols, exerciseSessions };
+			const microcycles = meso.microcycles.map((micro) => ({
+				...micro,
+				sessions: micro.sessions.map((session) => {
+					const exercisePlans = { ...(session.exercisePlans ?? {}) };
+					delete exercisePlans[id];
+					return {
+						...session,
+						exercisePlans: Object.keys(exercisePlans).length ? exercisePlans : undefined
+					};
+				}) as MicrocyclePlan['sessions']
+			}));
+			return { ...meso, microcycles, anchor1rm, anchor1rmManual, exerciseProtocols, exerciseSessions };
 		})
 	});
 }
@@ -1460,7 +1546,18 @@ export function purgeExerciseFromPlan(plan: CyclePlan, exerciseId: string): Cycl
 			delete exerciseProtocols[exerciseId];
 			const exerciseSessions = { ...(meso.exerciseSessions ?? {}) };
 			delete exerciseSessions[exerciseId];
-			return { ...meso, anchor1rm, anchor1rmManual, exerciseProtocols, exerciseSessions };
+			const microcycles = meso.microcycles.map((micro) => ({
+				...micro,
+				sessions: micro.sessions.map((session) => {
+					const exercisePlans = { ...(session.exercisePlans ?? {}) };
+					delete exercisePlans[exerciseId];
+					return {
+						...session,
+						exercisePlans: Object.keys(exercisePlans).length ? exercisePlans : undefined
+					};
+				}) as MicrocyclePlan['sessions']
+			}));
+			return { ...meso, microcycles, anchor1rm, anchor1rmManual, exerciseProtocols, exerciseSessions };
 		})
 	});
 }

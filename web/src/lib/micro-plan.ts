@@ -1,4 +1,11 @@
 import type { TrainingDay } from './microcycle';
+import type { ExerciseKind, ExerciseSet } from './types';
+
+/** Точная замена расчётного задания для одного упражнения в конкретной тренировке. */
+export type PlannedExercisePlan = {
+	kind: ExerciseKind;
+	sets: ExerciseSet[];
+};
 
 export type MicroSessionPlan = {
 	id: string;
@@ -6,6 +13,8 @@ export type MicroSessionPlan = {
 	date?: string;
 	/** Тренировка осознанно пропущена: не считается незаполненной и не выбирается автоматически. */
 	skipped?: boolean;
+	/** exerciseId → точные подходы только для этой тренировки. */
+	exercisePlans?: Record<string, PlannedExercisePlan>;
 };
 
 export type MicrocyclePlan = {

@@ -8,14 +8,20 @@
     exerciseProtocolSkipOnMicro,
     exerciseTargetOnMicro,
     exercisesForMicroSession,
+    markAnchorManual,
+    removeExerciseFromMeso,
     resolveMesoMicroSelection,
     setSessionSkipped,
     sortExercisesByAnchorDesc,
     suggestSessionIndex,
-    type EnrichedMicrocycle
+    updateExerciseProtocol,
+    updateExerciseSessions,
+    updateSessionExercisePlan,
+    type EnrichedMicrocycle,
+    type PlannedExercisePlan
   } from '$lib/cycle-plan';
   import { sessionPlanByIndex } from '$lib/micro-plan';
-  import { mesoProtocolId } from '$lib/exercise-keys';
+  import { mesoProtocolId, toExerciseId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, fmtSet, todayIso } from '$lib/format';
   import {
     indexToSlot,
@@ -44,6 +50,17 @@
   let pickerOpen = $state(false);
   let error = $state('');
   let weightAdjust = $state<Record<string, number>>({});
+  type PlanExerciseDraft = {
+    exercise: string;
+    kind: ExerciseKind;
+    sets: [string, string][];
+    customSets: boolean;
+    anchor1rm: string;
+    protocolId: string;
+    sessions: (0 | 1)[];
+  };
+  let planDraft = $state<PlanExerciseDraft | null>(null);
+  let planEditBusy = $state(false);
 
   const WEIGHT_STEP = 0.5;
 
@@ -170,6 +187,12 @@
   let skipBusy = $state(false);
   let plannedDateBusy = $state(false);
 
+  function sessionExerciseOverride(exerciseName: string): PlannedExercisePlan | null {
+    if (!activeSessionPlan) return null;
+    const exerciseId = toExerciseId(exerciseName, view.keyMaps);
+    return activeSessionPlan.exercisePlans?.[exerciseId] ?? null;
+  }
+
   function sessionSkippedFor(micro: EnrichedMicrocycle, index: 0 | 1): boolean {
     return Boolean(sessionPlanByIndex(micro.plan, index)?.skipped);
   }
@@ -179,6 +202,7 @@
     if (!mesocycle || !microcycle) return new Map<string, string | null>();
     const map = new Map<string, string | null>();
     for (const exercise of slotExercises) {
+      if (sessionExerciseOverride(exercise)?.sets.length) continue;
       const skip = exerciseProtocolSkipOnMicro(
         view.cyclePlanForCalc,
         mesocycle.plan,
@@ -527,6 +551,13 @@
   function adjustedPreviewSets(
     exerciseName: string
   ): { kind: ExerciseKind; sets: ExerciseSet[] } | null {
+    const override = sessionExerciseOverride(exerciseName);
+    if (override?.sets.length) {
+      return {
+        kind: override.kind,
+        sets: applySetAdjustments(override.sets, override.kind, exerciseName, weightAdjust)
+      };
+    }
     if (protocolSkips.has(exerciseName)) return null;
     const input = plannedInput(exerciseName);
     if (!input) return null;
@@ -538,6 +569,162 @@
     );
     if (!sets.length) return null;
     return { kind: input.kind, sets };
+  }
+
+  function fallbackPlanSet(kind: ExerciseKind): ExerciseSet {
+    if (kind === 'run') return [20, 8];
+    if (kind === 'jumps') return [3, 5];
+    return [20, 5];
+  }
+
+  function beginPlanEdit(exerciseName: string) {
+    if (!mesocycle || !microcycle || activeIndex == null) return;
+    if (!usingManualPlan) {
+      toasts.error('Сначала откройте и сохраните план в разделе «План».');
+      return;
+    }
+    const kind = exerciseKind(exerciseName);
+    const override = sessionExerciseOverride(exerciseName);
+    const preview = adjustedPreviewSets(exerciseName);
+    const sourceSets = override?.sets ?? preview?.sets ?? [fallbackPlanSet(kind)];
+    const sessions = ([0, 1] as const).filter((index) =>
+      exercisesForMicroSession(mesocycle, view.workoutTemplates, index, view.keyMaps).includes(exerciseName)
+    );
+    planDraft = {
+      exercise: exerciseName,
+      kind,
+      sets: sourceSets.map(([first, second]) => [String(first), String(second)]),
+      customSets: Boolean(override),
+      anchor1rm: String(mesocycle.anchorInfo[exerciseName]?.anchor ?? ''),
+      protocolId: mesoProtocolId(mesocycle.plan, exerciseName, view.keyMaps) ?? mesocycle.plan.templateId,
+      sessions: sessions.length ? [...sessions] : [activeIndex]
+    };
+  }
+
+  function patchPlanSet(setIndex: number, valueIndex: 0 | 1, value: string) {
+    if (!planDraft) return;
+    planDraft.sets[setIndex][valueIndex] = value;
+    planDraft.customSets = true;
+  }
+
+  function addPlanSet() {
+    if (!planDraft) return;
+    const last = planDraft.sets.at(-1) ?? fallbackPlanSet(planDraft.kind).map(String) as [string, string];
+    planDraft.sets.push([...last]);
+    planDraft.customSets = true;
+  }
+
+  function removePlanSet(setIndex: number) {
+    if (!planDraft || planDraft.sets.length <= 1) return;
+    planDraft.sets.splice(setIndex, 1);
+    planDraft.customSets = true;
+  }
+
+  function resetPlanSetsToProtocol() {
+    if (!planDraft) return;
+    const input = plannedInput(planDraft.exercise);
+    const calculated = input ? suggestPlannedSets(input) : [];
+    const sets = calculated.length ? calculated : [fallbackPlanSet(planDraft.kind)];
+    planDraft.sets = sets.map(([first, second]) => [String(first), String(second)]);
+    planDraft.customSets = false;
+  }
+
+  function togglePlanSession(index: 0 | 1) {
+    if (!planDraft) return;
+    const hasSession = planDraft.sessions.includes(index);
+    if (hasSession && planDraft.sessions.length === 1) {
+      toasts.error('Упражнение должно остаться хотя бы в одной тренировке A/B.');
+      return;
+    }
+    planDraft.sessions = hasSession
+      ? planDraft.sessions.filter((item) => item !== index)
+      : [...planDraft.sessions, index].sort();
+  }
+
+  function parsedDraftSets(draft: PlanExerciseDraft): ExerciseSet[] | null {
+    const sets = draft.sets.map(([first, second]) => [Number(first), Number(second)] as ExerciseSet);
+    return sets.every(([first, second]) => Number.isFinite(first) && first > 0 && Number.isFinite(second) && second > 0)
+      ? sets
+      : null;
+  }
+
+  function savePlanEdit() {
+    if (!planDraft || !mesocycle || !microcycle || activeIndex == null) return;
+    const basePlan = workoutStore.view.cyclePlanView.plan;
+    if (!basePlan) {
+      toasts.error('Сначала откройте и сохраните план в разделе «План».');
+      return;
+    }
+    const anchor = Number(planDraft.anchor1rm);
+    if (planDraft.kind === 'strength' && (!Number.isFinite(anchor) || anchor <= 0)) {
+      toasts.error('1ПМ должен быть положительным числом.');
+      return;
+    }
+    const sets = parsedDraftSets(planDraft);
+    if (planDraft.customSets && !sets) {
+      toasts.error('В каждом подходе должны быть два положительных числа.');
+      return;
+    }
+
+    planEditBusy = true;
+    error = '';
+    try {
+      let next = basePlan;
+      if (planDraft.kind === 'strength') {
+        next = markAnchorManual(next, mesocycle.plan.id, planDraft.exercise, anchor, view.keyMaps);
+        next = updateExerciseProtocol(
+          next,
+          mesocycle.plan.id,
+          planDraft.exercise,
+          planDraft.protocolId,
+          view.keyMaps
+        );
+      }
+      next = updateExerciseSessions(
+        next,
+        mesocycle.plan.id,
+        planDraft.exercise,
+        planDraft.sessions,
+        view.keyMaps
+      );
+      next = updateSessionExercisePlan(
+        next,
+        mesocycle.plan.id,
+        microcycle.plan.id,
+        activeIndex,
+        planDraft.exercise,
+        planDraft.sessions.includes(activeIndex) && planDraft.customSets && sets
+          ? { kind: planDraft.kind, sets }
+          : null,
+        view.keyMaps
+      );
+      saveCyclePlanState(next);
+      clearWeightAdjust(planDraft.exercise);
+      toasts.success(`План обновлён: ${planDraft.exercise}`);
+      planDraft = null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось обновить план';
+      error = message;
+      toasts.error(message);
+    } finally {
+      planEditBusy = false;
+    }
+  }
+
+  function removePlannedExercise() {
+    if (!planDraft || !mesocycle) return;
+    if (browser && !window.confirm(`Убрать «${planDraft.exercise}» из текущего мезоцикла? История останется.`)) return;
+    const basePlan = workoutStore.view.cyclePlanView.plan;
+    if (!basePlan) return;
+    try {
+      saveCyclePlanState(removeExerciseFromMeso(basePlan, mesocycle.plan.id, planDraft.exercise, view.keyMaps));
+      toasts.success('Упражнение убрано из плана. История не изменена.');
+      planDraft = null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось изменить план';
+      error = message;
+      toasts.error(message);
+    }
   }
 
   async function saveSetsFor(
@@ -1490,7 +1677,10 @@
                 </div>
                 <div class="exercise-actions">
                   {#if fullyLogged && entry}
-                    <a class="button button-secondary" href={addUrl(exercise, entry?.id)}>Изменить</a>
+                    <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
+                      Изменить план
+                    </button>
+                    <a class="text-button" href={addUrl(exercise, entry?.id)}>Изменить запись</a>
                     {#if entry.id}
                       <button
                         type="button"
@@ -1502,7 +1692,9 @@
                       </button>
                     {/if}
                   {:else if protocolSkip}
-                    <!-- actions hidden: protocol skip -->
+                    <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
+                      Изменить план
+                    </button>
                   {:else}
                     <button
                       type="button"
@@ -1512,10 +1704,152 @@
                     >
                       {busyId === exercise ? 'Сохраняем…' : 'Готово'}
                     </button>
-                    <a class="button button-secondary" href={addUrl(exercise, entry?.id)}>Изменить</a>
+                    <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
+                      Изменить
+                    </button>
                   {/if}
                 </div>
               </div>
+              {#if planDraft?.exercise === exercise}
+                <section class="inline-plan-editor" aria-label="Редактирование плана упражнения">
+                  <header class="inline-plan-head">
+                    <div>
+                      <span class="eyebrow">План · прямо в карточке</span>
+                      <h4>{exercise}</h4>
+                    </div>
+                    <button
+                      type="button"
+                      class="editor-close"
+                      aria-label="Закрыть редактор плана"
+                      onclick={() => (planDraft = null)}
+                    >×</button>
+                  </header>
+
+                  <div class="plan-editor-section">
+                    <div class="plan-editor-title">
+                      <div>
+                        <strong>Подходы этой тренировки</strong>
+                        <small>
+                          {planDraft.customSets
+                            ? 'Точное задание вместо расчёта протокола'
+                            : 'Сейчас рассчитываются по протоколу; правка любого поля зафиксирует их'}
+                        </small>
+                      </div>
+                      {#if planDraft.customSets}
+                        <button
+                          type="button"
+                          class="text-button"
+                          onclick={resetPlanSetsToProtocol}
+                        >Вернуть расчёт по протоколу</button>
+                      {/if}
+                    </div>
+                    <div class="plan-set-editor">
+                      {#each planDraft.sets as set, setIndex}
+                        <div class="plan-set-inputs">
+                          <span>{setIndex + 1}</span>
+                          <label>
+                            <small>
+                              {planDraft.kind === 'strength'
+                                ? 'Вес, кг'
+                                : planDraft.kind === 'run'
+                                  ? 'Минуты'
+                                  : 'Подходы'}
+                            </small>
+                            <input
+                              type="number"
+                              min="0.1"
+                              step={planDraft.kind === 'strength' ? '0.5' : '0.1'}
+                              value={set[0]}
+                              oninput={(event) => patchPlanSet(setIndex, 0, event.currentTarget.value)}
+                            />
+                          </label>
+                          <label>
+                            <small>{planDraft.kind === 'run' ? 'км/ч' : 'Повторы'}</small>
+                            <input
+                              type="number"
+                              min="0.1"
+                              step={planDraft.kind === 'run' ? '0.1' : '1'}
+                              value={set[1]}
+                              oninput={(event) => patchPlanSet(setIndex, 1, event.currentTarget.value)}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            class="plan-set-remove"
+                            aria-label="Удалить подход {setIndex + 1}"
+                            disabled={planDraft.sets.length <= 1}
+                            onclick={() => removePlanSet(setIndex)}
+                          >×</button>
+                        </div>
+                      {/each}
+                    </div>
+                    <button type="button" class="button button-ghost plan-add-set" onclick={addPlanSet}>
+                      + Подход
+                    </button>
+                  </div>
+
+                  <div class="plan-editor-section meso-settings">
+                    <div class="plan-editor-title">
+                      <div>
+                        <strong>На весь мезоцикл</strong>
+                        <small>Эти параметры влияют и на другие микроциклы текущего мезоцикла</small>
+                      </div>
+                    </div>
+                    <div class="meso-field-grid">
+                      {#if planDraft.kind === 'strength'}
+                        <label>
+                          <span>Якорный 1ПМ, кг</span>
+                          <input
+                            type="number"
+                            min="0.1"
+                            step="0.5"
+                            bind:value={planDraft.anchor1rm}
+                          />
+                        </label>
+                        <label>
+                          <span>Протокол</span>
+                          <select bind:value={planDraft.protocolId}>
+                            {#each view.protocolTemplates as template (template.id)}
+                              <option value={template.id}>{template.name}</option>
+                            {/each}
+                          </select>
+                        </label>
+                      {/if}
+                      <fieldset>
+                        <legend>Тренировки</legend>
+                        <div class="session-checks">
+                          {#each [0, 1] as sessionIndex}
+                            {@const indexValue = sessionIndex as 0 | 1}
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={planDraft.sessions.includes(indexValue)}
+                                onchange={() => togglePlanSession(indexValue)}
+                              />
+                              <span>{indexValue === 0 ? 'A' : 'B'}</span>
+                            </label>
+                          {/each}
+                        </div>
+                      </fieldset>
+                    </div>
+                  </div>
+
+                  <footer class="plan-editor-actions">
+                    <button
+                      type="button"
+                      class="button button-primary"
+                      disabled={planEditBusy}
+                      onclick={savePlanEdit}
+                    >{planEditBusy ? 'Сохраняем…' : 'Сохранить план'}</button>
+                    <button type="button" class="button button-ghost" onclick={() => (planDraft = null)}>
+                      Отмена
+                    </button>
+                    <button type="button" class="text-button danger remove-from-plan" onclick={removePlannedExercise}>
+                      Убрать из мезоцикла
+                    </button>
+                  </footer>
+                </section>
+              {/if}
             </div>
           </article>
         {/each}
@@ -2627,13 +2961,225 @@
     justify-content: flex-end;
   }
 
-  .text-button {
+  .inline-plan-editor {
+    display: grid;
+    gap: 0;
+    margin-top: 18px;
+    background: #0d1015;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+    border-left: 3px solid var(--accent);
+  }
+
+  .inline-plan-head,
+  .plan-editor-actions,
+  .plan-editor-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .inline-plan-head {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .inline-plan-head h4 {
+    margin: 4px 0 0;
+    font-size: 16px;
+  }
+
+  .editor-close {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    color: var(--muted-strong);
+    background: transparent;
+    border: 1px solid var(--line);
+    cursor: pointer;
+    font-size: 20px;
+  }
+
+  .plan-editor-section {
+    display: grid;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .plan-editor-title strong,
+  .plan-editor-title small {
+    display: block;
+  }
+
+  .plan-editor-title strong {
+    font-size: 12px;
+    letter-spacing: 0.03em;
+  }
+
+  .plan-editor-title small {
+    margin-top: 4px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    line-height: 1.4;
+  }
+
+  .plan-set-editor {
+    display: grid;
+    gap: 7px;
+  }
+
+  .plan-set-inputs {
+    display: grid;
+    grid-template-columns: 30px minmax(90px, 150px) minmax(90px, 150px) 34px;
+    align-items: end;
+    gap: 8px;
+  }
+
+  .plan-set-inputs > span {
+    display: grid;
+    height: 36px;
+    place-items: center;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  .plan-set-inputs label,
+  .meso-field-grid > label {
+    display: grid;
+    gap: 5px;
+  }
+
+  .plan-set-inputs small,
+  .meso-field-grid label > span,
+  .meso-field-grid legend {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .plan-set-inputs input,
+  .meso-field-grid input[type='number'],
+  .meso-field-grid select {
+    min-width: 0;
+    height: 36px;
+    padding: 7px 9px;
+    color: var(--text);
+    background: #080a0d;
+    border: 1px solid var(--line-strong);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .plan-set-remove {
+    width: 34px;
+    height: 36px;
     padding: 0;
     color: var(--danger);
+    background: transparent;
+    border: 1px solid var(--line);
+    cursor: pointer;
+  }
+
+  .plan-set-remove:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+  }
+
+  .plan-add-set {
+    justify-self: start;
+  }
+
+  .meso-settings {
+    background: rgb(255 255 255 / 1.5%);
+  }
+
+  .meso-field-grid {
+    display: grid;
+    grid-template-columns: minmax(130px, 0.7fr) minmax(210px, 1.3fr) auto;
+    align-items: end;
+    gap: 12px;
+  }
+
+  .meso-field-grid fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .meso-field-grid legend {
+    margin-bottom: 5px;
+  }
+
+  .session-checks {
+    display: flex;
+    height: 36px;
+  }
+
+  .session-checks label {
+    position: relative;
+    display: grid;
+    width: 46px;
+    place-items: center;
+    cursor: pointer;
+  }
+
+  .session-checks input {
+    position: absolute;
+    opacity: 0;
+  }
+
+  .session-checks span {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    color: var(--muted);
+    background: #080a0d;
+    border: 1px solid var(--line-strong);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .session-checks label + label span {
+    border-left: 0;
+  }
+
+  .session-checks input:checked + span {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .plan-editor-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding: 14px 18px;
+  }
+
+  .remove-from-plan {
+    margin-left: auto;
+  }
+
+  .text-button {
+    padding: 0;
+    color: var(--blue);
     background: transparent;
     border: 0;
     cursor: pointer;
     font-size: 10px;
+  }
+
+  .text-button.danger {
+    color: var(--danger);
   }
 
   .set-list.compact {
@@ -2844,6 +3390,33 @@
 
     .exercise-heading .button {
       width: 100%;
+    }
+
+    .inline-plan-editor {
+      margin-left: -40px;
+    }
+
+    .plan-editor-title,
+    .plan-editor-actions {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .plan-set-inputs {
+      grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 34px;
+    }
+
+    .meso-field-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .plan-editor-actions .button {
+      width: 100%;
+    }
+
+    .remove-from-plan {
+      margin-left: 0;
+      align-self: flex-start;
     }
 
     .day-log article {

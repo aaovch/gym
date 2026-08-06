@@ -589,6 +589,17 @@ function validateCyclePlan(plan: CyclePlan): CyclePlan {
 					if (dates.has(session.date)) issues.push(`дата ${session.date} назначена нескольким слотам`);
 					dates.add(session.date);
 				}
+				for (const [exerciseId, exercisePlan] of Object.entries(session.exercisePlans ?? {})) {
+					if (!isExerciseKind(exercisePlan.kind) || !Array.isArray(exercisePlan.sets) || !exercisePlan.sets.length) {
+						issues.push(`${session.id}: exercisePlans[${exerciseId}] имеет неверную структуру`);
+						continue;
+					}
+					for (const set of exercisePlan.sets) {
+						if (!Array.isArray(set) || set.length !== 2 || !set.every(isPositiveNumber)) {
+							issues.push(`${session.id}: exercisePlans[${exerciseId}] содержит невалидный подход`);
+						}
+					}
+				}
 			}
 		}
 	}
