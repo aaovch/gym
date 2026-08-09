@@ -1360,11 +1360,20 @@
                 {/if}
               </div>
               <h2 class="deck-title">
-                <span class="deck-part deck-meso">{mesocycle.plan.label}</span>
+                <span class="deck-part deck-meso">
+                  <span class="deck-title-full">{mesocycle.plan.label}</span>
+                  <span class="deck-title-short">М{mesocycle.index}</span>
+                </span>
                 <span class="deck-sep" aria-hidden="true">·</span>
-                <span class="deck-part deck-micro">Микроцикл {microcycle.plan.indexInMeso}</span>
+                <span class="deck-part deck-micro">
+                  <span class="deck-title-full">Микроцикл {microcycle.plan.indexInMeso}</span>
+                  <span class="deck-title-short">μ{microcycle.plan.indexInMeso}</span>
+                </span>
                 <span class="deck-sep" aria-hidden="true">·</span>
-                <span class="deck-part deck-slot">{slotLabel(activeSlot)}</span>
+                <span class="deck-part deck-slot">
+                  <span class="deck-title-full">{slotLabel(activeSlot)}</span>
+                  <span class="deck-title-short">{activeSlot}</span>
+                </span>
               </h2>
               <div class="deck-meta">
                 <label class="deck-plan-date" title="Изменить дату этой тренировки в плане">
@@ -1831,7 +1840,12 @@
                                         title={setLocked ? 'Сначала отметьте предыдущий подход' : 'Подход был в плане, но не выполнен'}
                                         onclick={() => confirmSet(exercise, setIndex, true)}
                                       >
-                                        {setBusy ? '…' : 'не сделал'}
+                                        {#if setBusy}
+                                          …
+                                        {:else}
+                                          <span class="set-skip-full">не сделал</span>
+                                          <span class="set-skip-short">проп.</span>
+                                        {/if}
                                       </button>
                                     {/if}
                                   </div>
@@ -1898,29 +1912,31 @@
                 </div>
                 <div class="exercise-actions">
                   {#if protocolSkip && !entry}
-                    <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
-                      Изменить план
+                    <button class="button button-secondary exercise-plan-action" type="button" onclick={() => beginPlanEdit(exercise)}>
+                      <span class="plan-action-full">Изменить план</span>
+                      <span class="plan-action-short">План</span>
                     </button>
                   {:else}
                     {#if !fullyLogged && previewSets}
                       <button
                         type="button"
-                        class="button button-primary"
+                        class="button button-primary exercise-bulk-action"
                         disabled={busyId === exercise}
                         onclick={() => confirmPlanned(exercise)}
                       >
                         {busyId === exercise ? 'Сохраняем…' : 'Записать все подходы'}
                       </button>
                     {/if}
-                    <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
-                      Изменить план
+                    <button class="button button-secondary exercise-plan-action" type="button" onclick={() => beginPlanEdit(exercise)}>
+                      <span class="plan-action-full">Изменить план</span>
+                      <span class="plan-action-short">План</span>
                     </button>
                     {#if entry}
-                      <a class="text-button" href={addUrl(exercise, entry.id)}>Изменить запись</a>
+                      <a class="text-button exercise-record-action" href={addUrl(exercise, entry.id)}>Изменить запись</a>
                       {#if entry.id}
                         <button
                           type="button"
-                          class="text-button danger"
+                          class="text-button danger exercise-record-action"
                           disabled={busyId === entry.id}
                           onclick={() => removeEntry(entry.id)}
                         >
@@ -2488,6 +2504,10 @@
     font-size: 10px;
     font-weight: 700;
     white-space: nowrap;
+  }
+
+  .deck-title-short {
+    display: none;
   }
 
   .deck-ring {
@@ -3205,6 +3225,14 @@
     cursor: not-allowed;
   }
 
+  .set-skip-short {
+    display: none;
+  }
+
+  .plan-action-short {
+    display: none;
+  }
+
   .set-skipped-placeholder {
     color: var(--danger);
     background: color-mix(in srgb, var(--danger) 8%, #0a0c10);
@@ -3840,53 +3868,261 @@
   }
 
   @media (max-width: 520px) {
-    .plan-sets-editable {
+    .session-deck {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .deck-core {
+      gap: 8px;
+      padding: 10px 12px;
+    }
+
+    .deck-labels,
+    .deck-meta,
+    .deck-date,
+    .deck-change,
+    .deck-edit-actions,
+    .deck-ring {
+      display: none;
+    }
+
+    .deck-title {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .deck-title-full {
+      display: none;
+    }
+
+    .deck-title-short {
+      display: inline;
+    }
+
+    .deck-toolbar {
+      flex-direction: row;
+      align-items: center;
       gap: 8px;
     }
 
-    .strength-set-row {
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
+    .slot-segment {
+      flex: 1 1 auto;
+    }
+
+    .slot-seg {
+      min-height: 38px;
+    }
+
+    .deck-nav-mobile {
+      flex: 0 0 auto;
+      margin-left: 0;
+    }
+
+    .deck-nav-mini {
+      width: 38px;
+      height: 38px;
+    }
+
+    .session-toolbar {
+      flex-direction: row;
       align-items: center;
-      padding: 8px;
+      gap: 10px;
+      padding: 10px 12px;
+    }
+
+    .toolbar-main h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .toolbar-status {
+      display: none;
+    }
+
+    .toolbar-actions {
+      width: auto;
+      margin-left: auto;
+      justify-content: flex-end;
+    }
+
+    .toolbar-actions .button {
+      display: none;
+    }
+
+    .toolbar-actions .button-primary {
+      display: inline-flex;
+      flex: 0 0 auto;
+      min-height: 34px;
+      padding: 0 10px;
+      font-size: 9px;
+    }
+
+    .exercise-item {
+      display: block;
+      padding: 12px 10px;
+    }
+
+    .exercise-index {
+      display: none;
+    }
+
+    .exercise-heading {
+      position: relative;
+      display: block;
+    }
+
+    .exercise-heading > div:first-child {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .exercise-heading h3 {
+      margin: 2px 0 0;
+      padding-right: 54px;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .exercise-actions {
+      position: absolute;
+      top: 0;
+      right: 0;
+      gap: 0;
+    }
+
+    .exercise-actions .exercise-bulk-action,
+    .exercise-actions .exercise-record-action {
+      display: none;
+    }
+
+    .exercise-actions .exercise-plan-action {
+      min-height: 30px;
+      padding: 0 7px;
+      color: var(--muted);
+      background: transparent;
+      border-color: var(--line);
+      font-size: 8px;
+    }
+
+    .plan-action-full {
+      display: none;
+    }
+
+    .plan-action-short {
+      display: inline;
+    }
+
+    .plan-meta {
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .plan-meta > .rx,
+    .plan-meta > .plan-target,
+    .set-list-heading,
+    .quick-plan-actions,
+    .rx-sub {
+      display: none;
+    }
+
+    .protocol-skip-note {
+      display: none;
+    }
+
+    .plan-sets-editable {
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .strength-set-row {
+      grid-template-columns: 78px minmax(0, 1fr) 46px;
+      gap: 6px;
+      align-items: center;
+      min-height: 52px;
+      padding: 4px;
     }
 
     .strength-set-row > .set-chip {
       grid-column: 1;
       grid-row: 1;
+      width: 78px;
+      flex-basis: 78px;
+      padding-inline: 6px;
+      font-size: 11px;
     }
 
     .strength-set-row > .set-controls {
-      grid-column: 1 / -1;
-      grid-row: 2;
+      grid-column: 2;
+      grid-row: 1;
       grid-template-columns: minmax(0, 1fr);
-      gap: 6px;
+      gap: 0;
     }
 
     .strength-set-row .set-weight-control-plan {
       display: none;
     }
 
+    .strength-set-row .set-weight-control-fact {
+      gap: 0;
+    }
+
+    .strength-set-row .set-source {
+      display: none;
+    }
+
     .strength-set-row > .set-action-pair {
-      grid-column: 2;
+      grid-column: 3;
       grid-row: 1;
     }
 
     .strength-set-row .set-done-btn,
     .strength-set-row .set-undo-btn {
-      width: auto;
-      min-width: 104px;
-      padding: 0 13px;
+      width: 46px;
+      min-width: 46px;
+      height: 46px;
+      padding: 0;
+    }
+
+    .strength-set-row:not(.set-done):not(.set-failed) > .set-controls {
+      grid-column: 3;
+    }
+
+    .strength-set-row:not(.set-done):not(.set-failed) > .set-action-pair {
+      grid-column: 2;
+      width: 100%;
+    }
+
+    .strength-set-row:not(.set-done):not(.set-failed) .set-done-btn {
+      width: 100%;
       gap: 7px;
     }
 
-    .set-action-label {
+    .strength-set-row:not(.set-done):not(.set-failed) .set-action-label {
       display: inline;
       font-family: var(--font-mono);
       font-size: 9px;
       font-weight: 800;
       letter-spacing: 0.05em;
       text-transform: uppercase;
+    }
+
+    .strength-set-row .set-stepper,
+    .strength-set-row .set-stepper-placeholder,
+    .strength-set-row .set-skip-btn {
+      height: 46px;
+    }
+
+    .strength-set-row .set-skip-btn {
+      padding: 0 2px;
+      font-size: 7px;
+    }
+
+    .set-skip-full {
+      display: none;
+    }
+
+    .set-skip-short {
+      display: inline;
     }
 
     .set-action-icon {
@@ -3896,6 +4132,10 @@
 
     .set-stepper-placeholder {
       font-size: 7px;
+    }
+
+    .inline-plan-editor {
+      margin-left: 0;
     }
   }
 </style>
