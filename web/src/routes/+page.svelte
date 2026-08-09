@@ -887,7 +887,7 @@
     return planDraft ? loggedSetsFor(entryByExercise.get(planDraft.exercise)).length : 0;
   }
 
-  async function confirmSet(exerciseName: string, setIndex: number) {
+  async function confirmSet(exerciseName: string, setIndex: number, failed = false) {
     if (protocolSkips.has(exerciseName)) return;
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
@@ -900,11 +900,12 @@
     const nextFailedSets = new Set(
       failedSetsFor(existing).filter((index) => index >= 0 && index < recordedSets.length)
     );
-    nextFailedSets.delete(setIndex);
+    if (failed) nextFailedSets.add(setIndex);
+    else nextFailedSets.delete(setIndex);
     const doneAll = recordedSets.length >= preview.sets.length;
     const message = doneAll
       ? `Записано: ${exerciseName}`
-      : `Подход ${setIndex + 1} · ${exerciseName}`;
+      : `${failed ? 'Не выполнен' : 'Подход'} ${setIndex + 1} · ${exerciseName}`;
     await saveSetsFor(
       exerciseName,
       preview.kind,
@@ -1811,11 +1812,25 @@
                                   </div>
                                   <div class="set-weight-control set-weight-control-fact">
                                     {#if setDone}
-                                      <span class="set-source">{setFailed ? 'не выполнен' : 'факт'} · {displaySet[1]} повт</span>
-                                      {@render setStepper(exercise, setIndex, displaySet[0], setBusy, 'fact')}
+                                      {#if setFailed}
+                                        <span class="set-source">факт</span>
+                                        <div class="set-stepper-placeholder set-skipped-placeholder">не сделал</div>
+                                      {:else}
+                                        <span class="set-source">факт · {displaySet[1]} повт</span>
+                                        {@render setStepper(exercise, setIndex, displaySet[0], setBusy, 'fact')}
+                                      {/if}
                                     {:else}
                                       <span class="set-source">факт</span>
-                                      <div class="set-stepper-placeholder">после ✓</div>
+                                      <button
+                                        type="button"
+                                        class="set-skip-btn"
+                                        aria-label="Отметить подход {setIndex + 1} как не выполненный"
+                                        disabled={setBusy || setLocked}
+                                        title={setLocked ? 'Сначала отметьте предыдущий подход' : 'Подход был в плане, но не выполнен'}
+                                        onclick={() => confirmSet(exercise, setIndex, true)}
+                                      >
+                                        {setBusy ? '…' : 'не сделал'}
+                                      </button>
                                     {/if}
                                   </div>
                                 </div>
@@ -3153,6 +3168,45 @@
     white-space: nowrap;
   }
 
+  .set-skip-btn {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+    place-items: center;
+    padding: 0 8px;
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 4%, #0a0c10);
+    border: 1px dashed color-mix(in srgb, var(--danger) 45%, var(--line));
+    font-family: var(--font-mono);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .set-skip-btn:hover:not(:disabled) {
+    color: #fff;
+    background: var(--danger);
+    border-color: var(--danger);
+    border-style: solid;
+  }
+
+  .set-skip-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .set-skipped-placeholder {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 8%, #0a0c10);
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+    border-style: solid;
+    font-weight: 700;
+  }
+
   .set-chip {
     display: inline-flex;
     align-items: center;
@@ -3725,6 +3779,10 @@
     }
 
     .set-stepper-placeholder {
+      height: 44px;
+    }
+
+    .set-skip-btn {
       height: 44px;
     }
 
