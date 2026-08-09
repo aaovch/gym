@@ -92,6 +92,7 @@ export type SetInput = {
 	id: string;
 	weight: string;
 	reps: string;
+	failed?: boolean;
 };
 
 export type RowInput = {

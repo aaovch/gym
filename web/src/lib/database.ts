@@ -32,13 +32,31 @@ export function parseSetInputs(inputs: SetInput[]): ExerciseSet[] {
 }
 
 export function rowInputToSessionRow(row: RowInput, kind: ExerciseKind = 'strength'): SessionRow | null {
-	const sets = parseSetInputs(row.sets);
+	const sets: ExerciseSet[] = [];
+	const failedSets: number[] = [];
+	for (const input of row.sets) {
+		const parsed = parseSetInputs([input])[0];
+		if (!parsed) continue;
+		if (input.failed) failedSets.push(sets.length);
+		sets.push(parsed);
+	}
 	if (sets.length === 0) return null;
 	return {
 		kind,
 		sets,
-		comment: row.comment.trim() || null
+		comment: row.comment.trim() || null,
+		...(failedSets.length ? { failedSets } : {})
 	};
+}
+
+export function completedEntrySets(entry: Pick<WorkoutEntry, 'sets' | 'failedSets'>): ExerciseSet[] {
+	const failed = new Set(entry.failedSets ?? []);
+	return entry.sets.filter((_, index) => !failed.has(index));
+}
+
+export function completedRowSets(row: Pick<SessionRow, 'sets' | 'failedSets'>): ExerciseSet[] {
+	const failed = new Set(row.failedSets ?? []);
+	return row.sets.filter((_, index) => !failed.has(index));
 }
 
 export function sessionToEntry(session: WorkoutSession): WorkoutEntry {

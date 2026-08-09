@@ -10,7 +10,6 @@ import {
 	refreshAllMesoAnchors,
 	repairMicroDatesFromAuto,
 	suggestSessionIndex,
-	unassignSessionDate,
 	type CyclePlan
 } from './cycle-plan';
 import { repairWorkoutLinks, summarizeLogMicroLinks } from './data-repair';
@@ -69,14 +68,6 @@ export type SaveExerciseLogInput = {
 	microSessionId?: string;
 	context?: SaveLogContext;
 };
-
-function hasMicroSessionLog(logs: ExerciseLog[], microSessionId: string): boolean {
-	return logs.some((log) => log.microSessionId === microSessionId);
-}
-
-function hasLogOnDate(logs: ExerciseLog[], date: string): boolean {
-	return logs.some((log) => log.date === date);
-}
 
 function microSessionContext(plan: CyclePlan, microSessionId: string): SaveLogContext | null {
 	for (const meso of plan.mesocycles) {
@@ -447,20 +438,9 @@ class WorkoutStore {
 
 	async deleteLog(logId: string) {
 		const db = this.database;
-		const removed = db.logs.find((item) => item.id === logId);
 		const logs = db.logs.filter((item) => item.id !== logId);
 		this.database = { ...db, logs };
 		this.persistDatabase();
-
-		if (
-			removed?.microSessionId &&
-			removed.date &&
-			this.cyclePlan &&
-			!hasMicroSessionLog(logs, removed.microSessionId) &&
-			!hasLogOnDate(logs, removed.date)
-		) {
-			this.persistCyclePlan(unassignSessionDate(this.cyclePlan, removed.date));
-		}
 	}
 
 	async deleteSession(sessionId: string) {

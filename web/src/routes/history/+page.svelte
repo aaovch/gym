@@ -3,6 +3,7 @@
   import { browser } from '$app/environment';
   import { base } from '$app/paths';
   import { formatDateRu, fmtNum } from '$lib/format';
+  import { completedRowSets } from '$lib/database';
   import type { ExerciseKind, ExerciseSet, WorkoutSession } from '$lib/types';
   import { workoutStore } from '$lib/workout-store';
 
@@ -48,7 +49,7 @@
   const totalSets = $derived(
     selectedSessions.reduce(
       (total, session) =>
-        total + session.rows.reduce((rowTotal, row) => rowTotal + row.sets.length, 0),
+		total + session.rows.reduce((rowTotal, row) => rowTotal + completedRowSets(row).length, 0),
       0
     )
   );
@@ -228,8 +229,10 @@
                 <div class="session-details">
                   {#each session.rows as row}
                     <div class="sets">
-                      {#each row.sets as set}
-                        <span>{setLabel(kind, set)}</span>
+					  {#each row.sets as set, setIndex}
+						<span class:failed-set={row.failedSets?.includes(setIndex)}>
+						  {row.failedSets?.includes(setIndex) ? '✗ ' : ''}{setLabel(kind, set)}
+						</span>
                       {/each}
                     </div>
                     {#if row.comment?.trim()}
@@ -387,6 +390,13 @@
     border: 1px solid var(--line);
     border-radius: 0;
     font-size: 10px;
+  }
+
+  .sets span.failed-set {
+	color: #ff8a8a;
+	border-color: rgb(255 107 107 / 45%);
+	background: rgb(255 107 107 / 9%);
+	text-decoration: line-through;
   }
 
   .session-comment {

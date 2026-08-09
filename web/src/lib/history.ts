@@ -1,4 +1,4 @@
-import { formatSetsCell } from './database';
+import { completedRowSets, formatSetsCell } from './database';
 import type { WorkoutSession } from './types';
 
 function epley1rm(weight: number, reps: number): number {
@@ -25,7 +25,7 @@ export function sessionsForExercise(
 }
 
 export function buildSessionHistoryItem(session: WorkoutSession): SessionHistoryItem | null {
-	const allSets = session.rows.flatMap((row) => row.sets);
+	const allSets = session.rows.flatMap((row) => completedRowSets(row));
 	if (allSets.length === 0) return null;
 
 	let bestSet = allSets[0];

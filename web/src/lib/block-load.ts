@@ -6,6 +6,7 @@ import {
 	type MovementBlockId
 } from './muscle-groups';
 import type { WorkoutEntry } from './types';
+import { completedEntrySets } from './database';
 
 export type LoadMetric = 'tonnage' | 'reps' | 'sets';
 
@@ -105,13 +106,13 @@ export function buildBlockWeeklyLoad(entries: WorkoutEntry[]): BlockLoadWeek[] {
 		}
 
 		const blockExercises = new Set<string>();
-		addEntryMetrics(blockTotals, entry.sets, entry.exercise, blockExercises);
+		addEntryMetrics(blockTotals, completedEntrySets(entry), entry.exercise, blockExercises);
 		if (blockExercises.size) {
 			blockTotals.exerciseCount = blockExercises.size;
 		}
 
 		const weekExercises = new Set<string>();
-		addEntryMetrics(week.total, entry.sets, entry.exercise, weekExercises);
+		addEntryMetrics(week.total, completedEntrySets(entry), entry.exercise, weekExercises);
 	}
 
 	return [...weekMap.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart));

@@ -147,10 +147,11 @@
 
 	function sessionRowToInput(row: WorkoutSession['rows'][number]): RowInput {
 		return {
-			sets: row.sets.map(([weight, reps]) => ({
+			sets: row.sets.map(([weight, reps], index) => ({
 				id: crypto.randomUUID(),
 				weight: String(weight).replace('.', ','),
-				reps: String(reps)
+				reps: String(reps),
+				failed: row.failedSets?.includes(index) ?? false
 			})),
 			comment: row.comment ?? ''
 		};

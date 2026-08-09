@@ -1,4 +1,5 @@
 import type { StrengthSummary, TrendPoint, WorkoutEntry } from './types';
+import { completedEntrySets } from './database';
 
 type SetPair = [number, number];
 
@@ -56,6 +57,7 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 			exercise: string;
 			kind: 'strength' | 'run' | 'jumps';
 			sessions: number;
+			metricSessions: number;
 			sets: number;
 			reps: number;
 			tonnage: number;
@@ -70,7 +72,6 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 	const trendMap = new Map<string, TrendPoint[]>();
 
 	for (const entry of entries) {
-		const metrics = computeEntryMetrics(entry.sets);
 		const kind = entry.kind;
 
 		if (!summaryMap.has(entry.exercise)) {
@@ -78,6 +79,7 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 				exercise: entry.exercise,
 				kind,
 				sessions: 0,
+				metricSessions: 0,
 				sets: 0,
 				reps: 0,
 				tonnage: 0,
@@ -91,11 +93,15 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 
 		const group = summaryMap.get(entry.exercise)!;
 		group.sessions += 1;
+		group.dates.push(entry.date);
+		const completedSets = completedEntrySets(entry);
+		if (!completedSets.length) continue;
+		const metrics = computeEntryMetrics(completedSets);
+		group.metricSessions += 1;
 		group.sets += metrics.sets;
 		group.reps += metrics.reps;
 		group.tonnage += metrics.tonnage;
 		group.avgIntensitySum += metrics.avgIntensity;
-		group.dates.push(entry.date);
 
 		if (metrics.maxWeight > group.maxWeight[0]) {
 			group.maxWeight = [metrics.maxWeight, metrics.maxWeightSet[1], entry.date];
@@ -131,8 +137,8 @@ export function buildWorkoutData(entries: WorkoutEntry[]) {
 			tonnage: Math.round(group.tonnage * 10) / 10,
 			periodStart: group.dates.length ? group.dates.reduce((a, b) => (a < b ? a : b)) : null,
 			periodEnd: group.dates.length ? group.dates.reduce((a, b) => (a > b ? a : b)) : null,
-			avgIntensity: group.sessions
-				? Math.round((group.avgIntensitySum / group.sessions) * 10) / 10
+			avgIntensity: group.metricSessions
+				? Math.round((group.avgIntensitySum / group.metricSessions) * 10) / 10
 				: 0,
 			best1rm: {
 				value: Math.round(group.best1rm[0] * 10) / 10,

@@ -69,7 +69,7 @@
 
 	<div class="sets-grid">
 		{#each row.sets as set, index (set.id)}
-      <div class="set-item">
+      <div class="set-item" class:set-failed={set.failed}>
         <span class="set-no" aria-hidden="true">{index + 1}</span>
         <label>
           <span>{firstLabel}</span>
@@ -91,6 +91,17 @@
         </label>
         <button type="button" class="button button-ghost button-danger set-remove" onclick={() => removeSet(index)} aria-label="Удалить подход">
           ×
+        </button>
+        <button
+          type="button"
+          class="button button-ghost set-status"
+          class:failed={set.failed}
+          aria-pressed={set.failed ? 'true' : 'false'}
+          aria-label={`Подход ${index + 1} не выполнен`}
+          title={set.failed ? 'Вернуть в выполненные' : 'Отметить как не выполненный'}
+          onclick={() => (set.failed = !set.failed)}
+        >
+          {set.failed ? '✗' : '✓'}
         </button>
       </div>
 		{/each}
@@ -133,7 +144,7 @@
 
   .set-item {
     display: grid;
-    grid-template-columns: 1.75rem 1fr 1fr auto;
+    grid-template-columns: 1.75rem 1fr 1fr auto auto;
     gap: 0.5rem;
     align-items: end;
   }
@@ -171,5 +182,22 @@
     min-height: 46px;
     min-width: 46px;
     padding: 0;
+  }
+
+  .set-status {
+    min-height: 46px;
+    min-width: 46px;
+    padding: 0;
+    color: var(--accent);
+  }
+
+  .set-status.failed {
+    color: #ff6b6b;
+    border-color: rgb(255 107 107 / 55%);
+    background: rgb(255 107 107 / 10%);
+  }
+
+  .set-item.set-failed input {
+    border-color: rgb(255 107 107 / 35%);
   }
 </style>

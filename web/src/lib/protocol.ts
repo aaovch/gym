@@ -1,4 +1,5 @@
 import type { ExerciseSet, WorkoutEntry } from './types';
+import { completedEntrySets } from './database';
 
 export function epley1rm(weight: number, reps: number): number {
 	return weight * (1 + reps / 30);
@@ -19,7 +20,7 @@ function best1rmFromEntries(
 	let best: Best1rmHit | null = null;
 	for (const entry of entries) {
 		if (entry.kind !== 'strength' || entry.exercise !== exercise || !predicate(entry.date)) continue;
-		for (const [weight, reps] of entry.sets) {
+		for (const [weight, reps] of completedEntrySets(entry)) {
 			const value = epley1rm(weight, reps);
 			if (!best || value > best.value) {
 				best = {
@@ -374,11 +375,12 @@ export function sessionIntensity(
 	anchor1rm: number,
 	targetPct: number
 ): SessionIntensity | null {
-	if (entry.kind !== 'strength' || !entry.sets.length || !anchor1rm) return null;
-	const tonnage = entry.sets.reduce((sum, [w, r]) => sum + w * r, 0);
-	const reps = entry.sets.reduce((sum, [, r]) => sum + r, 0);
+	const sets = completedEntrySets(entry);
+	if (entry.kind !== 'strength' || !sets.length || !anchor1rm) return null;
+	const tonnage = sets.reduce((sum, [w, r]) => sum + w * r, 0);
+	const reps = sets.reduce((sum, [, r]) => sum + r, 0);
 	const avgWeight = reps ? tonnage / reps : 0;
-	const maxWeight = Math.max(...entry.sets.map(([w]) => w));
+	const maxWeight = Math.max(...sets.map(([w]) => w));
 	return {
 		exercise: entry.exercise,
 		date: entry.date,

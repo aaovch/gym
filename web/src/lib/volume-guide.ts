@@ -6,6 +6,7 @@ import {
 } from './protocol';
 import type { VolumeGuideRow } from './training-theses.svelte';
 import type { WorkoutEntry } from './types';
+import { completedEntrySets } from './database';
 
 export const TRAINING_VOLUME_GUIDE_ID = 'training-volume-by-intensity';
 
@@ -58,7 +59,7 @@ export function resolveVolumeAnchor1rm(
 	for (const entry of entries) {
 		if (entry.exercise !== exercise || entry.date !== date) continue;
 		if (excludeSessionId && entry.id === excludeSessionId) continue;
-		for (const [weight, reps] of entry.sets) {
+		for (const [weight, reps] of completedEntrySets(entry)) {
 			sameDayBest = Math.max(sameDayBest, epley1rm(weight, reps));
 		}
 	}
@@ -113,7 +114,7 @@ export function evaluateEntryVolume(
 	guideRows: VolumeGuideRow[]
 ): VolumeCheckResult | null {
 	if (entry.kind !== 'strength' || isCardioExercise(entry.exercise) || !anchor1rm) return null;
-	return evaluateSessionVolume(entry.sets, anchor1rm, guideRows);
+	return evaluateSessionVolume(completedEntrySets(entry), anchor1rm, guideRows);
 }
 
 export function volumeCheckLabel(result: VolumeCheckResult): string {

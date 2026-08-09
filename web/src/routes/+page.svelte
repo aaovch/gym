@@ -21,6 +21,7 @@
     type PlannedExercisePlan
   } from '$lib/cycle-plan';
   import { sessionPlanByIndex } from '$lib/micro-plan';
+  import { completedRowSets } from '$lib/database';
   import { mesoProtocolId, toExerciseId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, fmtSet, todayIso } from '$lib/format';
   import {
@@ -36,7 +37,7 @@
     type PlannedSetsInput
   } from '$lib/planned-sets';
   import { thesesStore } from '$lib/training-theses';
-  import type { ExerciseKind, ExerciseLog, ExerciseSet, WorkoutEntry } from '$lib/types';
+  import type { ExerciseKind, ExerciseLog, ExerciseSet, SessionRow, WorkoutEntry } from '$lib/types';
   import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
   import { deleteSession, saveCyclePlanState, saveExerciseLog, saveLog, workoutStore } from '$lib/workout-store';
   import { toasts } from '$lib/toast.svelte';
@@ -218,11 +219,11 @@
     slotExercises.filter((exercise) => !protocolSkips.has(exercise))
   );
   function isExerciseFullyLogged(exerciseName: string, entry?: WorkoutEntry): boolean {
-    if (!entry?.sets.length) return false;
-    if (entry.date !== todayIso()) return true;
+    const recordedSets = loggedSetsFor(entry);
+    if (!recordedSets.length) return false;
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return true;
-    return entry.sets.length >= preview.sets.length;
+    return recordedSets.length >= preview.sets.length;
   }
 
   const loggedPlanned = $derived(
@@ -336,15 +337,18 @@
 
     const logged = required.filter((exercise) => {
       if (!sessionDate) return false;
+      let entry: WorkoutEntry | undefined;
       if (msId) {
-        const linked = view.entries.some(
+        entry = view.entries.find(
           (entry) => entry.microSessionId === msId && entry.exercise === exercise
         );
-        if (linked) return true;
       }
-      return view.entries.some(
-        (entry) => entry.date === sessionDate && entry.exercise === exercise
+      entry ??= view.entries.find(
+        (candidate) => candidate.date === sessionDate && candidate.exercise === exercise
       );
+      if (!entry) return false;
+      const planned = plannedSetsForSession(meso, micro, index, exercise);
+      return planned ? loggedSetsFor(entry).length >= planned.sets.length : loggedSetsFor(entry).length > 0;
     }).length;
 
     return Math.round((logged / required.length) * 100);
@@ -523,6 +527,66 @@
     return { kind: input.kind, sets };
   }
 
+  function primaryLogRow(entry?: WorkoutEntry): SessionRow | null {
+    if (!entry?.id) return null;
+    return workoutStore.database.logs.find((item) => item.id === entry.id)?.blocks[0] ?? null;
+  }
+
+  function loggedSetsFor(entry?: WorkoutEntry): ExerciseSet[] {
+    const row = primaryLogRow(entry);
+    return row?.sets ?? entry?.sets ?? [];
+  }
+
+  function failedSetsFor(entry?: WorkoutEntry): number[] {
+    const row = primaryLogRow(entry);
+    return row?.failedSets ?? entry?.failedSets ?? [];
+  }
+
+  function completedLoggedSetsFor(entry?: WorkoutEntry): ExerciseSet[] {
+	const row = primaryLogRow(entry);
+	return row ? completedRowSets(row) : [];
+  }
+
+  function plannedSetsForSession(
+    meso: (typeof mesocycles)[number],
+    micro: EnrichedMicrocycle,
+    index: 0 | 1,
+    exerciseName: string
+  ): { kind: ExerciseKind; sets: ExerciseSet[] } | null {
+    const session = sessionPlanByIndex(micro.plan, index);
+    const exerciseId = toExerciseId(exerciseName, view.keyMaps);
+    const override = session?.exercisePlans?.[exerciseId];
+    if (override?.sets.length) {
+      return { kind: override.kind, sets: override.sets.map((set) => [...set] as ExerciseSet) };
+    }
+    const skip = exerciseProtocolSkipOnMicro(
+      view.cyclePlanForCalc,
+      meso.plan,
+      micro.plan,
+      exerciseName,
+      view.keyMaps
+    );
+    if (skip.skipped) return null;
+    const kind = exerciseKind(exerciseName);
+    const protocolId = mesoProtocolId(meso.plan, exerciseName, view.keyMaps) ?? meso.plan.templateId;
+    const guide = thesesStore.protocolGuideFor(protocolId);
+    const sets = suggestPlannedSets({
+      exercise: exerciseName,
+      kind,
+      date: session?.date ?? todayIso(),
+      entries: view.entries,
+      anchor1rm: meso.anchorInfo[exerciseName]?.anchor ?? null,
+      cyclePlan: view.cyclePlanForCalc,
+      meso: meso.plan,
+      micro: micro.plan,
+      keyMaps: view.keyMaps,
+      protocolGuideWeek: protocolGuideWeek(guide?.weeks, micro.plan.indexInMeso),
+      volumeGuideRows,
+      allowLastWorkoutFallback: Boolean(session?.date)
+    });
+    return sets.length ? { kind, sets } : null;
+  }
+
   function saveQuickPlanSets(exerciseName: string, kind: ExerciseKind, sets: ExerciseSet[]) {
     if (!mesocycle || !microcycle || activeIndex == null) return;
     if (!usingManualPlan) {
@@ -572,6 +636,17 @@
     saveQuickPlanSets(exerciseName, preview.kind, sets);
   }
 
+  function removeLastPlannedSet(exerciseName: string) {
+    const preview = adjustedPreviewSets(exerciseName);
+    const recordedCount = loggedSetsFor(entryByExercise.get(exerciseName)).length;
+    if (!preview || preview.sets.length <= Math.max(1, recordedCount)) return;
+    saveQuickPlanSets(
+      exerciseName,
+      preview.kind,
+      preview.sets.slice(0, -1).map((set) => [...set] as ExerciseSet)
+    );
+  }
+
   function fallbackPlanSet(kind: ExerciseKind): ExerciseSet {
     if (kind === 'run') return [20, 8];
     if (kind === 'jumps') return [3, 5];
@@ -616,16 +691,28 @@
   }
 
   function removePlanSet(setIndex: number) {
-    if (!planDraft || planDraft.sets.length <= 1) return;
+	const recordedSets = planDraft
+	  ? loggedSetsFor(entryByExercise.get(planDraft.exercise)).length
+	  : 0;
+    if (
+      !planDraft ||
+	  setIndex < recordedSets ||
+	  planDraft.sets.length <= Math.max(1, recordedSets)
+    ) return;
     planDraft.sets.splice(setIndex, 1);
     planDraft.customSets = true;
   }
 
   function resetPlanSetsToProtocol() {
     if (!planDraft) return;
+	const recordedSets = loggedSetsFor(entryByExercise.get(planDraft.exercise)).length;
     const input = plannedInput(planDraft.exercise);
     const calculated = input ? suggestPlannedSets(input) : [];
     const sets = calculated.length ? calculated : [fallbackPlanSet(planDraft.kind)];
+	if (sets.length < recordedSets) {
+	  toasts.error(`В записи уже есть подходов: ${recordedSets}. Сначала измените факт.`);
+      return;
+    }
     planDraft.sets = sets.map(([first, second]) => [String(first), String(second)]);
     planDraft.customSets = false;
   }
@@ -662,8 +749,13 @@
       return;
     }
     const sets = parsedDraftSets(planDraft);
+	const recordedSets = loggedSetsFor(entryByExercise.get(planDraft.exercise)).length;
     if (planDraft.customSets && !sets) {
       toasts.error('В каждом подходе должны быть два положительных числа.');
+      return;
+    }
+	if (planDraft.customSets && sets && sets.length < recordedSets) {
+	  toasts.error(`Нельзя оставить меньше ${recordedSets} подходов: они уже записаны в факте.`);
       return;
     }
 
@@ -740,12 +832,21 @@
     busyId = exerciseName;
     error = '';
     try {
-      const row: import('$lib/types').SessionRow = { kind, sets, comment: null };
-      if (failedSets?.length) row.failedSets = failedSets;
+      const existingLog = existingId
+        ? workoutStore.database.logs.find((item) => item.id === existingId)
+        : undefined;
+      const existingRow = existingLog?.blocks[0];
+      const normalizedFailedSets = failedSets ?? existingRow?.failedSets ?? [];
+      const row: SessionRow = {
+        kind,
+        sets,
+        comment: existingRow?.comment ?? null,
+        ...(normalizedFailedSets.length ? { failedSets: normalizedFailedSets } : {})
+      };
       await saveExerciseLog({
         exerciseName,
         date: workoutDate,
-        rows: [row],
+        rows: [row, ...(existingLog?.blocks.slice(1) ?? [])],
         id: existingId ?? crypto.randomUUID(),
         context: {
           mesoId: mesocycle.plan.id,
@@ -763,35 +864,46 @@
     }
   }
 
-  async function confirmSet(exerciseName: string, setIndex: number) {
+  function currentPlanDraftRecordedSets(): number {
+    return planDraft ? loggedSetsFor(entryByExercise.get(planDraft.exercise)).length : 0;
+  }
+
+  async function setRecordedStatus(exerciseName: string, setIndex: number, failed: boolean) {
     if (protocolSkips.has(exerciseName)) return;
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
-    const sets = preview.sets.slice(0, setIndex + 1);
     const existing = entryByExercise.get(exerciseName);
-    // Preserve existing failedSets for earlier indices
-    const prevFailed = existing?.failedSets?.filter((i) => i < setIndex) ?? [];
-    const doneAll = sets.length >= preview.sets.length;
+    const recordedSets = loggedSetsFor(existing).map((set) => [...set] as ExerciseSet);
+    if (setIndex > recordedSets.length || !preview.sets[setIndex]) return;
+    if (setIndex === recordedSets.length) {
+      recordedSets.push([...preview.sets[setIndex]] as ExerciseSet);
+    }
+    const nextFailedSets = new Set(
+      failedSetsFor(existing).filter((index) => index >= 0 && index < recordedSets.length)
+    );
+    if (failed) nextFailedSets.add(setIndex);
+    else nextFailedSets.delete(setIndex);
+    const doneAll = recordedSets.length >= preview.sets.length;
     const message = doneAll
       ? `Записано: ${exerciseName}`
-      : `Подход ${setIndex + 1} · ${exerciseName}`;
-    await saveSetsFor(exerciseName, preview.kind, sets, message, false, existing?.id, prevFailed.length ? prevFailed : undefined);
+      : `${failed ? '✗ ' : ''}Подход ${setIndex + 1} · ${exerciseName}`;
+    await saveSetsFor(
+      exerciseName,
+      preview.kind,
+      recordedSets,
+      message,
+      false,
+      existing?.id,
+      [...nextFailedSets].sort((a, b) => a - b)
+    );
+  }
+
+  async function confirmSet(exerciseName: string, setIndex: number) {
+    await setRecordedStatus(exerciseName, setIndex, false);
   }
 
   async function failSet(exerciseName: string, setIndex: number) {
-    if (protocolSkips.has(exerciseName)) return;
-    const preview = adjustedPreviewSets(exerciseName);
-    if (!preview) return;
-    const sets = preview.sets.slice(0, setIndex + 1);
-    const existing = entryByExercise.get(exerciseName);
-    // Collect existing failedSets + add this one
-    const prevFailed = existing?.failedSets?.filter((i) => i < setIndex) ?? [];
-    const failedSets = [...prevFailed, setIndex];
-    const doneAll = sets.length >= preview.sets.length;
-    const message = doneAll
-      ? `Записано: ${exerciseName}`
-      : `✗ Подход ${setIndex + 1} · ${exerciseName}`;
-    await saveSetsFor(exerciseName, preview.kind, sets, message, false, existing?.id, failedSets);
+    await setRecordedStatus(exerciseName, setIndex, true);
   }
 
   async function confirmPlanned(exerciseName: string) {
@@ -805,7 +917,8 @@
       preview.sets,
       `Записано: ${exerciseName}`,
       false,
-      existing?.id
+      existing?.id,
+      failedSetsFor(existing)
     );
   }
 
@@ -826,7 +939,8 @@
           preview.sets,
           '',
           true,
-          entryByExercise.get(exerciseName)?.id
+          entryByExercise.get(exerciseName)?.id,
+          failedSetsFor(entryByExercise.get(exerciseName))
         );
         if (!error) saved += 1;
         if (error) break;
@@ -1063,33 +1177,31 @@
   {/if}
 {/snippet}
 
-{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, failed: boolean, disabled: boolean)}
-  {#if done && failed}
-    <span class="set-failed-mark" aria-label="Подход {setIndex + 1} не выполнен">✗</span>
-  {:else if done}
-    <span class="set-done-mark" aria-label="Подход {setIndex + 1} выполнен">✓</span>
-  {:else}
-    <div class="set-action-pair">
-      <button
-        type="button"
-        class="set-done-btn"
-        aria-label="Записать подход {setIndex + 1}"
-        {disabled}
-        onclick={() => confirmSet(exercise, setIndex)}
-      >
-        {disabled ? '…' : '✓'}
-      </button>
-      <button
-        type="button"
-        class="set-fail-btn"
-        aria-label="Отметить подход {setIndex + 1} как невыполненный"
-        {disabled}
-        onclick={() => failSet(exercise, setIndex)}
-      >
-        {disabled ? '…' : '✗'}
-      </button>
-    </div>
-  {/if}
+{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, failed: boolean, disabled: boolean, locked: boolean)}
+  <div class="set-action-pair">
+    <button
+      type="button"
+      class="set-done-btn"
+      aria-label="Подход {setIndex + 1} выполнен"
+      aria-pressed={done && !failed}
+      disabled={disabled || locked}
+      title={locked ? 'Сначала отметьте предыдущий подход' : 'Записать как выполненный'}
+      onclick={() => confirmSet(exercise, setIndex)}
+    >
+      {disabled ? '…' : '✓'}
+    </button>
+    <button
+      type="button"
+      class="set-fail-btn"
+      aria-label="Подход {setIndex + 1} не выполнен"
+      aria-pressed={done && failed}
+      disabled={disabled || locked}
+      title={locked ? 'Сначала отметьте предыдущий подход' : 'Записать как невыполненный'}
+      onclick={() => failSet(exercise, setIndex)}
+    >
+      {disabled ? '…' : '✗'}
+    </button>
+  </div>
 {/snippet}
 
 {#snippet setStepper(exercise: string, setIndex: number, weight: number, disabled: boolean)}
@@ -1562,7 +1674,9 @@
           {@const protocolSkip = protocolSkips.get(exercise)}
           {@const previewSets = adjustedPreviewSets(exercise)}
           {@const fullyLogged = isExerciseFullyLogged(exercise, entry)}
-          {@const loggedCount = entry?.sets.length ?? 0}
+          {@const loggedSets = loggedSetsFor(entry)}
+          {@const loggedCount = loggedSets.length}
+          {@const failedSetIndexes = failedSetsFor(entry)}
           {@const comments = entry ? entryComments(entry) : []}
           <article
             class="exercise-item"
@@ -1585,30 +1699,12 @@
               <div class="exercise-heading">
                 <div>
                   <h3>{exercise}</h3>
-                  {#if fullyLogged && entry}
-                    <div class="plan-meta logged">
-                      <div class="plan-sets">
-                        {#each entry.sets as set, setIndex}
-                          <span class="set-chip">
-                            <em>{setIndex + 1}</em>{setChipText(entry.kind, set)}
-                          </span>
-                        {/each}
-                      </div>
-                      {#if comments.length}
-                        <div class="entry-comments">
-                          {#each comments as comment}
-                            <p>{comment}</p>
-                          {/each}
-                        </div>
-                      {/if}
-                      {@render specSub(entry.kind, entry.sets, hint?.anchor1rm ?? null, hint?.maxPct ?? null, 'макс')}
-                    </div>
-                  {:else if protocolSkip}
+                  {#if protocolSkip && !entry}
                     <div class="plan-meta protocol-skip">
                       <span class="protocol-skip-badge">Пропускаем в этом μ</span>
                       <span class="protocol-skip-note">По протоколу без силовой нагрузки</span>
                     </div>
-                  {:else if hint || previewSets}
+                  {:else if hint || previewSets || entry}
                     {@const ps = previewSets ? planStats(previewSets.sets) : null}
                     <div class="plan-meta">
                       {#if hint && ps?.uniform}
@@ -1628,19 +1724,26 @@
                         </div>
                       {/if}
                       {#if previewSets}
+                        <div class="set-list-heading">
+                          <strong>Подходы</strong>
+                          <span>{loggedCount} из {previewSets.sets.length} записано · автосохранение</span>
+                        </div>
                         <div class="plan-sets-editable">
                           {#each previewSets.sets as set, setIndex}
                             {@const setDone = setIndex < loggedCount}
-                            {@const setFailed = Boolean(entry?.failedSets?.includes(setIndex))}
+                            {@const setFailed = failedSetIndexes.includes(setIndex)}
                             {@const setBusy = busyId === exercise || planQuickBusy === exercise}
+                            {@const setLocked = setIndex > loggedCount}
+                            {@const displaySet = loggedSets[setIndex] ?? set}
                             <div class="set-row" class:set-done={setDone && !setFailed} class:set-failed={setDone && setFailed}>
                               <span class="set-chip">
-                                <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
+                                <em>{setIndex + 1}</em>{setChipText(previewSets.kind, displaySet)}
                               </span>
+                              <span class="set-source">{setDone ? (setFailed ? 'не выполнен' : 'факт') : 'план'}</span>
                               {#if previewSets.kind === 'strength' && !setDone}
                                 {@render setStepper(exercise, setIndex, set[0], setBusy)}
                               {/if}
-                              {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy)}
+                              {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
                             </div>
                           {/each}
                         </div>
@@ -1653,55 +1756,78 @@
                           >
                             {planQuickBusy === exercise ? 'Сохраняем…' : '+ Подход по плану'}
                           </button>
+                          {#if previewSets.sets.length > Math.max(1, loggedCount)}
+                            <button
+                              type="button"
+                              class="quick-plan-remove"
+                              disabled={planQuickBusy === exercise || busyId === exercise}
+                              onclick={() => removeLastPlannedSet(exercise)}
+                            >
+                              − Последний из плана
+                            </button>
+                          {/if}
                           {#if sessionExerciseOverride(exercise)}
                             <span>точный план этой тренировки</span>
                           {/if}
                         </div>
                         {@render specSub(
                           previewSets.kind,
-                          loggedCount > 0
-                            ? previewSets.sets.slice(0, loggedCount)
-                            : previewSets.sets,
+						  loggedCount > 0 ? completedLoggedSetsFor(entry) : previewSets.sets,
                           hint?.anchor1rm ?? null,
                           null,
                           ''
                         )}
+                      {:else if entry}
+                        <div class="plan-sets">
+                          {#each loggedSets as set, setIndex}
+                            <span class="set-chip">
+                              <em>{setIndex + 1}</em>{setChipText(entry.kind, set)}
+                            </span>
+                          {/each}
+                        </div>
+                      {/if}
+                      {#if comments.length}
+                        <div class="entry-comments">
+                          {#each comments as comment}
+                            <p>{comment}</p>
+                          {/each}
+                        </div>
                       {/if}
                     </div>
                   {/if}
                 </div>
                 <div class="exercise-actions">
-                  {#if fullyLogged && entry}
-                    <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
-                      Изменить план
-                    </button>
-                    <a class="text-button" href={addUrl(exercise, entry?.id)}>Изменить запись</a>
-                    {#if entry.id}
-                      <button
-                        type="button"
-                        class="text-button danger"
-                        disabled={busyId === entry.id}
-                        onclick={() => removeEntry(entry.id)}
-                      >
-                        {busyId === entry.id ? '…' : 'Удалить'}
-                      </button>
-                    {/if}
-                  {:else if protocolSkip}
+                  {#if protocolSkip && !entry}
                     <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
                       Изменить план
                     </button>
                   {:else}
-                    <button
-                      type="button"
-                      class="button button-primary"
-                      disabled={busyId === exercise}
-                      onclick={() => confirmPlanned(exercise)}
-                    >
-                      {busyId === exercise ? 'Сохраняем…' : 'Готово'}
-                    </button>
+                    {#if !fullyLogged && previewSets}
+                      <button
+                        type="button"
+                        class="button button-primary"
+                        disabled={busyId === exercise}
+                        onclick={() => confirmPlanned(exercise)}
+                      >
+                        {busyId === exercise ? 'Сохраняем…' : 'Записать все подходы'}
+                      </button>
+                    {/if}
                     <button class="button button-secondary" type="button" onclick={() => beginPlanEdit(exercise)}>
-                      Изменить
+                      Изменить план
                     </button>
+                    {#if entry}
+                      <a class="text-button" href={addUrl(exercise, entry.id)}>Изменить запись</a>
+                      {#if entry.id}
+                        <button
+                          type="button"
+                          class="text-button danger"
+                          disabled={busyId === entry.id}
+                          onclick={() => removeEntry(entry.id)}
+                        >
+                          {busyId === entry.id ? '…' : 'Удалить запись'}
+                        </button>
+                      {/if}
+                    {/if}
                   {/if}
                 </div>
               </div>
@@ -1769,11 +1895,14 @@
                             />
                           </label>
                           <button
-                            type="button"
-                            class="plan-set-remove"
-                            aria-label="Удалить подход {setIndex + 1}"
-                            disabled={planDraft.sets.length <= 1}
-                            onclick={() => removePlanSet(setIndex)}
+                             type="button"
+                             class="plan-set-remove"
+                             aria-label="Удалить подход {setIndex + 1}"
+                             disabled={setIndex < currentPlanDraftRecordedSets() || planDraft.sets.length <= Math.max(1, currentPlanDraftRecordedSets())}
+                             title={setIndex < currentPlanDraftRecordedSets()
+                               ? 'Этот подход уже есть в записи. Сначала измените факт.'
+                               : 'Удалить подход из плана'}
+                             onclick={() => removePlanSet(setIndex)}
                           >×</button>
                         </div>
                       {/each}
@@ -1875,8 +2004,10 @@
           <div>
             <strong>{entry.exercise}</strong>
             <div class="inline-sets">
-              {#each entry.sets as set}
-                <span>{setLabel(entry.kind, set)}</span>
+			  {#each entry.sets as set, setIndex}
+				<span class:failed-set={entry.failedSets?.includes(setIndex)}>
+				  {entry.failedSets?.includes(setIndex) ? '✗ ' : ''}{setLabel(entry.kind, set)}
+				</span>
               {/each}
             </div>
             {#if comments.length}
@@ -2672,8 +2803,9 @@
     margin-top: 2px;
   }
 
-  .quick-plan-add {
-    min-height: 32px;
+  .quick-plan-add,
+  .quick-plan-remove {
+    min-height: 36px;
     padding: 6px 10px;
     color: var(--accent);
     background: #0a0c10;
@@ -2686,13 +2818,20 @@
     cursor: pointer;
   }
 
-  .quick-plan-add:hover:not(:disabled) {
+  .quick-plan-remove {
+    color: var(--muted);
+    border-color: var(--line-strong);
+  }
+
+  .quick-plan-add:hover:not(:disabled),
+  .quick-plan-remove:hover:not(:disabled) {
     color: var(--accent-ink);
     background: var(--accent);
     border-style: solid;
   }
 
-  .quick-plan-add:disabled {
+  .quick-plan-add:disabled,
+  .quick-plan-remove:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
@@ -2711,6 +2850,40 @@
     gap: 8px;
   }
 
+  .set-list-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .set-list-heading span,
+  .set-source {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .set-source {
+    min-width: 86px;
+  }
+
+  .set-row.set-done .set-source {
+    color: var(--accent);
+  }
+
+  .set-row.set-failed .set-source {
+    color: var(--danger);
+  }
+
   .set-row.set-done .set-chip {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
@@ -2723,9 +2896,9 @@
     width: 36px;
     height: 36px;
     padding: 0;
-    color: var(--accent-ink);
-    background: var(--accent);
-    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, #0a0c10);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
     cursor: pointer;
     font-size: 14px;
     font-weight: 800;
@@ -2733,7 +2906,15 @@
   }
 
   .set-done-btn:hover:not(:disabled) {
-    filter: brightness(1.08);
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .set-done-btn[aria-pressed='true'] {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
   }
 
   .set-done-btn:disabled {
@@ -2741,37 +2922,9 @@
     cursor: not-allowed;
   }
 
-  .set-done-mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 12%, #0a0c10);
-    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
-    font-size: 14px;
-    font-weight: 800;
-    line-height: 1;
-  }
-
   .set-row.set-failed .set-chip {
     color: var(--danger);
     border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
-  }
-
-  .set-failed-mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    color: var(--danger);
-    background: color-mix(in srgb, var(--danger) 12%, #0a0c10);
-    border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
-    font-size: 14px;
-    font-weight: 800;
-    line-height: 1;
   }
 
   .set-action-pair {
@@ -2786,9 +2939,9 @@
     width: 36px;
     height: 36px;
     padding: 0;
-    color: #fff;
-    background: var(--danger);
-    border: 1px solid var(--danger);
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 8%, #0a0c10);
+    border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
     cursor: pointer;
     font-size: 14px;
     font-weight: 800;
@@ -2796,7 +2949,15 @@
   }
 
   .set-fail-btn:hover:not(:disabled) {
-    filter: brightness(1.08);
+    color: #fff;
+    background: var(--danger);
+    border-color: var(--danger);
+  }
+
+  .set-fail-btn[aria-pressed='true'] {
+    color: #fff;
+    background: var(--danger);
+    border-color: var(--danger);
   }
 
   .set-fail-btn:disabled {
@@ -3213,27 +3374,12 @@
     color: var(--danger);
   }
 
-  .set-list.compact {
-    margin-top: 8px;
-  }
-
-  .set-list.compact span {
-    padding: 4px 7px;
-    font-size: 10px;
-  }
-
-  .set-list,
   .inline-sets {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
   }
 
-  .set-list {
-    margin-top: 14px;
-  }
-
-  .set-list span,
   .inline-sets span {
     padding: 6px 9px;
     color: var(--muted-strong);
@@ -3243,6 +3389,13 @@
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 500;
+  }
+
+  .inline-sets span.failed-set {
+	color: #ff8a8a;
+	border-color: rgb(255 107 107 / 45%);
+	background: rgb(255 107 107 / 9%);
+	text-decoration: line-through;
   }
 
   .day-log {
