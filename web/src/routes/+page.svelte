@@ -2966,15 +2966,19 @@
   }
 
   .set-stepper {
-    display: inline-flex;
+    display: inline-grid;
+    grid-template-columns: 34px 54px 34px;
     align-items: center;
+    flex: 0 0 122px;
+    width: 122px;
     height: 36px;
     border: 1px solid var(--line);
     background: #0a0c10;
   }
 
   .set-stepper button {
-    width: 34px;
+    width: 100%;
+    min-width: 0;
     height: 100%;
     color: var(--text);
     background: transparent;
@@ -2995,14 +2999,16 @@
   }
 
   .set-stepper span {
-    min-width: 44px;
+    min-width: 0;
     padding: 0 4px;
     border-inline: 1px solid var(--line);
     color: var(--accent);
     text-align: center;
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: 11px;
     font-weight: 700;
+    white-space: nowrap;
   }
 
   .set-stepper span small {
@@ -3024,6 +3030,13 @@
     font-size: 12px;
     font-weight: 600;
     line-height: 1;
+  }
+
+  .plan-sets-editable .set-chip {
+    flex: 0 0 86px;
+    width: 86px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .set-chip em {
@@ -3559,7 +3572,13 @@
     }
 
     .set-stepper button {
-      width: 40px;
+      width: 100%;
+    }
+
+    .set-stepper {
+      grid-template-columns: 40px 54px 40px;
+      flex-basis: 134px;
+      width: 134px;
     }
 
     .exercise-index {
