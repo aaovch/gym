@@ -1221,7 +1221,7 @@
         title="Отменить запись подхода"
         onclick={() => undoRecordedSet(exercise, setIndex)}
       >
-        <span class="set-action-icon">{disabled ? '…' : '×'}</span>
+        <span class="set-action-icon">{disabled ? '…' : '↶'}</span>
         <span class="set-action-label">Отменить</span>
       </button>
     {:else}
@@ -1798,7 +1798,12 @@
                             >
                               {#if previewSets.kind === 'strength'}
                                 <span class="set-chip">
-                                  <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
+                                  <em>
+                                    <span class="set-number">{setIndex + 1}</span>
+                                    {#if setDone && !setFailed}
+                                      <span class="set-done-mark" aria-label="Подход выполнен">✓</span>
+                                    {/if}
+                                  </em>{setChipText(previewSets.kind, set)}
                                 </span>
                                 <div class="set-controls">
                                   <div class="set-weight-control set-weight-control-plan">
@@ -3261,6 +3266,10 @@
     text-align: center;
   }
 
+  .set-done-mark {
+    display: none;
+  }
+
   .exercise-item.complete .set-chip {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
@@ -4073,6 +4082,28 @@
       display: none;
     }
 
+    .strength-set-row.set-done .set-chip {
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 6%, #0a0c10);
+      border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+    }
+
+    .strength-set-row.set-done .set-chip em {
+      color: var(--accent);
+    }
+
+    .strength-set-row.set-done .set-number {
+      display: none;
+    }
+
+    .strength-set-row.set-done .set-done-mark {
+      display: inline;
+    }
+
+    .strength-set-row.set-done .set-stepper-fact {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+    }
+
     .strength-set-row > .set-action-pair {
       grid-column: 3;
       grid-row: 1;
@@ -4084,6 +4115,12 @@
       min-width: 46px;
       height: 46px;
       padding: 0;
+    }
+
+    .strength-set-row.set-done .set-undo-btn {
+      color: var(--muted-strong);
+      background: transparent;
+      border-color: var(--line-strong);
     }
 
     .strength-set-row:not(.set-done):not(.set-failed) > .set-controls {
