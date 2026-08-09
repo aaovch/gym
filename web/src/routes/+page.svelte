@@ -628,6 +628,25 @@
     saveQuickPlanSets(exerciseName, preview.kind, sets);
   }
 
+  async function nudgeRecordedSetWeight(exerciseName: string, setIndex: number, direction: 1 | -1) {
+    const preview = adjustedPreviewSets(exerciseName);
+    const existing = entryByExercise.get(exerciseName);
+    const sets = loggedSetsFor(existing).map((set) => [...set] as ExerciseSet);
+    if (!preview || preview.kind !== 'strength' || !existing?.id || !sets[setIndex]) return;
+    const [weight, reps] = sets[setIndex];
+    const nextWeight = Math.max(WEIGHT_STEP, Math.round((weight + direction * WEIGHT_STEP) * 2) / 2);
+    sets[setIndex] = [nextWeight, reps];
+    await saveSetsFor(
+      exerciseName,
+      preview.kind,
+      sets,
+      '',
+      true,
+      existing.id,
+      failedSetsFor(existing)
+    );
+  }
+
   function addPlannedSet(exerciseName: string) {
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
@@ -1204,22 +1223,32 @@
   </div>
 {/snippet}
 
-{#snippet setStepper(exercise: string, setIndex: number, weight: number, disabled: boolean)}
-  <div class="set-stepper" role="group" aria-label="Вес по плану для подхода {setIndex + 1}">
+{#snippet setStepper(exercise: string, setIndex: number, weight: number, disabled: boolean, mode: 'plan' | 'fact')}
+  <div
+    class="set-stepper"
+    class:set-stepper-plan={mode === 'plan'}
+    class:set-stepper-fact={mode === 'fact'}
+    role="group"
+    aria-label="Вес {mode === 'fact' ? 'по факту' : 'по плану'} для подхода {setIndex + 1}"
+  >
     <button
       type="button"
-      aria-label="Уменьшить вес по плану на {WEIGHT_STEP} кг"
+      aria-label="Уменьшить вес {mode === 'fact' ? 'по факту' : 'по плану'} на {WEIGHT_STEP} кг"
       {disabled}
-      onclick={() => nudgePlannedSetWeight(exercise, setIndex, -1)}
+      onclick={() => mode === 'fact'
+        ? nudgeRecordedSetWeight(exercise, setIndex, -1)
+        : nudgePlannedSetWeight(exercise, setIndex, -1)}
     >
       −
     </button>
     <span>{fmtNum(weight)}<small>кг</small></span>
     <button
       type="button"
-      aria-label="Увеличить вес по плану на {WEIGHT_STEP} кг"
+      aria-label="Увеличить вес {mode === 'fact' ? 'по факту' : 'по плану'} на {WEIGHT_STEP} кг"
       {disabled}
-      onclick={() => nudgePlannedSetWeight(exercise, setIndex, 1)}
+      onclick={() => mode === 'fact'
+        ? nudgeRecordedSetWeight(exercise, setIndex, 1)
+        : nudgePlannedSetWeight(exercise, setIndex, 1)}
     >
       +
     </button>
@@ -1735,15 +1764,37 @@
                             {@const setBusy = busyId === exercise || planQuickBusy === exercise}
                             {@const setLocked = setIndex > loggedCount}
                             {@const displaySet = loggedSets[setIndex] ?? set}
-                            <div class="set-row" class:set-done={setDone && !setFailed} class:set-failed={setDone && setFailed}>
-                              <span class="set-chip">
-                                <em>{setIndex + 1}</em>{setChipText(previewSets.kind, displaySet)}
-                              </span>
-                              <span class="set-source">{setDone ? (setFailed ? 'не выполнен' : 'факт') : 'план'}</span>
-                              {#if previewSets.kind === 'strength' && !setDone}
-                                {@render setStepper(exercise, setIndex, set[0], setBusy)}
+                            <div
+                              class="set-row"
+                              class:strength-set-row={previewSets.kind === 'strength'}
+                              class:set-done={setDone && !setFailed}
+                              class:set-failed={setDone && setFailed}
+                            >
+                              {#if previewSets.kind === 'strength'}
+                                <span class="set-chip">
+                                  <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
+                                </span>
+                                <div class="set-weight-control set-weight-control-plan">
+                                  <span class="set-source">план · {set[1]} повт</span>
+                                  {@render setStepper(exercise, setIndex, set[0], setBusy, 'plan')}
+                                </div>
+                                <div class="set-weight-control set-weight-control-fact">
+                                  {#if setDone}
+                                    <span class="set-source">{setFailed ? 'не выполнен' : 'факт'} · {displaySet[1]} повт</span>
+                                    {@render setStepper(exercise, setIndex, displaySet[0], setBusy, 'fact')}
+                                  {:else}
+                                    <span class="set-source">факт</span>
+                                    <div class="set-stepper-placeholder">после ✓ или ✗</div>
+                                  {/if}
+                                </div>
+                                {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
+                              {:else}
+                                <span class="set-chip">
+                                  <em>{setIndex + 1}</em>{setChipText(previewSets.kind, displaySet)}
+                                </span>
+                                <span class="set-source">{setDone ? (setFailed ? 'не выполнен' : 'факт') : 'план'}</span>
+                                {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
                               {/if}
-                              {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
                             </div>
                           {/each}
                         </div>
@@ -2850,6 +2901,25 @@
     gap: 8px;
   }
 
+  .strength-set-row {
+    display: grid;
+    grid-template-columns: 86px 122px 122px auto;
+    align-items: end;
+  }
+
+  .set-weight-control {
+    display: grid;
+    gap: 4px;
+  }
+
+  .set-weight-control .set-source {
+    min-width: 0;
+  }
+
+  .set-weight-control-plan .set-source {
+    color: var(--muted);
+  }
+
   .set-list-heading {
     display: flex;
     flex-wrap: wrap;
@@ -2882,6 +2952,11 @@
 
   .set-row.set-failed .set-source {
     color: var(--danger);
+  }
+
+  .set-row.set-done .set-weight-control-plan .set-source,
+  .set-row.set-failed .set-weight-control-plan .set-source {
+    color: var(--muted);
   }
 
   .set-row.set-done .set-chip {
@@ -3018,6 +3093,29 @@
     font-weight: 600;
   }
 
+  .set-stepper-plan span {
+    color: var(--muted-strong);
+  }
+
+  .set-row.set-failed .set-stepper-fact span {
+    color: var(--danger);
+  }
+
+  .set-stepper-placeholder {
+    display: grid;
+    width: 122px;
+    height: 36px;
+    place-items: center;
+    color: var(--muted);
+    background: #0a0c10;
+    border: 1px dashed var(--line-strong);
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
   .set-chip {
     display: inline-flex;
     align-items: center;
@@ -3037,6 +3135,12 @@
     width: 86px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+
+  .strength-set-row.set-done .set-chip,
+  .strength-set-row.set-failed .set-chip {
+    color: var(--muted-strong);
+    border-color: var(--line);
   }
 
   .set-chip em {
@@ -3581,6 +3685,15 @@
       width: 134px;
     }
 
+    .strength-set-row {
+      grid-template-columns: 86px 134px 134px auto;
+    }
+
+    .set-stepper-placeholder {
+      width: 134px;
+      height: 44px;
+    }
+
     .exercise-index {
       width: 30px;
       height: 30px;
@@ -3625,6 +3738,21 @@
     .day-log article {
       align-items: flex-start;
       flex-direction: column;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .strength-set-row {
+      grid-template-columns: 86px minmax(134px, 1fr) 94px;
+    }
+
+    .strength-set-row .set-weight-control-fact {
+      grid-column: 2;
+    }
+
+    .strength-set-row > .set-action-pair {
+      grid-column: 3;
+      grid-row: 1;
     }
   }
 </style>
