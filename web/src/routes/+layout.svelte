@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
-  import { afterNavigate, replaceState } from '$app/navigation';
+  import { afterNavigate } from '$app/navigation';
   import { base } from '$app/paths';
   import { page } from '$app/state';
   import { getGitHubToken, setGitHubToken } from '$lib/auth';
@@ -118,7 +118,9 @@
 
   function ensureProfileInUrl(urlSlug: string) {
     if (page.url.searchParams.get('profile') === urlSlug) return;
-    replaceState(urlForProfile(page.url, urlSlug), page.state);
+    // This can run while SvelteKit is still hydrating. Preserve its history
+    // payload and only normalize the address; route content does not change.
+    window.history.replaceState(window.history.state, '', urlForProfile(page.url, urlSlug));
   }
 
   afterNavigate(({ to }) => {

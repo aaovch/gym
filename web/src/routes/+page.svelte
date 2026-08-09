@@ -911,7 +911,7 @@
       preview.kind,
       recordedSets,
       message,
-      false,
+      true,
       existing?.id,
       [...nextFailedSets].sort((a, b) => a - b)
     );
@@ -1774,18 +1774,20 @@
                                 <span class="set-chip">
                                   <em>{setIndex + 1}</em>{setChipText(previewSets.kind, set)}
                                 </span>
-                                <div class="set-weight-control set-weight-control-plan">
-                                  <span class="set-source">план · {set[1]} повт</span>
-                                  {@render setStepper(exercise, setIndex, set[0], setBusy, 'plan')}
-                                </div>
-                                <div class="set-weight-control set-weight-control-fact">
-                                  {#if setDone}
-                                    <span class="set-source">{setFailed ? 'не выполнен' : 'факт'} · {displaySet[1]} повт</span>
-                                    {@render setStepper(exercise, setIndex, displaySet[0], setBusy, 'fact')}
-                                  {:else}
-                                    <span class="set-source">факт</span>
-                                    <div class="set-stepper-placeholder">после ✓ или ✗</div>
-                                  {/if}
+                                <div class="set-controls">
+                                  <div class="set-weight-control set-weight-control-plan">
+                                    <span class="set-source">план · {set[1]} повт</span>
+                                    {@render setStepper(exercise, setIndex, set[0], setBusy, 'plan')}
+                                  </div>
+                                  <div class="set-weight-control set-weight-control-fact">
+                                    {#if setDone}
+                                      <span class="set-source">{setFailed ? 'не выполнен' : 'факт'} · {displaySet[1]} повт</span>
+                                      {@render setStepper(exercise, setIndex, displaySet[0], setBusy, 'fact')}
+                                    {:else}
+                                      <span class="set-source">факт</span>
+                                      <div class="set-stepper-placeholder">после ✓ или ✗</div>
+                                    {/if}
+                                  </div>
                                 </div>
                                 {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
                               {:else}
@@ -2843,6 +2845,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    width: min(100%, 560px);
     margin-top: 4px;
   }
 
@@ -2903,13 +2906,28 @@
 
   .strength-set-row {
     display: grid;
-    grid-template-columns: 86px 122px 122px auto;
+    grid-template-columns: 86px minmax(252px, 1fr) auto;
     align-items: end;
+    padding: 7px;
+    background: rgb(8 10 13 / 55%);
+    border: 1px solid transparent;
+  }
+
+  .strength-set-row:hover {
+    border-color: var(--line);
+  }
+
+  .set-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    min-width: 0;
   }
 
   .set-weight-control {
     display: grid;
     gap: 4px;
+    min-width: 0;
   }
 
   .set-weight-control .set-source {
@@ -3042,10 +3060,10 @@
 
   .set-stepper {
     display: inline-grid;
-    grid-template-columns: 34px 54px 34px;
+    grid-template-columns: 34px minmax(48px, 1fr) 34px;
     align-items: center;
-    flex: 0 0 122px;
-    width: 122px;
+    width: 100%;
+    min-width: 0;
     height: 36px;
     border: 1px solid var(--line);
     background: #0a0c10;
@@ -3103,7 +3121,8 @@
 
   .set-stepper-placeholder {
     display: grid;
-    width: 122px;
+    width: 100%;
+    min-width: 0;
     height: 36px;
     place-items: center;
     color: var(--muted);
@@ -3680,17 +3699,14 @@
     }
 
     .set-stepper {
-      grid-template-columns: 40px 54px 40px;
-      flex-basis: 134px;
-      width: 134px;
+      grid-template-columns: 40px minmax(46px, 1fr) 40px;
     }
 
     .strength-set-row {
-      grid-template-columns: 86px 134px 134px auto;
+      grid-template-columns: 86px minmax(280px, 1fr) auto;
     }
 
     .set-stepper-placeholder {
-      width: 134px;
       height: 44px;
     }
 
@@ -3742,17 +3758,35 @@
   }
 
   @media (max-width: 520px) {
-    .strength-set-row {
-      grid-template-columns: 86px minmax(134px, 1fr) 94px;
+    .plan-sets-editable {
+      gap: 8px;
     }
 
-    .strength-set-row .set-weight-control-fact {
-      grid-column: 2;
+    .strength-set-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px;
+    }
+
+    .strength-set-row > .set-chip {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .strength-set-row > .set-controls {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      gap: 6px;
     }
 
     .strength-set-row > .set-action-pair {
-      grid-column: 3;
+      grid-column: 2;
       grid-row: 1;
+    }
+
+    .set-stepper-placeholder {
+      font-size: 7px;
     }
   }
 </style>
