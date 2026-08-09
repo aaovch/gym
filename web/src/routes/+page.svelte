@@ -477,12 +477,16 @@
     const tonnage = sets.reduce((sum, [weight, reps]) => sum + weight * reps, 0);
     const repsList = sets.map(([, reps]) => reps);
     const weightList = sets.map(([weight]) => weight);
+    const averageWeight = count
+      ? weightList.reduce((sum, weight) => sum + weight, 0) / count
+      : 0;
     const uniformReps = repsList.length > 0 && repsList.every((reps) => reps === repsList[0]);
     const uniformWeight = weightList.length > 0 && weightList.every((w) => w === weightList[0]);
     return {
       count,
       totalReps,
       tonnage,
+      averageWeight,
       maxWeight: weightList.length ? Math.max(...weightList) : 0,
       uniform: count > 0 && uniformReps && uniformWeight,
       weight: weightList[0] ?? 0,
@@ -1199,6 +1203,7 @@
     <p class="rx-sub">
       {#if anchor1rm}<span>1ПМ {fmtNum(anchor1rm)} кг</span>{/if}
       {#if pct}<span>{pct}% {pctLabel}</span>{/if}
+      <span class="average-weight">ср. вес {fmtNum(st.averageWeight)} кг</span>
       <span>Σ {st.totalReps} повт</span>
       <span>объём {fmtNum(st.tonnage)} кг</span>
     </p>
@@ -4000,7 +4005,26 @@
     .plan-meta > .plan-target,
     .set-list-heading,
     .quick-plan-actions,
+    .rx-sub span:not(.average-weight) {
+      display: none;
+    }
+
     .rx-sub {
+      display: flex;
+      margin-top: 6px;
+    }
+
+    .rx-sub .average-weight {
+      display: inline-flex;
+      padding: 4px 7px;
+      color: var(--accent);
+      background: #0a0c10;
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .rx-sub .average-weight::before {
       display: none;
     }
 
