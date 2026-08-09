@@ -1237,7 +1237,8 @@
         title="Отменить запись подхода"
         onclick={() => undoRecordedSet(exercise, setIndex)}
       >
-        {disabled ? '…' : '×'}
+        <span class="set-action-icon">{disabled ? '…' : '×'}</span>
+        <span class="set-action-label">Отменить</span>
       </button>
     {:else}
       <button
@@ -1248,7 +1249,8 @@
         title={locked ? 'Сначала отметьте предыдущий подход' : 'Записать подход'}
         onclick={() => confirmSet(exercise, setIndex)}
       >
-        {disabled ? '…' : '✓'}
+        <span class="set-action-icon">{disabled ? '…' : '✓'}</span>
+        <span class="set-action-label">Сделал</span>
       </button>
     {/if}
   </div>
@@ -3064,6 +3066,10 @@
     gap: 4px;
   }
 
+  .set-action-label {
+    display: none;
+  }
+
   .set-undo-btn {
     display: inline-flex;
     align-items: center;
@@ -3853,12 +3859,39 @@
     .strength-set-row > .set-controls {
       grid-column: 1 / -1;
       grid-row: 2;
+      grid-template-columns: minmax(0, 1fr);
       gap: 6px;
+    }
+
+    .strength-set-row .set-weight-control-plan {
+      display: none;
     }
 
     .strength-set-row > .set-action-pair {
       grid-column: 2;
       grid-row: 1;
+    }
+
+    .strength-set-row .set-done-btn,
+    .strength-set-row .set-undo-btn {
+      width: auto;
+      min-width: 104px;
+      padding: 0 13px;
+      gap: 7px;
+    }
+
+    .set-action-label {
+      display: inline;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .set-action-icon {
+      font-size: 16px;
+      line-height: 1;
     }
 
     .set-stepper-placeholder {
