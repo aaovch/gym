@@ -887,7 +887,7 @@
     return planDraft ? loggedSetsFor(entryByExercise.get(planDraft.exercise)).length : 0;
   }
 
-  async function setRecordedStatus(exerciseName: string, setIndex: number, failed: boolean) {
+  async function confirmSet(exerciseName: string, setIndex: number) {
     if (protocolSkips.has(exerciseName)) return;
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
@@ -900,12 +900,11 @@
     const nextFailedSets = new Set(
       failedSetsFor(existing).filter((index) => index >= 0 && index < recordedSets.length)
     );
-    if (failed) nextFailedSets.add(setIndex);
-    else nextFailedSets.delete(setIndex);
+    nextFailedSets.delete(setIndex);
     const doneAll = recordedSets.length >= preview.sets.length;
     const message = doneAll
       ? `Записано: ${exerciseName}`
-      : `${failed ? '✗ ' : ''}Подход ${setIndex + 1} · ${exerciseName}`;
+      : `Подход ${setIndex + 1} · ${exerciseName}`;
     await saveSetsFor(
       exerciseName,
       preview.kind,
@@ -917,12 +916,42 @@
     );
   }
 
-  async function confirmSet(exerciseName: string, setIndex: number) {
-    await setRecordedStatus(exerciseName, setIndex, false);
-  }
+  async function undoRecordedSet(exerciseName: string, setIndex: number) {
+    const preview = adjustedPreviewSets(exerciseName);
+    const existing = entryByExercise.get(exerciseName);
+    if (!preview || !existing?.id) return;
+    const recordedSets = loggedSetsFor(existing).map((set) => [...set] as ExerciseSet);
+    if (setIndex < 0 || setIndex >= recordedSets.length) return;
 
-  async function failSet(exerciseName: string, setIndex: number) {
-    await setRecordedStatus(exerciseName, setIndex, true);
+    recordedSets.splice(setIndex, 1);
+    const nextFailedSets = failedSetsFor(existing)
+      .filter((index) => index !== setIndex)
+      .map((index) => (index > setIndex ? index - 1 : index));
+
+    if (recordedSets.length) {
+      await saveSetsFor(
+        exerciseName,
+        preview.kind,
+        recordedSets,
+        '',
+        true,
+        existing.id,
+        nextFailedSets
+      );
+      return;
+    }
+
+    busyId = exerciseName;
+    error = '';
+    try {
+      await deleteSession(existing.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось отменить подход';
+      error = message;
+      toasts.error(message);
+    } finally {
+      busyId = null;
+    }
   }
 
   async function confirmPlanned(exerciseName: string) {
@@ -1196,30 +1225,31 @@
   {/if}
 {/snippet}
 
-{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, failed: boolean, disabled: boolean, locked: boolean)}
+{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, disabled: boolean, locked: boolean)}
   <div class="set-action-pair">
-    <button
-      type="button"
-      class="set-done-btn"
-      aria-label="Подход {setIndex + 1} выполнен"
-      aria-pressed={done && !failed}
-      disabled={disabled || locked}
-      title={locked ? 'Сначала отметьте предыдущий подход' : 'Записать как выполненный'}
-      onclick={() => confirmSet(exercise, setIndex)}
-    >
-      {disabled ? '…' : '✓'}
-    </button>
-    <button
-      type="button"
-      class="set-fail-btn"
-      aria-label="Подход {setIndex + 1} не выполнен"
-      aria-pressed={done && failed}
-      disabled={disabled || locked}
-      title={locked ? 'Сначала отметьте предыдущий подход' : 'Записать как невыполненный'}
-      onclick={() => failSet(exercise, setIndex)}
-    >
-      {disabled ? '…' : '✗'}
-    </button>
+    {#if done}
+      <button
+        type="button"
+        class="set-undo-btn"
+        aria-label="Отменить запись подхода {setIndex + 1}"
+        {disabled}
+        title="Отменить запись подхода"
+        onclick={() => undoRecordedSet(exercise, setIndex)}
+      >
+        {disabled ? '…' : '×'}
+      </button>
+    {:else}
+      <button
+        type="button"
+        class="set-done-btn"
+        aria-label="Записать подход {setIndex + 1}"
+        disabled={disabled || locked}
+        title={locked ? 'Сначала отметьте предыдущий подход' : 'Записать подход'}
+        onclick={() => confirmSet(exercise, setIndex)}
+      >
+        {disabled ? '…' : '✓'}
+      </button>
+    {/if}
   </div>
 {/snippet}
 
@@ -1785,17 +1815,17 @@
                                       {@render setStepper(exercise, setIndex, displaySet[0], setBusy, 'fact')}
                                     {:else}
                                       <span class="set-source">факт</span>
-                                      <div class="set-stepper-placeholder">после ✓ или ✗</div>
+                                      <div class="set-stepper-placeholder">после ✓</div>
                                     {/if}
                                   </div>
                                 </div>
-                                {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
+                                {@render setDoneButton(exercise, setIndex, setDone, setBusy, setLocked)}
                               {:else}
                                 <span class="set-chip">
                                   <em>{setIndex + 1}</em>{setChipText(previewSets.kind, displaySet)}
                                 </span>
                                 <span class="set-source">{setDone ? (setFailed ? 'не выполнен' : 'факт') : 'план'}</span>
-                                {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
+                                {@render setDoneButton(exercise, setIndex, setDone, setBusy, setLocked)}
                               {/if}
                             </div>
                           {/each}
@@ -3004,12 +3034,6 @@
     border-color: var(--accent);
   }
 
-  .set-done-btn[aria-pressed='true'] {
-    color: var(--accent-ink);
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-
   .set-done-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -3025,7 +3049,7 @@
     gap: 4px;
   }
 
-  .set-fail-btn {
+  .set-undo-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3036,24 +3060,18 @@
     background: color-mix(in srgb, var(--danger) 8%, #0a0c10);
     border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
     cursor: pointer;
-    font-size: 14px;
+    font-size: 18px;
     font-weight: 800;
     line-height: 1;
   }
 
-  .set-fail-btn:hover:not(:disabled) {
+  .set-undo-btn:hover:not(:disabled) {
     color: #fff;
     background: var(--danger);
     border-color: var(--danger);
   }
 
-  .set-fail-btn[aria-pressed='true'] {
-    color: #fff;
-    background: var(--danger);
-    border-color: var(--danger);
-  }
-
-  .set-fail-btn:disabled {
+  .set-undo-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
@@ -3684,13 +3702,13 @@
     }
 
     .set-done-btn,
-    .set-fail-btn,
+    .set-undo-btn,
     .set-stepper {
       height: 44px;
     }
 
     .set-done-btn,
-    .set-fail-btn {
+    .set-undo-btn {
       width: 44px;
     }
 
