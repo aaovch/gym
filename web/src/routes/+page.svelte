@@ -306,18 +306,18 @@
 
     const msId = sessionPlanByIndex(micro.plan, index)?.id ?? null;
     const sessionDate = sessionDateForIndex(micro, index);
+    const sessionEntries = plannedEntriesForSession(view.entries, {
+      activeMicroSessionId: msId,
+      validMicroSessionIds,
+      workoutDate: sessionDate ?? '',
+      slotExercises: exercises
+    });
+    const sessionEntryByExercise = new Map(
+      sessionEntries.map((entry) => [entry.exercise, entry])
+    );
 
     const logged = required.filter((exercise) => {
-      if (!sessionDate) return false;
-      let entry: WorkoutEntry | undefined;
-      if (msId) {
-        entry = view.entries.find(
-          (entry) => entry.microSessionId === msId && entry.exercise === exercise
-        );
-      }
-      entry ??= view.entries.find(
-        (candidate) => candidate.date === sessionDate && candidate.exercise === exercise
-      );
+      const entry = sessionEntryByExercise.get(exercise);
       if (!entry) return false;
       const planned = plannedSetsForSession(meso, micro, index, exercise);
       return planned ? loggedSetsFor(entry).length >= planned.sets.length : loggedSetsFor(entry).length > 0;

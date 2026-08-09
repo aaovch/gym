@@ -46,6 +46,16 @@ test('same-date records linked to another session are not claimed by the active 
 	assert.deepEqual(extraEntriesForSession(entries, context), []);
 });
 
+test('shared exercise from another session cannot complete active-session progress', () => {
+	const entries = [
+		entry('a1', 'only-a', 'session-a'),
+		entry('b-shared', 'shared', 'session-b')
+	];
+
+	assert.equal(plannedEntriesForSession(entries, context).length, 1);
+	assert.equal(context.slotExercises.length, 2);
+});
+
 test('an extra exercise linked to the active session stays in out-of-plan', () => {
 	const entries = [entry('a-extra', 'only-b', 'session-a')];
 
