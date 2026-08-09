@@ -39,6 +39,12 @@
   import { thesesStore } from '$lib/training-theses';
   import type { ExerciseKind, ExerciseLog, ExerciseSet, SessionRow, WorkoutEntry } from '$lib/types';
   import { TRAINING_VOLUME_GUIDE_ID } from '$lib/volume-guide';
+  import {
+    extraEntriesForSession,
+    plannedEntriesForSession,
+    preferredSessionForDate,
+    type SessionRoutingRef
+  } from '$lib/session-entry-routing';
   import { deleteSession, saveCyclePlanState, saveExerciseLog, saveLog, workoutStore } from '$lib/workout-store';
   import { toasts } from '$lib/toast.svelte';
 
@@ -139,6 +145,15 @@
     if (!microcycle || activeIndex == null) return null;
     return sessionPlanByIndex(microcycle.plan, activeIndex)?.id ?? null;
   });
+  const validMicroSessionIds = $derived.by(() => {
+    const ids = new Set<string>();
+    for (const meso of mesocycles) {
+      for (const micro of meso.microcycles) {
+        for (const session of micro.plan.sessions) ids.add(session.id);
+      }
+    }
+    return ids;
+  });
 
   function planEditorUrl(scope: 'plan' | 'session'): string {
     const params = new URLSearchParams({
@@ -153,30 +168,13 @@
     return `${base}/cycles?${params.toString()}`;
   }
   const entriesForSession = $derived.by(() => {
-    if (!sessionReady || !microcycle || activeIndex == null) return [];
-
-    const sessionDate = sessionDateForIndex(microcycle, activeIndex);
-    if (!sessionDate) return [];
-
-    const byWorkoutDate = view.entries.filter(
-      (entry) => entry.date === workoutDate && slotExercises.includes(entry.exercise)
-    );
-    if (byWorkoutDate.length) {
-      return byWorkoutDate.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
-    }
-
-    const msId = activeMicroSessionId;
-    if (msId) {
-      const linked = view.entries.filter((entry) => entry.microSessionId === msId);
-      if (linked.length) {
-        return linked.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
-      }
-    }
-
-    return view.entries
-      .filter(
-        (entry) => entry.date === sessionDate && slotExercises.includes(entry.exercise)
-      )
+    if (!sessionReady) return [];
+    return plannedEntriesForSession(view.entries, {
+      activeMicroSessionId,
+      validMicroSessionIds,
+      workoutDate,
+      slotExercises
+    })
       .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
   });
   const usingManualPlan = $derived(view.cyclePlanView.usingManualPlan);
@@ -272,39 +270,13 @@
     thesesStore.volumeGuides.find((guide) => guide.id === TRAINING_VOLUME_GUIDE_ID)?.rows ?? []
   );
   const outOfPlanEntries = $derived.by(() => {
-    if (!sessionReady || !plannedSessionDate) return [];
-    const core = entriesForSession;
-
-    const onWorkoutDate = view.entries.filter(
-      (entry) =>
-        entry.date === workoutDate &&
-        !slotExercises.includes(entry.exercise) &&
-        !core.some((linked) => linked.id === entry.id)
-    );
-    if (onWorkoutDate.length) {
-      return onWorkoutDate.sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
-    }
-
-    const msId = activeMicroSessionId;
-
-    if (msId) {
-      return view.entries
-        .filter(
-          (entry) => entry.microSessionId === msId && !slotExercises.includes(entry.exercise)
-        )
-        .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
-    }
-
-    const sessionDate = plannedSessionDate;
-    if (!sessionDate) return [];
-
-    return view.entries
-      .filter(
-        (entry) =>
-          entry.date === sessionDate &&
-          !slotExercises.includes(entry.exercise) &&
-          !core.some((linked) => linked.id === entry.id)
-      )
+    if (!sessionReady) return [];
+    return extraEntriesForSession(view.entries, {
+      activeMicroSessionId,
+      validMicroSessionIds,
+      workoutDate,
+      slotExercises
+    })
       .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
   });
 
@@ -359,14 +331,21 @@
     return sessionProgressPercent(mesocycle, micro, index);
   }
 
-  type PlanSessionRef = { mesoId: string; microId: string; slot: WorkoutSlot };
-
-  const planSessionSteps = $derived.by((): PlanSessionRef[] => {
-    const steps: PlanSessionRef[] = [];
+  const planSessionSteps = $derived.by((): SessionRoutingRef[] => {
+    const steps: SessionRoutingRef[] = [];
     for (const meso of mesocycles) {
       for (const micro of meso.microcycles) {
         for (const slot of ['A', 'B'] as const) {
-          steps.push({ mesoId: meso.plan.id, microId: micro.plan.id, slot });
+          const index = slot === 'B' ? 1 : 0;
+          const session = sessionPlanByIndex(micro.plan, index);
+          if (!session) continue;
+          steps.push({
+            id: session.id,
+            mesoId: meso.plan.id,
+            microId: micro.plan.id,
+            slot,
+            date: session.date ?? null
+          });
         }
       }
     }
@@ -383,7 +362,7 @@
     );
   });
 
-  function applySessionStep(step: PlanSessionRef) {
+  function applySessionStep(step: Pick<SessionRoutingRef, 'mesoId' | 'microId' | 'slot'>) {
     autoPicked = false;
     mesoPick = step.mesoId;
     microPick = step.microId;
@@ -404,7 +383,7 @@
     if (next) applySessionStep(next);
   }
 
-  function pickSession(slot: WorkoutSlot) {
+  function pickSession(slot: 'A' | 'B') {
     if (!mesocycle || !microcycle) return;
     applySessionStep({ mesoId: mesocycle.plan.id, microId: microcycle.plan.id, slot });
   }
@@ -1015,7 +994,7 @@
 
   // «Ближайшая незаполненная»: среди всех сессий плана с упражнениями и прогрессом < 100%
   // берём ту, что ближе всего к сегодня по дате; сессии без даты — по порядку плана, в конце.
-  function findNearestIncomplete(): { mesoId: string; microId: string; slot: WorkoutSlot } | null {
+  function findNearestIncomplete(): { mesoId: string; microId: string; slot: 'A' | 'B' } | null {
     type Candidate = {
       mesoId: string;
       microId: string;
@@ -1104,7 +1083,7 @@
       autoSelected = true;
       return;
     }
-    const pick = findNearestIncomplete();
+    const pick = preferredSessionForDate(planSessionSteps, view.entries, todayIso()) ?? findNearestIncomplete();
     if (pick) {
       mesoPick = pick.mesoId;
       microPick = pick.microId;
@@ -1395,7 +1374,7 @@
             <div class="deck-toolbar">
               <div class="slot-segment" role="tablist" aria-label="Сессия A или B">
                 {#each ['A', 'B'] as slot (slot)}
-                  {@const slotKey = slot as WorkoutSlot}
+                  {@const slotKey = slot as 'A' | 'B'}
                   {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
                   {@const tabProgress = sessionProgressFor(microcycle, slotIndex)}
                   {@const tabSkipped = sessionSkippedFor(microcycle, slotIndex)}
@@ -1621,7 +1600,7 @@
           <span class="control-label">Сессия</span>
           <div class="choice-row compact">
             {#each ['A', 'B'] as slot (slot)}
-              {@const slotKey = slot as WorkoutSlot}
+              {@const slotKey = slot as 'A' | 'B'}
               {@const slotIndex = (slotKey === 'B' ? 1 : 0) as 0 | 1}
               {@const slotDate = microcycle ? sessionDateForIndex(microcycle, slotIndex) : null}
               {@const slotProgress = microcycle ? sessionProgressFor(microcycle, slotIndex) : 0}
