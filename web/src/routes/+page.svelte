@@ -1234,7 +1234,7 @@
         onclick={() => confirmSet(exercise, setIndex)}
       >
         <span class="set-action-icon">{disabled ? '…' : '✓'}</span>
-        <span class="set-action-label">Сделал</span>
+        <span class="set-action-label">{locked ? 'Ждёт' : 'Сделал'}</span>
       </button>
     {/if}
   </div>
@@ -1795,6 +1795,8 @@
                               class:strength-set-row={previewSets.kind === 'strength'}
                               class:set-done={setDone && !setFailed}
                               class:set-failed={setDone && setFailed}
+                              class:set-active={!setDone && !setFailed && !setLocked}
+                              class:set-locked={!setDone && !setFailed && setLocked}
                             >
                               {#if previewSets.kind === 'strength'}
                                 <span class="set-chip">
@@ -4102,6 +4104,33 @@
 
     .strength-set-row.set-done .set-stepper-fact {
       border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+    }
+
+    .strength-set-row.set-active {
+      background: color-mix(in srgb, var(--accent) 3%, rgb(8 10 13 / 55%));
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+    }
+
+    .strength-set-row.set-active .set-action-icon,
+    .strength-set-row.set-locked .set-action-icon {
+      display: none;
+    }
+
+    .strength-set-row.set-active .set-done-btn {
+      color: var(--accent-ink);
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .strength-set-row.set-locked {
+      opacity: 0.46;
+    }
+
+    .strength-set-row.set-locked .set-done-btn:disabled {
+      color: var(--muted);
+      background: transparent;
+      border-color: var(--line);
+      opacity: 1;
     }
 
     .strength-set-row > .set-action-pair {
