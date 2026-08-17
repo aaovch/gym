@@ -5,6 +5,7 @@
   import { afterNavigate } from '$app/navigation';
   import { base } from '$app/paths';
   import { page } from '$app/state';
+  import { IconMenu2 } from '@tabler/icons-svelte';
   import { getGitHubToken, setGitHubToken } from '$lib/auth';
   import {
     pullFromGitHub,
@@ -285,7 +286,10 @@
 <div class="app-shell">
   <aside class="sidebar">
     <a class="brand" href={hrefForActiveProfile(`${base}/`)} aria-label="На главную">
-      <span class="brand-mark">{activeProfile.initials}</span>
+      <span class="brand-mark">
+        <span class="brand-mark-desktop">{activeProfile.initials}</span>
+        <span class="brand-mark-mobile">GP</span>
+      </span>
       <span>
         <strong>Gym Planner</strong>
         <small>личный тренерский штаб</small>
@@ -310,7 +314,7 @@
       aria-label="Открыть настройки"
       onclick={() => (settingsOpen = true)}
     >
-      Настройки
+      <IconMenu2 size={24} stroke={2.2} aria-hidden="true" />
     </button>
 
     <nav class="primary-nav" aria-label="Основная навигация">

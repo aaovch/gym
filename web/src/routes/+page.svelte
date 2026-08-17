@@ -3,7 +3,14 @@
   import { base } from '$app/paths';
   import { browser } from '$app/environment';
   import { page } from '$app/state';
-  import { IconArrowRight, IconCheck, IconRotate2, IconX } from '@tabler/icons-svelte';
+  import {
+    IconArrowRight,
+    IconCheck,
+    IconFocus2,
+    IconLock,
+    IconRotate2,
+    IconX
+  } from '@tabler/icons-svelte';
   import {
     assignSessionDate,
     exerciseProtocolSkipOnMicro,
@@ -71,6 +78,8 @@
   let planDraft = $state<PlanExerciseDraft | null>(null);
   let planEditBusy = $state(false);
   let undoNotice = $state<{ key: string; setNumber: number } | null>(null);
+  let mobileFocusExercise = $state<string | null>(null);
+  let mobileFocusSessionKey = $state('');
 
   const WEIGHT_STEP = 0.5;
 
@@ -122,11 +131,13 @@
     return `${mesocycle?.plan.id ?? ''}:${microcycle?.plan.id ?? ''}:${activeIndex ?? ''}:${exerciseName}`;
   }
 
-  function continueToNextExercise(button: HTMLButtonElement) {
-    const next = button.closest('.exercise-item')?.nextElementSibling;
-    if (next instanceof HTMLElement) {
-      next.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    }
+  function continueToNextExercise(exerciseName: string) {
+    const currentIndex = slotExercises.indexOf(exerciseName);
+    const nextExercise = slotExercises[currentIndex + 1];
+    if (!nextExercise) return;
+    mobileFocusExercise = nextExercise;
+    undoNotice = null;
+    if (browser) window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   const sessionReady = $derived(mesocycle != null && microcycle != null && activeIndex != null);
   const activeSlot = $derived(activeIndex != null ? indexToSlot(activeIndex) : null);
@@ -236,6 +247,24 @@
     if (!preview) return true;
     return recordedSets.length >= preview.sets.length;
   }
+
+  $effect(() => {
+    if (!browser || !sessionReady || slotExercises.length === 0) return;
+    const sessionKey = `${mesocycle?.plan.id ?? ''}:${microcycle?.plan.id ?? ''}:${activeIndex ?? ''}:${workoutDate}`;
+    if (
+      mobileFocusSessionKey === sessionKey &&
+      mobileFocusExercise &&
+      slotExercises.includes(mobileFocusExercise)
+    ) {
+      return;
+    }
+
+    mobileFocusSessionKey = sessionKey;
+    mobileFocusExercise =
+      slotExercises.find((exercise) => !isExerciseFullyLogged(exercise, entryByExercise.get(exercise))) ??
+      slotExercises.at(-1) ??
+      null;
+  });
 
   const loggedPlanned = $derived(
     requiredSlotExercises.filter((exercise) =>
@@ -1261,7 +1290,13 @@
         onclick={() => confirmSet(exercise, setIndex)}
       >
         <span class="set-action-icon">
-          {#if disabled}…{:else}<IconCheck size={18} stroke={3} aria-hidden="true" />{/if}
+          {#if disabled}
+            …
+          {:else if locked}
+            <IconLock size={17} stroke={2.2} aria-hidden="true" />
+          {:else}
+            <IconFocus2 size={20} stroke={2.1} aria-hidden="true" />
+          {/if}
         </span>
         <span class="set-action-label">{locked ? 'Ждёт' : 'Выполнил'}</span>
       </button>
@@ -1765,6 +1800,7 @@
           {@const comments = entry ? entryComments(entry) : []}
           <article
             class="exercise-item"
+            class:mobile-focused={mobileFocusExercise === exercise}
             class:complete={fullyLogged}
             class:performed={fullyCompleted}
             class:in-progress={Boolean(entry) && !fullyLogged}
@@ -1784,6 +1820,7 @@
             <div class="exercise-content">
               <div class="exercise-heading">
                 <div>
+                  <span class="mobile-exercise-eyebrow">Тренировка {activeSlot}</span>
                   <h3>{exercise}</h3>
                   {#if protocolSkip && !entry}
                     <div class="plan-meta protocol-skip">
@@ -1899,7 +1936,7 @@
                               </button>
                             </div>
                           {/if}
-                          <div class="exercise-set-progress">
+                          <div class="exercise-set-progress" class:complete={fullyCompleted}>
                             <div class="exercise-set-progress-bar" aria-hidden="true">
                               <span style:width={`${Math.min(100, (loggedCount / previewSets.sets.length) * 100)}%`}></span>
                             </div>
@@ -1921,12 +1958,22 @@
                               <button
                                 type="button"
                                 class="exercise-next-button"
-                                onclick={(event) => continueToNextExercise(event.currentTarget)}
+                                onclick={() => continueToNextExercise(exercise)}
                               >
                                 <span>Дальше</span>
                                 <IconArrowRight size={20} stroke={2.6} aria-hidden="true" />
                               </button>
                             </div>
+                          {:else if loggedCount < previewSets.sets.length}
+                            <button
+                              type="button"
+                              class="exercise-next-button exercise-complete-set-button"
+                              disabled={busyId === exercise || planQuickBusy === exercise}
+                              onclick={() => confirmSet(exercise, loggedCount)}
+                            >
+                              <span>Выполнил</span>
+                              <IconArrowRight size={20} stroke={2.6} aria-hidden="true" />
+                            </button>
                           {/if}
                         </div>
                         <div class="quick-plan-actions">
@@ -2917,6 +2964,10 @@
     margin: 1px 0 4px;
     font-size: 18px;
     letter-spacing: 0.01em;
+  }
+
+  .mobile-exercise-eyebrow {
+    display: none;
   }
 
   .exercise-heading p {
@@ -4461,6 +4512,370 @@
 
     .inline-plan-editor {
       margin-left: 0;
+    }
+  }
+
+  @media (max-width: 520px) {
+    :global(body) {
+      padding-bottom: 0;
+      overflow-x: hidden;
+    }
+
+    :global(.sidebar) {
+      height: 76px;
+      padding: 14px 20px 12px;
+      background: rgb(9 12 15 / 98%);
+      border-bottom-color: var(--line-strong);
+    }
+
+    :global(.brand) {
+      gap: 11px;
+    }
+
+    :global(.brand-mark) {
+      width: 42px;
+      height: 42px;
+      font-size: 13px;
+    }
+
+    :global(.brand strong) {
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    :global(.brand small) {
+      display: block;
+      margin-top: 5px;
+      font-size: 7px;
+      letter-spacing: 0.13em;
+    }
+
+    :global(.profile-switcher),
+    :global(.mobile-nav) {
+      display: none;
+    }
+
+    :global(.mobile-settings) {
+      display: grid;
+      width: 48px;
+      height: 48px;
+      place-items: center;
+      margin-left: auto;
+      padding: 0;
+      color: var(--muted-strong);
+      background: transparent;
+      border: 0;
+    }
+
+    :global(.main-content) {
+      padding: 0;
+    }
+
+    .dashboard.session-active,
+    .exercise-grid {
+      width: 100%;
+      max-width: none;
+      min-height: calc(100dvh - 76px);
+    }
+
+    .dashboard.session-active {
+      padding-bottom: 0;
+    }
+
+    .page-header.compact,
+    .training-card,
+    .session-toolbar,
+    .section-heading,
+    .day-log {
+      display: none;
+    }
+
+    .exercise-grid {
+      display: block;
+      background: rgb(9 12 15 / 96%);
+    }
+
+    .exercise-item:not(.mobile-focused) {
+      display: none;
+    }
+
+    .exercise-item.mobile-focused {
+      position: relative;
+      display: block;
+      min-height: calc(100dvh - 76px);
+      padding: 20px 22px 18px;
+      background: linear-gradient(150deg, rgb(13 17 20 / 98%), rgb(8 11 14 / 99%));
+      border: 0;
+      border-radius: 0;
+    }
+
+    .exercise-item.mobile-focused .exercise-content {
+      display: flex;
+      min-height: calc(100dvh - 114px);
+      flex-direction: column;
+    }
+
+    .exercise-heading {
+      position: static;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .exercise-heading > div:first-child {
+      display: block;
+    }
+
+    .exercise-heading h3 {
+      max-width: 100%;
+      margin: 7px 0 0;
+      padding: 0;
+      color: var(--text);
+      font-size: clamp(20px, 6vw, 25px);
+      line-height: 1.02;
+      letter-spacing: 0.01em;
+      text-transform: uppercase;
+    }
+
+    .mobile-exercise-eyebrow {
+      display: block;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .exercise-actions {
+      display: none;
+    }
+
+    .plan-meta {
+      display: flex;
+      flex: none;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .plan-meta > .rx {
+      display: flex;
+      gap: 10px;
+      padding-bottom: 4px;
+    }
+
+    .rx-weight,
+    .rx-scheme {
+      color: #62a9ff;
+      background: transparent;
+      border: 0;
+    }
+
+    .rx-weight {
+      font-size: 23px;
+    }
+
+    .rx-scheme {
+      padding: 0;
+      font-size: 19px;
+    }
+
+    .target-pct,
+    .rx-sub,
+    .set-list-heading,
+    .quick-plan-actions {
+      display: none;
+    }
+
+    .plan-sets-editable {
+      width: 100%;
+      gap: 7px;
+      margin-top: 2px;
+    }
+
+    .strength-set-row {
+      grid-template-columns: minmax(118px, 1.38fr) minmax(94px, 1fr) 48px;
+      gap: 8px;
+      min-height: 56px;
+      padding: 3px 0;
+      background: transparent;
+      border: 0;
+    }
+
+    .strength-set-row > .set-chip {
+      grid-column: 1;
+      grid-row: 1;
+      width: 100%;
+      min-height: 48px;
+      padding-inline: 10px;
+      color: var(--text);
+      background: rgb(8 11 14 / 78%);
+      border-color: var(--line-strong);
+      font-size: 12px;
+    }
+
+    .strength-set-row > .set-controls,
+    .strength-set-row:not(.set-done):not(.set-failed) > .set-controls {
+      grid-column: 2;
+      grid-row: 1;
+      min-width: 0;
+    }
+
+    .strength-set-row > .set-action-pair,
+    .strength-set-row:not(.set-done):not(.set-failed) > .set-action-pair {
+      grid-column: 3;
+      grid-row: 1;
+      width: 48px;
+    }
+
+    .strength-set-row:not(.set-done):not(.set-failed) .set-weight-control-plan {
+      display: grid;
+    }
+
+    .strength-set-row:not(.set-done):not(.set-failed) .set-weight-control-fact {
+      display: none;
+    }
+
+    .strength-set-row .set-stepper {
+      grid-template-columns: 30px minmax(40px, 1fr) 30px;
+      height: 48px;
+    }
+
+    .strength-set-row .set-stepper button {
+      width: 30px;
+    }
+
+    .strength-set-row .set-stepper span {
+      font-size: 10px;
+    }
+
+    .strength-set-row .set-done-btn,
+    .strength-set-row .set-undo-btn,
+    .strength-set-row:not(.set-done):not(.set-failed) .set-done-btn {
+      width: 48px;
+      min-width: 48px;
+      height: 48px;
+      padding: 0;
+    }
+
+    .strength-set-row.set-active .set-done-btn {
+      color: var(--accent);
+      background: rgb(8 11 14 / 85%);
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+    }
+
+    .strength-set-row.set-locked .set-done-btn:disabled {
+      color: var(--muted);
+      background: rgb(8 11 14 / 55%);
+      border-color: var(--line);
+    }
+
+    .strength-set-row.set-locked {
+      opacity: 0.68;
+    }
+
+    .strength-set-row.set-done .set-chip {
+      color: var(--text);
+      background: rgb(8 11 14 / 78%);
+      border-color: var(--line-strong);
+    }
+
+    .strength-set-row.set-done .set-chip em,
+    .strength-set-row.set-done .set-number {
+      display: inline;
+      color: var(--accent);
+    }
+
+    .strength-set-row.set-done .set-done-mark {
+      display: none;
+    }
+
+    .strength-set-row.set-done .set-undo-btn {
+      color: var(--accent-ink);
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .set-action-label {
+      display: none !important;
+    }
+
+    .exercise-progress-state {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+      padding-top: 15px;
+    }
+
+    .exercise-set-progress {
+      gap: 9px;
+      padding-top: 13px;
+    }
+
+    .exercise-set-progress.complete {
+      display: none;
+    }
+
+    .exercise-set-progress-bar {
+      height: 5px;
+      border: 0;
+    }
+
+    .exercise-set-progress > span {
+      font-size: 9px;
+      letter-spacing: 0.14em;
+    }
+
+    .exercise-undo-notice {
+      min-height: 48px;
+      background: #2a2e35;
+      border-color: #343941;
+    }
+
+    .exercise-completion {
+      position: static;
+      gap: 13px;
+      padding-top: 0;
+      animation: none;
+      transform: none;
+    }
+
+    .exercise-completion img {
+      position: absolute;
+      right: 22px;
+      bottom: 200px;
+      width: 124px;
+      height: 124px;
+      filter: drop-shadow(0 0 14px rgb(204 255 51 / 14%));
+      pointer-events: none;
+    }
+
+    .exercise-completion-band {
+      position: absolute;
+      right: 0;
+      bottom: 96px;
+      left: 0;
+      width: auto;
+      margin: 0;
+      padding: 14px 10px 12px;
+      border-inline-width: 7px;
+    }
+
+    .exercise-completion-band strong {
+      font-size: 20px;
+    }
+
+    .exercise-next-button {
+      position: absolute;
+      right: 22px;
+      bottom: 20px;
+      left: 22px;
+      width: auto;
+      min-height: 56px;
+      font-size: 19px;
+    }
+
+    .exercise-complete-set-button {
+      margin-top: 2px;
     }
   }
 </style>
