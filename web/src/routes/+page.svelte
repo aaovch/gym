@@ -30,6 +30,7 @@
   } from '$lib/cycle-plan';
   import { sessionPlanByIndex } from '$lib/micro-plan';
   import { completedRowSets } from '$lib/database';
+  import { completionPhrase } from '$lib/completion-phrases';
   import { randomUuid } from '$lib/id';
   import { mesoProtocolId, toExerciseId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, fmtSet, todayIso } from '$lib/format';
@@ -130,6 +131,10 @@
   });
   function exerciseInteractionKey(exerciseName: string): string {
     return `${mesocycle?.plan.id ?? ''}:${microcycle?.plan.id ?? ''}:${activeIndex ?? ''}:${exerciseName}`;
+  }
+
+  function exerciseCompletionPhrase(exerciseName: string): string {
+    return completionPhrase(`${exerciseInteractionKey(exerciseName)}:${workoutDate}`);
   }
 
   function nextIncompleteExercise(exerciseName: string): string | null {
@@ -2012,7 +2017,7 @@
                                 aria-hidden="true"
                               />
                               <div class="exercise-completion-band">
-                                <strong>Упражнение выполнено</strong>
+                                <strong>{exerciseCompletionPhrase(exercise)}</strong>
                                 <span>{loggedCount} из {previewSets.sets.length} подходов</span>
                               </div>
                               <button
