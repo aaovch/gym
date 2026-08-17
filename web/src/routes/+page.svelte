@@ -3,6 +3,7 @@
   import { base } from '$app/paths';
   import { browser } from '$app/environment';
   import { page } from '$app/state';
+  import { IconArrowRight, IconCheck, IconRotate2, IconX } from '@tabler/icons-svelte';
   import {
     assignSessionDate,
     exerciseProtocolSkipOnMicro,
@@ -22,6 +23,7 @@
   } from '$lib/cycle-plan';
   import { sessionPlanByIndex } from '$lib/micro-plan';
   import { completedRowSets } from '$lib/database';
+  import { randomUuid } from '$lib/id';
   import { mesoProtocolId, toExerciseId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, fmtSet, todayIso } from '$lib/format';
   import {
@@ -68,6 +70,7 @@
   };
   let planDraft = $state<PlanExerciseDraft | null>(null);
   let planEditBusy = $state(false);
+  let undoNotice = $state<{ key: string; setNumber: number } | null>(null);
 
   const WEIGHT_STEP = 0.5;
 
@@ -115,6 +118,16 @@
     if (slotPick != null) return slotPick === 'B' ? 1 : 0;
     return urlSession;
   });
+  function exerciseInteractionKey(exerciseName: string): string {
+    return `${mesocycle?.plan.id ?? ''}:${microcycle?.plan.id ?? ''}:${activeIndex ?? ''}:${exerciseName}`;
+  }
+
+  function continueToNextExercise(button: HTMLButtonElement) {
+    const next = button.closest('.exercise-item')?.nextElementSibling;
+    if (next instanceof HTMLElement) {
+      next.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+  }
   const sessionReady = $derived(mesocycle != null && microcycle != null && activeIndex != null);
   const activeSlot = $derived(activeIndex != null ? indexToSlot(activeIndex) : null);
   const plannedSessionDate = $derived.by(() => {
@@ -849,7 +862,7 @@
         exerciseName,
         date: workoutDate,
         rows: [row, ...(existingLog?.blocks.slice(1) ?? [])],
-        id: existingId ?? crypto.randomUUID(),
+        id: existingId ?? randomUuid(),
         context: {
           mesoId: mesocycle.plan.id,
           microId: microcycle.plan.id,
@@ -871,6 +884,7 @@
   }
 
   async function confirmSet(exerciseName: string, setIndex: number, failed = false) {
+    undoNotice = null;
     if (protocolSkips.has(exerciseName)) return;
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
@@ -922,6 +936,12 @@
         existing.id,
         nextFailedSets
       );
+      if (!error) {
+        undoNotice = {
+          key: exerciseInteractionKey(exerciseName),
+          setNumber: setIndex + 1
+        };
+      }
       return;
     }
 
@@ -929,6 +949,10 @@
     error = '';
     try {
       await deleteSession(existing.id);
+      undoNotice = {
+        key: exerciseInteractionKey(exerciseName),
+        setNumber: setIndex + 1
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось отменить подход';
       error = message;
@@ -939,6 +963,7 @@
   }
 
   async function confirmPlanned(exerciseName: string) {
+    undoNotice = null;
     if (protocolSkips.has(exerciseName)) return;
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
@@ -1221,7 +1246,9 @@
         title="Отменить запись подхода"
         onclick={() => undoRecordedSet(exercise, setIndex)}
       >
-        <span class="set-action-icon">{disabled ? '…' : '↶'}</span>
+        <span class="set-action-icon">
+          {#if disabled}…{:else}<IconCheck size={18} stroke={3} aria-hidden="true" />{/if}
+        </span>
         <span class="set-action-label">Отменить</span>
       </button>
     {:else}
@@ -1233,8 +1260,10 @@
         title={locked ? 'Сначала отметьте предыдущий подход' : 'Записать подход'}
         onclick={() => confirmSet(exercise, setIndex)}
       >
-        <span class="set-action-icon">{disabled ? '…' : '✓'}</span>
-        <span class="set-action-label">{locked ? 'Ждёт' : 'Сделал'}</span>
+        <span class="set-action-icon">
+          {#if disabled}…{:else}<IconCheck size={18} stroke={3} aria-hidden="true" />{/if}
+        </span>
+        <span class="set-action-label">{locked ? 'Ждёт' : 'Выполнил'}</span>
       </button>
     {/if}
   </div>
@@ -1732,16 +1761,18 @@
           {@const loggedSets = loggedSetsFor(entry)}
           {@const loggedCount = loggedSets.length}
           {@const failedSetIndexes = failedSetsFor(entry)}
+          {@const fullyCompleted = fullyLogged && failedSetIndexes.length === 0}
           {@const comments = entry ? entryComments(entry) : []}
           <article
             class="exercise-item"
             class:complete={fullyLogged}
+            class:performed={fullyCompleted}
             class:in-progress={Boolean(entry) && !fullyLogged}
             class:protocol-skipped={Boolean(protocolSkip) && !entry}
           >
             <div class="exercise-index">
               {#if fullyLogged}
-                ✓
+                <IconCheck size={18} stroke={3} aria-hidden="true" />
               {:else if loggedCount > 0 && previewSets}
                 {loggedCount}/{previewSets.sets.length}
               {:else if protocolSkip}
@@ -1803,7 +1834,9 @@
                                   <em>
                                     <span class="set-number">{setIndex + 1}</span>
                                     {#if setDone && !setFailed}
-                                      <span class="set-done-mark" aria-label="Подход выполнен">✓</span>
+                                      <span class="set-done-mark" aria-label="Подход выполнен">
+                                        <IconCheck size={14} stroke={3} aria-hidden="true" />
+                                      </span>
                                     {/if}
                                   </em>{setChipText(previewSets.kind, set)}
                                 </span>
@@ -1851,6 +1884,50 @@
                               {/if}
                             </div>
                           {/each}
+                        </div>
+                        <div class="exercise-progress-state" aria-live="polite">
+                          {#if undoNotice?.key === exerciseInteractionKey(exercise)}
+                            <div class="exercise-undo-notice">
+                              <IconRotate2 size={17} stroke={2.4} aria-hidden="true" />
+                              <span>Подход {undoNotice.setNumber} отменён</span>
+                              <button
+                                type="button"
+                                aria-label="Скрыть сообщение об отмене"
+                                onclick={() => (undoNotice = null)}
+                              >
+                                <IconX size={16} stroke={2.4} aria-hidden="true" />
+                              </button>
+                            </div>
+                          {/if}
+                          <div class="exercise-set-progress">
+                            <div class="exercise-set-progress-bar" aria-hidden="true">
+                              <span style:width={`${Math.min(100, (loggedCount / previewSets.sets.length) * 100)}%`}></span>
+                            </div>
+                            <span>{loggedCount} из {previewSets.sets.length} подходов</span>
+                          </div>
+                          {#if fullyCompleted}
+                            <div class="exercise-completion">
+                              <img
+                                src={`${base}/assets/workout-completion-stamp.png`}
+                                alt=""
+                                width="136"
+                                height="136"
+                                aria-hidden="true"
+                              />
+                              <div class="exercise-completion-band">
+                                <strong>Упражнение выполнено</strong>
+                                <span>{loggedCount} из {previewSets.sets.length} подходов</span>
+                              </div>
+                              <button
+                                type="button"
+                                class="exercise-next-button"
+                                onclick={(event) => continueToNextExercise(event.currentTarget)}
+                              >
+                                <span>Дальше</span>
+                                <IconArrowRight size={20} stroke={2.6} aria-hidden="true" />
+                              </button>
+                            </div>
+                          {/if}
                         </div>
                         <div class="quick-plan-actions">
                           <button
@@ -2797,6 +2874,10 @@
     border-left-color: var(--accent);
   }
 
+  .exercise-progress-state {
+    display: none;
+  }
+
   .exercise-index {
     display: grid;
     width: 34px;
@@ -3693,6 +3774,27 @@
     font-size: 12px;
   }
 
+  @keyframes completion-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .exercise-completion {
+      animation: none;
+    }
+
+    .exercise-set-progress-bar > span {
+      transition: none;
+    }
+  }
+
   @media (max-width: 1050px) {
     .context-picker {
       grid-template-columns: 1fr;
@@ -4048,11 +4150,156 @@
       margin-top: 6px;
     }
 
+    .exercise-progress-state {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .exercise-set-progress {
+      display: grid;
+      gap: 7px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .exercise-set-progress > span {
+      color: var(--muted-strong);
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .exercise-set-progress-bar {
+      height: 4px;
+      overflow: hidden;
+      background: var(--surface-raised);
+      border: 1px solid var(--line);
+    }
+
+    .exercise-set-progress-bar > span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+      transition: width 180ms ease-out;
+    }
+
+    .exercise-undo-notice {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 0 10px;
+      color: var(--text);
+      background: var(--surface-raised);
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .exercise-undo-notice button {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      padding: 0;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+    }
+
+    .exercise-undo-notice button:hover,
+    .exercise-undo-notice button:focus-visible {
+      color: var(--text);
+      background: rgb(255 255 255 / 4%);
+      outline: 1px solid var(--line-strong);
+    }
+
+    .exercise-completion {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      padding-top: 2px;
+      animation: completion-enter 260ms ease-out both;
+    }
+
+    .exercise-completion img {
+      display: block;
+      width: 136px;
+      height: 136px;
+      object-fit: contain;
+      filter: drop-shadow(0 0 16px rgb(204 255 51 / 10%));
+    }
+
+    .exercise-completion-band {
+      display: grid;
+      width: 100%;
+      gap: 2px;
+      padding: 12px 10px;
+      color: var(--accent-ink);
+      background: var(--accent);
+      border-inline: 5px solid var(--accent-ink);
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .exercise-completion-band strong {
+      font-family: var(--font-display);
+      font-size: 17px;
+      letter-spacing: 0.025em;
+      line-height: 1;
+    }
+
+    .exercise-completion-band span {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+    }
+
+    .exercise-next-button {
+      display: flex;
+      width: 100%;
+      min-height: 48px;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 0 14px;
+      color: var(--accent-ink);
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .exercise-next-button:hover,
+    .exercise-next-button:focus-visible {
+      background: color-mix(in srgb, var(--accent) 86%, white);
+      outline: 2px solid rgb(204 255 51 / 24%);
+      outline-offset: 2px;
+    }
+
+    .exercise-item.performed {
+      border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+    }
+
     .strength-set-row {
-      grid-template-columns: 78px minmax(0, 1fr) 46px;
+      grid-template-columns: 78px minmax(0, 1fr) 48px;
       gap: 6px;
       align-items: center;
-      min-height: 52px;
+      min-height: 54px;
       padding: 4px;
     }
 
@@ -4140,16 +4387,25 @@
 
     .strength-set-row .set-done-btn,
     .strength-set-row .set-undo-btn {
-      width: 46px;
-      min-width: 46px;
-      height: 46px;
+      width: 48px;
+      min-width: 48px;
+      height: 48px;
       padding: 0;
     }
 
     .strength-set-row.set-done .set-undo-btn {
-      color: var(--muted-strong);
-      background: transparent;
-      border-color: var(--line-strong);
+      color: var(--accent-ink);
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .strength-set-row.set-done .set-undo-btn:hover:not(:disabled),
+    .strength-set-row.set-done .set-undo-btn:focus-visible {
+      color: var(--accent-ink);
+      background: color-mix(in srgb, var(--accent) 86%, white);
+      border-color: var(--accent);
+      outline: 2px solid rgb(204 255 51 / 24%);
+      outline-offset: 2px;
     }
 
     .strength-set-row:not(.set-done):not(.set-failed) > .set-controls {
@@ -4178,7 +4434,7 @@
     .strength-set-row .set-stepper,
     .strength-set-row .set-stepper-placeholder,
     .strength-set-row .set-skip-btn {
-      height: 46px;
+      height: 48px;
     }
 
     .strength-set-row .set-skip-btn {

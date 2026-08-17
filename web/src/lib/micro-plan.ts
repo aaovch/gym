@@ -1,5 +1,6 @@
 import type { TrainingDay } from './microcycle';
 import type { ExerciseKind, ExerciseSet } from './types';
+import { randomUuid } from './id';
 
 /** Точная замена расчётного задания для одного упражнения в конкретной тренировке. */
 export type PlannedExercisePlan = {
@@ -26,7 +27,7 @@ export type MicrocyclePlan = {
 };
 
 function newSessionId(): string {
-	return `ms-${crypto.randomUUID().slice(0, 8)}`;
+	return `ms-${randomUuid().slice(0, 8)}`;
 }
 
 export function defaultMicroSessions(): [MicroSessionPlan, MicroSessionPlan] {
