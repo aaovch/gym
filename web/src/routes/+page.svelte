@@ -132,10 +132,24 @@
     return `${mesocycle?.plan.id ?? ''}:${microcycle?.plan.id ?? ''}:${activeIndex ?? ''}:${exerciseName}`;
   }
 
-  function continueToNextExercise(exerciseName: string) {
+  function nextIncompleteExercise(exerciseName: string): string | null {
     const currentIndex = slotExercises.indexOf(exerciseName);
-    const nextExercise = slotExercises[currentIndex + 1];
-    if (!nextExercise) return;
+    const followingExercises = currentIndex >= 0
+      ? [...slotExercises.slice(currentIndex + 1), ...slotExercises.slice(0, currentIndex)]
+      : slotExercises;
+    return followingExercises.find((candidate) =>
+      !protocolSkips.has(candidate) &&
+      !isExerciseFullyLogged(candidate, entryByExercise.get(candidate))
+    ) ?? null;
+  }
+
+  async function continueToNextExercise(exerciseName: string) {
+    const nextExercise = nextIncompleteExercise(exerciseName);
+    if (!nextExercise) {
+      const params = new URLSearchParams({ profile: workoutStore.profile.urlSlug });
+      await goto(`${base}/history?${params.toString()}`);
+      return;
+    }
     mobileFocusExercise = nextExercise;
     undoNotice = null;
     if (browser) window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -2006,7 +2020,7 @@
                                 class="exercise-next-button"
                                 onclick={() => continueToNextExercise(exercise)}
                               >
-                                <span>Дальше</span>
+                                <span>{nextIncompleteExercise(exercise) ? 'Дальше' : 'В журнал'}</span>
                                 <IconArrowRight size={20} stroke={2.6} aria-hidden="true" />
                               </button>
                             </div>
