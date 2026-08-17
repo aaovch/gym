@@ -4723,14 +4723,12 @@
     .plan-meta {
       display: flex;
       flex: none;
-      gap: 12px;
-      margin-top: 14px;
+      gap: 0;
+      margin-top: 10px;
     }
 
     .plan-meta > .rx {
-      display: flex;
-      gap: 10px;
-      padding-bottom: 4px;
+      display: none;
     }
 
     .rx-weight,
@@ -4766,7 +4764,7 @@
       display: grid;
       grid-template-columns: minmax(118px, 1.38fr) minmax(94px, 1fr) 48px;
       gap: 8px;
-      margin-top: 12px;
+      margin-top: 4px;
       color: var(--muted-strong);
       font-family: var(--font-mono);
       font-size: 8px;
