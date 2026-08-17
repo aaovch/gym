@@ -78,6 +78,7 @@
   let planDraft = $state<PlanExerciseDraft | null>(null);
   let planEditBusy = $state(false);
   let undoNotice = $state<{ key: string; setNumber: number } | null>(null);
+  let pendingActualWeights = $state<Record<string, number>>({});
   let mobileFocusExercise = $state<string | null>(null);
   let mobileFocusSessionKey = $state('');
 
@@ -653,6 +654,24 @@
     saveQuickPlanSets(exerciseName, preview.kind, sets);
   }
 
+  function pendingActualWeight(exerciseName: string, setIndex: number, plannedWeight: number) {
+    return pendingActualWeights[`${exerciseInteractionKey(exerciseName)}:${setIndex}`] ?? plannedWeight;
+  }
+
+  function nudgePendingActualWeight(
+    exerciseName: string,
+    setIndex: number,
+    plannedWeight: number,
+    direction: 1 | -1
+  ) {
+    const key = `${exerciseInteractionKey(exerciseName)}:${setIndex}`;
+    const currentWeight = pendingActualWeight(exerciseName, setIndex, plannedWeight);
+    pendingActualWeights[key] = Math.max(
+      WEIGHT_STEP,
+      Math.round((currentWeight + direction * WEIGHT_STEP) * 2) / 2
+    );
+  }
+
   async function nudgeRecordedSetWeight(exerciseName: string, setIndex: number, direction: 1 | -1) {
     const preview = adjustedPreviewSets(exerciseName);
     const existing = entryByExercise.get(exerciseName);
@@ -921,7 +940,11 @@
     const recordedSets = loggedSetsFor(existing).map((set) => [...set] as ExerciseSet);
     if (setIndex > recordedSets.length || !preview.sets[setIndex]) return;
     if (setIndex === recordedSets.length) {
-      recordedSets.push([...preview.sets[setIndex]] as ExerciseSet);
+      const plannedSet = preview.sets[setIndex];
+      const actualSet: ExerciseSet = preview.kind === 'strength'
+        ? [pendingActualWeight(exerciseName, setIndex, plannedSet[0]), plannedSet[1]]
+        : [...plannedSet] as ExerciseSet;
+      recordedSets.push(actualSet);
     }
     const nextFailedSets = new Set(
       failedSetsFor(existing).filter((index) => index >= 0 && index < recordedSets.length)
@@ -941,6 +964,9 @@
       existing?.id,
       [...nextFailedSets].sort((a, b) => a - b)
     );
+    if (!error) {
+      delete pendingActualWeights[`${exerciseInteractionKey(exerciseName)}:${setIndex}`];
+    }
   }
 
   async function undoRecordedSet(exerciseName: string, setIndex: number) {
@@ -1304,32 +1330,36 @@
   </div>
 {/snippet}
 
-{#snippet setStepper(exercise: string, setIndex: number, weight: number, disabled: boolean, mode: 'plan' | 'fact')}
+{#snippet setStepper(exercise: string, setIndex: number, weight: number, disabled: boolean, mode: 'plan' | 'fact' | 'draft')}
   <div
     class="set-stepper"
     class:set-stepper-plan={mode === 'plan'}
     class:set-stepper-fact={mode === 'fact'}
     role="group"
-    aria-label="Вес {mode === 'fact' ? 'по факту' : 'по плану'} для подхода {setIndex + 1}"
+    aria-label="Вес {mode === 'plan' ? 'по плану' : 'по факту'} для подхода {setIndex + 1}"
   >
     <button
       type="button"
-      aria-label="Уменьшить вес {mode === 'fact' ? 'по факту' : 'по плану'} на {WEIGHT_STEP} кг"
+      aria-label="Уменьшить вес {mode === 'plan' ? 'по плану' : 'по факту'} на {WEIGHT_STEP} кг"
       {disabled}
       onclick={() => mode === 'fact'
         ? nudgeRecordedSetWeight(exercise, setIndex, -1)
-        : nudgePlannedSetWeight(exercise, setIndex, -1)}
+        : mode === 'draft'
+          ? nudgePendingActualWeight(exercise, setIndex, weight, -1)
+          : nudgePlannedSetWeight(exercise, setIndex, -1)}
     >
       −
     </button>
     <span>{fmtNum(weight)}<small>кг</small></span>
     <button
       type="button"
-      aria-label="Увеличить вес {mode === 'fact' ? 'по факту' : 'по плану'} на {WEIGHT_STEP} кг"
+      aria-label="Увеличить вес {mode === 'plan' ? 'по плану' : 'по факту'} на {WEIGHT_STEP} кг"
       {disabled}
       onclick={() => mode === 'fact'
         ? nudgeRecordedSetWeight(exercise, setIndex, 1)
-        : nudgePlannedSetWeight(exercise, setIndex, 1)}
+        : mode === 'draft'
+          ? nudgePendingActualWeight(exercise, setIndex, weight, 1)
+          : nudgePlannedSetWeight(exercise, setIndex, 1)}
     >
       +
     </button>
@@ -1851,6 +1881,13 @@
                           <strong>Подходы</strong>
                           <span>{loggedCount} из {previewSets.sets.length} записано · автосохранение</span>
                         </div>
+                        {#if previewSets.kind === 'strength'}
+                          <div class="mobile-set-columns" aria-hidden="true">
+                            <span>План</span>
+                            <span>Факт</span>
+                            <span></span>
+                          </div>
+                        {/if}
                         <div class="plan-sets-editable">
                           {#each previewSets.sets as set, setIndex}
                             {@const setDone = setIndex < loggedCount}
@@ -1893,6 +1930,15 @@
                                       {/if}
                                     {:else}
                                       <span class="set-source">факт</span>
+                                      <div class="mobile-fact-draft">
+                                        {@render setStepper(
+                                          exercise,
+                                          setIndex,
+                                          pendingActualWeight(exercise, setIndex, set[0]),
+                                          setBusy || setLocked,
+                                          'draft'
+                                        )}
+                                      </div>
                                       <button
                                         type="button"
                                         class="set-skip-btn"
@@ -3126,6 +3172,11 @@
 
   .set-weight-control-plan .set-source {
     color: var(--muted);
+  }
+
+  .mobile-set-columns,
+  .mobile-fact-draft {
+    display: none;
   }
 
   .set-list-heading {
@@ -4692,6 +4743,25 @@
       margin-top: 2px;
     }
 
+    .mobile-set-columns {
+      display: grid;
+      grid-template-columns: minmax(118px, 1.38fr) minmax(94px, 1fr) 48px;
+      gap: 8px;
+      margin-top: 12px;
+      color: var(--muted-strong);
+      font-family: var(--font-mono);
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .mobile-set-columns span:first-child,
+    .mobile-set-columns span:nth-child(2) {
+      padding-inline: 10px;
+    }
+
     .strength-set-row {
       grid-template-columns: minmax(118px, 1.38fr) minmax(94px, 1fr) 48px;
       gap: 8px;
@@ -4728,10 +4798,18 @@
     }
 
     .strength-set-row:not(.set-done):not(.set-failed) .set-weight-control-plan {
-      display: grid;
+      display: none;
     }
 
     .strength-set-row:not(.set-done):not(.set-failed) .set-weight-control-fact {
+      display: grid;
+    }
+
+    .strength-set-row:not(.set-done):not(.set-failed) .mobile-fact-draft {
+      display: block;
+    }
+
+    .strength-set-row:not(.set-done):not(.set-failed) .set-skip-btn {
       display: none;
     }
 
@@ -4842,9 +4920,9 @@
     .exercise-completion img {
       position: absolute;
       right: 22px;
-      bottom: 200px;
-      width: 124px;
-      height: 124px;
+      bottom: 158px;
+      width: 110px;
+      height: 110px;
       filter: drop-shadow(0 0 14px rgb(204 255 51 / 14%));
       pointer-events: none;
     }
