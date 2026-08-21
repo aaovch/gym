@@ -31,6 +31,11 @@
   import { sessionPlanByIndex } from '$lib/micro-plan';
   import { completedRowSets } from '$lib/database';
   import { completionPhrase } from '$lib/completion-phrases';
+  import {
+    adjacentExercise,
+    horizontalSwipeDirection,
+    type ExerciseMoveDirection
+  } from '$lib/mobile-exercise-navigation';
   import { randomUuid } from '$lib/id';
   import { mesoProtocolId, toExerciseId } from '$lib/exercise-keys';
   import { formatDateRu, fmtNum, fmtSet, todayIso } from '$lib/format';
@@ -82,6 +87,7 @@
   let pendingActualWeights = $state<Record<string, number>>({});
   let mobileFocusExercise = $state<string | null>(null);
   let mobileFocusSessionKey = $state('');
+  let mobileSwipeStart: { x: number; y: number } | null = null;
 
   const WEIGHT_STEP = 0.5;
 
@@ -137,6 +143,51 @@
     return completionPhrase(`${exerciseInteractionKey(exerciseName)}:${workoutDate}`);
   }
 
+  function scrollMobileExerciseIntoView(node: HTMLElement, exerciseName: string | null) {
+    const centerActiveExercise = () => {
+      const target = node.querySelector<HTMLElement>('.mobile-exercise-tab.active');
+      if (!target) return;
+      const left = target.offsetLeft - (node.clientWidth - target.clientWidth) / 2;
+      node.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    };
+    requestAnimationFrame(centerActiveExercise);
+    return {
+      update(nextExerciseName: string | null) {
+        if (nextExerciseName !== exerciseName) requestAnimationFrame(centerActiveExercise);
+        exerciseName = nextExerciseName;
+      }
+    };
+  }
+
+  function focusMobileExercise(exerciseName: string, behavior: ScrollBehavior = 'smooth') {
+    if (!slotExercises.includes(exerciseName) || mobileFocusExercise === exerciseName) return;
+    mobileFocusExercise = exerciseName;
+    undoNotice = null;
+    if (browser) window.scrollTo({ top: 0, behavior });
+  }
+
+  function moveMobileExercise(direction: ExerciseMoveDirection) {
+    const nextExercise = adjacentExercise(slotExercises, mobileFocusExercise, direction);
+    if (nextExercise) focusMobileExercise(nextExercise, 'auto');
+  }
+
+  function beginMobileExerciseSwipe(event: TouchEvent) {
+    if (event.touches.length !== 1) {
+      mobileSwipeStart = null;
+      return;
+    }
+    mobileSwipeStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  }
+
+  function finishMobileExerciseSwipe(event: TouchEvent) {
+    const start = mobileSwipeStart;
+    mobileSwipeStart = null;
+    if (!start || event.changedTouches.length !== 1) return;
+    const touch = event.changedTouches[0];
+    const direction = horizontalSwipeDirection(start.x, start.y, touch.clientX, touch.clientY);
+    if (direction) moveMobileExercise(direction);
+  }
+
   function nextIncompleteExercise(exerciseName: string): string | null {
     const currentIndex = slotExercises.indexOf(exerciseName);
     const followingExercises = currentIndex >= 0
@@ -155,9 +206,7 @@
       await goto(`${base}/history?${params.toString()}`);
       return;
     }
-    mobileFocusExercise = nextExercise;
-    undoNotice = null;
-    if (browser) window.scrollTo({ top: 0, behavior: 'smooth' });
+    focusMobileExercise(nextExercise);
   }
   const sessionReady = $derived(mesocycle != null && microcycle != null && activeIndex != null);
   const activeSlot = $derived(activeIndex != null ? indexToSlot(activeIndex) : null);
@@ -266,6 +315,16 @@
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return true;
     return recordedSets.length >= preview.sets.length;
+  }
+
+  function mobileExerciseProgress(exerciseName: string): { completed: number; total: number; percent: number } {
+    const completed = loggedSetsFor(entryByExercise.get(exerciseName)).length;
+    const total = adjustedPreviewSets(exerciseName)?.sets.length ?? Math.max(1, completed);
+    return {
+      completed,
+      total,
+      percent: Math.min(100, Math.round((completed / total) * 100))
+    };
   }
 
   $effect(() => {
@@ -1835,7 +1894,40 @@
           </button>
         </section>
       {:else if slotExercises.length > 0}
-      <section class="exercise-grid">
+      <section
+        class="exercise-grid"
+        role="group"
+        aria-label="Упражнения текущей тренировки"
+        ontouchstart={beginMobileExerciseSwipe}
+        ontouchend={finishMobileExerciseSwipe}
+        ontouchcancel={() => (mobileSwipeStart = null)}
+      >
+        <nav class="mobile-exercise-nav" aria-label="Упражнения текущей тренировки">
+          <div class="mobile-exercise-track" use:scrollMobileExerciseIntoView={mobileFocusExercise}>
+            {#each slotExercises as exercise, index (exercise)}
+              {@const progress = mobileExerciseProgress(exercise)}
+              {@const skipped = protocolSkips.has(exercise) && progress.completed === 0}
+              <button
+                type="button"
+                class="mobile-exercise-tab"
+                class:active={mobileFocusExercise === exercise}
+                class:complete={progress.percent === 100}
+                class:in-progress={progress.completed > 0 && progress.percent < 100}
+                class:skipped
+                style={`--exercise-progress: ${progress.percent * 3.6}deg`}
+                aria-label={`${exercise}: ${skipped ? 'пропуск по протоколу' : `${progress.completed} из ${progress.total} подходов`}`}
+                aria-current={mobileFocusExercise === exercise ? 'step' : undefined}
+                onclick={() => focusMobileExercise(exercise)}
+              >
+                <span class="mobile-exercise-ring" aria-hidden="true">
+                  <span>{progress.percent === 100 ? '✓' : skipped ? '—' : index + 1}</span>
+                </span>
+                <span class="mobile-exercise-name">{exercise}</span>
+              </button>
+            {/each}
+          </div>
+          <span class="mobile-swipe-hint" aria-hidden="true">свайп для перехода</span>
+        </nav>
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
           {@const hint = protocolHints.get(exercise)}
@@ -3032,6 +3124,10 @@
   }
 
   .mobile-exercise-eyebrow {
+    display: none;
+  }
+
+  .mobile-exercise-nav {
     display: none;
   }
 
@@ -4662,7 +4758,129 @@
 
     .exercise-grid {
       display: block;
+      --mobile-exercise-nav-height: 82px;
       background: rgb(9 12 15 / 96%);
+    }
+
+    .mobile-exercise-nav {
+      position: sticky;
+      z-index: 8;
+      top: 0;
+      display: grid;
+      height: var(--mobile-exercise-nav-height);
+      align-content: center;
+      gap: 3px;
+      padding: 7px 0 5px;
+      overflow: hidden;
+      background: rgb(9 12 15 / 97%);
+      border-bottom: 1px solid var(--line-strong);
+      box-shadow: 0 8px 18px rgb(0 0 0 / 18%);
+    }
+
+    .mobile-exercise-track {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 0 14px;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
+    }
+
+    .mobile-exercise-track::-webkit-scrollbar {
+      display: none;
+    }
+
+    .mobile-exercise-tab {
+      display: grid;
+      min-width: 58px;
+      max-width: 72px;
+      flex: 1 0 58px;
+      justify-items: center;
+      gap: 3px;
+      padding: 0;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+    }
+
+    .mobile-exercise-ring {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      padding: 2px;
+      background: conic-gradient(
+        var(--accent) var(--exercise-progress),
+        var(--line-strong) var(--exercise-progress)
+      );
+      border-radius: 50%;
+    }
+
+    .mobile-exercise-ring > span {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      place-items: center;
+      color: var(--muted-strong);
+      background: #0b0e11;
+      border: 2px solid #0b0e11;
+      border-radius: inherit;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .mobile-exercise-name {
+      width: 100%;
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: 7px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.05;
+      text-align: center;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .mobile-exercise-tab.active {
+      color: var(--text);
+    }
+
+    .mobile-exercise-tab.active .mobile-exercise-ring {
+      box-shadow: 0 0 0 2px #0b0e11, 0 0 0 3px var(--accent), 0 0 14px rgb(204 255 51 / 18%);
+    }
+
+    .mobile-exercise-tab.active .mobile-exercise-ring > span,
+    .mobile-exercise-tab.complete .mobile-exercise-ring > span {
+      color: var(--accent);
+    }
+
+    .mobile-exercise-tab.skipped .mobile-exercise-ring {
+      background: var(--line-strong);
+    }
+
+    .mobile-exercise-tab.skipped .mobile-exercise-ring > span {
+      color: var(--muted);
+    }
+
+    .mobile-exercise-tab:focus-visible {
+      outline: 1px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .mobile-swipe-hint {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 6px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      line-height: 1;
+      text-align: center;
+      text-transform: uppercase;
     }
 
     .exercise-item:not(.mobile-focused) {
@@ -4672,16 +4890,17 @@
     .exercise-item.mobile-focused {
       position: relative;
       display: block;
-      min-height: calc(100dvh - 76px);
+      min-height: calc(100dvh - 76px - var(--mobile-exercise-nav-height));
       padding: 20px 22px 18px;
       background: linear-gradient(150deg, rgb(13 17 20 / 98%), rgb(8 11 14 / 99%));
       border: 0;
       border-radius: 0;
+      touch-action: pan-y;
     }
 
     .exercise-item.mobile-focused .exercise-content {
       display: flex;
-      min-height: calc(100dvh - 114px);
+      min-height: calc(100dvh - 114px - var(--mobile-exercise-nav-height));
       flex-direction: column;
     }
 
