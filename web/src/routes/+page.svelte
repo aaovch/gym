@@ -92,7 +92,12 @@
   let mobileFocusSessionKey = $state('');
   let mobileExerciseHoldTarget = $state<string | null>(null);
   let mobileSwipeStart: { x: number; y: number } | null = null;
-  let mobileExerciseHoldStart: { pointerId: number; x: number; y: number } | null = null;
+  let mobileExerciseHoldStart: {
+    input: 'pointer' | 'touch';
+    id: number;
+    x: number;
+    y: number;
+  } | null = null;
   let mobileExerciseHoldTimer: ReturnType<typeof setTimeout> | null = null;
   let suppressMobileExerciseClick = false;
 
@@ -185,20 +190,14 @@
     mobileExerciseHoldStart = null;
   }
 
-  function beginMobileExerciseHold(event: PointerEvent, exerciseName: string) {
-    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  function scheduleMobileExerciseHold(
+    exerciseName: string,
+    start: NonNullable<typeof mobileExerciseHoldStart>
+  ) {
     clearMobileExerciseHold();
     suppressMobileExerciseClick = false;
     mobileExerciseHoldTarget = exerciseName;
-    mobileExerciseHoldStart = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    const target = event.currentTarget as HTMLElement;
-    if ('setPointerCapture' in target) {
-      try {
-        target.setPointerCapture(event.pointerId);
-      } catch {
-        // Some mobile browsers expose Pointer Events without pointer capture.
-      }
-    }
+    mobileExerciseHoldStart = start;
     mobileExerciseHoldTimer = setTimeout(() => {
       mobileExerciseHoldTimer = null;
       mobileExerciseHoldTarget = null;
@@ -208,10 +207,55 @@
     }, MOBILE_EXERCISE_HOLD_MS);
   }
 
+  function beginMobileExerciseHold(event: PointerEvent, exerciseName: string) {
+    if (
+      event.pointerType === 'touch' ||
+      !event.isPrimary ||
+      (event.pointerType === 'mouse' && event.button !== 0)
+    ) return;
+    scheduleMobileExerciseHold(exerciseName, {
+      input: 'pointer',
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY
+    });
+    const target = event.currentTarget as HTMLElement;
+    if ('setPointerCapture' in target) {
+      try {
+        target.setPointerCapture(event.pointerId);
+      } catch {
+        // Some mobile browsers expose Pointer Events without pointer capture.
+      }
+    }
+  }
+
   function moveMobileExerciseHold(event: PointerEvent) {
     const start = mobileExerciseHoldStart;
-    if (!start || start.pointerId !== event.pointerId) return;
+    if (!start || start.input !== 'pointer' || start.id !== event.pointerId) return;
     if (holdPointerMoved(start.x, start.y, event.clientX, event.clientY)) clearMobileExerciseHold();
+  }
+
+  function beginMobileExerciseTouchHold(event: TouchEvent, exerciseName: string) {
+    if (event.touches.length !== 1) {
+      clearMobileExerciseHold();
+      return;
+    }
+    const touch = event.touches[0];
+    scheduleMobileExerciseHold(exerciseName, {
+      input: 'touch',
+      id: touch.identifier,
+      x: touch.clientX,
+      y: touch.clientY
+    });
+  }
+
+  function moveMobileExerciseTouchHold(event: TouchEvent) {
+    const start = mobileExerciseHoldStart;
+    if (!start || start.input !== 'touch') return;
+    const touch = Array.from(event.touches).find((item) => item.identifier === start.id);
+    if (!touch || holdPointerMoved(start.x, start.y, touch.clientX, touch.clientY)) {
+      clearMobileExerciseHold();
+    }
   }
 
   function finishMobileExerciseHold() {
@@ -2065,6 +2109,10 @@
                 onpointermove={moveMobileExerciseHold}
                 onpointerup={finishMobileExerciseHold}
                 onpointercancel={finishMobileExerciseHold}
+                ontouchstart={(event) => beginMobileExerciseTouchHold(event, exercise)}
+                ontouchmove={moveMobileExerciseTouchHold}
+                ontouchend={finishMobileExerciseHold}
+                ontouchcancel={finishMobileExerciseHold}
                 oncontextmenu={(event) => event.preventDefault()}
                 onclick={() => void handleMobileExerciseClick(exercise)}
               >
