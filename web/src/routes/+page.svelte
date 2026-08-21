@@ -33,7 +33,9 @@
   import { completionPhrase } from '$lib/completion-phrases';
   import {
     adjacentExercise,
+    allPlannedSetsFailed,
     horizontalSwipeDirection,
+    MOBILE_EXERCISE_HOLD_MS,
     type ExerciseMoveDirection
   } from '$lib/mobile-exercise-navigation';
   import { randomUuid } from '$lib/id';
@@ -87,7 +89,10 @@
   let pendingActualWeights = $state<Record<string, number>>({});
   let mobileFocusExercise = $state<string | null>(null);
   let mobileFocusSessionKey = $state('');
+  let mobileExerciseHoldTarget = $state<string | null>(null);
   let mobileSwipeStart: { x: number; y: number } | null = null;
+  let mobileExerciseHoldTimer: ReturnType<typeof setTimeout> | null = null;
+  let suppressMobileExerciseClick = false;
 
   const WEIGHT_STEP = 0.5;
 
@@ -169,6 +174,41 @@
   function moveMobileExercise(direction: ExerciseMoveDirection) {
     const nextExercise = adjacentExercise(slotExercises, mobileFocusExercise, direction);
     if (nextExercise) focusMobileExercise(nextExercise, 'auto');
+  }
+
+  function clearMobileExerciseHold() {
+    if (mobileExerciseHoldTimer) clearTimeout(mobileExerciseHoldTimer);
+    mobileExerciseHoldTimer = null;
+    mobileExerciseHoldTarget = null;
+  }
+
+  function beginMobileExerciseHold(event: PointerEvent, exerciseName: string) {
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    clearMobileExerciseHold();
+    suppressMobileExerciseClick = false;
+    mobileExerciseHoldTarget = exerciseName;
+    mobileExerciseHoldTimer = setTimeout(() => {
+      mobileExerciseHoldTimer = null;
+      mobileExerciseHoldTarget = null;
+      suppressMobileExerciseClick = true;
+      void markExerciseNotDone(exerciseName);
+    }, MOBILE_EXERCISE_HOLD_MS);
+  }
+
+  function finishMobileExerciseHold() {
+    clearMobileExerciseHold();
+  }
+
+  async function handleMobileExerciseClick(exerciseName: string) {
+    if (suppressMobileExerciseClick) {
+      suppressMobileExerciseClick = false;
+      return;
+    }
+    if (mobileExerciseProgress(exerciseName).notDone) {
+      await restoreExerciseNotDone(exerciseName);
+      return;
+    }
+    focusMobileExercise(exerciseName);
   }
 
   function beginMobileExerciseSwipe(event: TouchEvent) {
@@ -317,13 +357,20 @@
     return recordedSets.length >= preview.sets.length;
   }
 
-  function mobileExerciseProgress(exerciseName: string): { completed: number; total: number; percent: number } {
-    const completed = loggedSetsFor(entryByExercise.get(exerciseName)).length;
+  function mobileExerciseProgress(exerciseName: string): {
+    completed: number;
+    total: number;
+    percent: number;
+    notDone: boolean;
+  } {
+    const entry = entryByExercise.get(exerciseName);
+    const completed = loggedSetsFor(entry).length;
     const total = adjustedPreviewSets(exerciseName)?.sets.length ?? Math.max(1, completed);
     return {
       completed,
       total,
-      percent: Math.min(100, Math.round((completed / total) * 100))
+      percent: Math.min(100, Math.round((completed / total) * 100)),
+      notDone: allPlannedSetsFailed(total, completed, failedSetsFor(entry))
     };
   }
 
@@ -1007,6 +1054,77 @@
 
   function currentPlanDraftRecordedSets(): number {
     return planDraft ? loggedSetsFor(entryByExercise.get(planDraft.exercise)).length : 0;
+  }
+
+  async function markExerciseNotDone(exerciseName: string) {
+    if (busyId !== null || protocolSkips.has(exerciseName)) return;
+    const preview = adjustedPreviewSets(exerciseName);
+    if (!preview?.sets.length) return;
+    const existing = entryByExercise.get(exerciseName);
+    const storedLog = existing?.id
+      ? workoutStore.database.logs.find((item) => item.id === existing.id)
+      : undefined;
+    const recordedSets = loggedSetsFor(existing);
+
+    if (storedLog && storedLog.blocks.length > 1) {
+      focusMobileExercise(exerciseName);
+      toasts.error('В упражнении есть дополнительные блоки. Отметьте подходы внутри карточки.');
+      return;
+    }
+    if (completedLoggedSetsFor(existing).length > 0) {
+      focusMobileExercise(exerciseName);
+      toasts.info('Есть выполненные подходы. Отметьте оставшиеся крестиками внутри упражнения.');
+      return;
+    }
+    if (recordedSets.length > preview.sets.length) {
+      focusMobileExercise(exerciseName);
+      toasts.error('В записи больше подходов, чем в плане. Измените её внутри карточки.');
+      return;
+    }
+
+    const sets = preview.sets.map((plannedSet, index) => [
+      ...(recordedSets[index] ?? plannedSet)
+    ] as ExerciseSet);
+    await saveSetsFor(
+      exerciseName,
+      preview.kind,
+      sets,
+      '',
+      true,
+      existing?.id,
+      sets.map((_, index) => index)
+    );
+    if (!error) {
+      if (browser && 'vibrate' in navigator) navigator.vibrate(35);
+      toasts.info(`Не выполнено: ${exerciseName}`);
+    }
+  }
+
+  async function restoreExerciseNotDone(exerciseName: string) {
+    if (busyId !== null) return;
+    const existing = entryByExercise.get(exerciseName);
+    if (!existing?.id || !mobileExerciseProgress(exerciseName).notDone) return;
+    const storedLog = workoutStore.database.logs.find((item) => item.id === existing.id);
+    const row = storedLog?.blocks[0];
+
+    focusMobileExercise(exerciseName, 'auto');
+    if (!storedLog || storedLog.blocks.length !== 1 || row?.comment?.trim()) {
+      toasts.error('В записи есть комментарий или дополнительные данные. Восстановите её через редактор.');
+      return;
+    }
+
+    busyId = exerciseName;
+    error = '';
+    try {
+      await deleteSession(existing.id);
+      toasts.success(`Возвращено в тренировку: ${exerciseName}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось вернуть упражнение';
+      error = message;
+      toasts.error(message);
+    } finally {
+      busyId = null;
+    }
   }
 
   async function confirmSet(exerciseName: string, setIndex: number, failed = false) {
@@ -1911,22 +2029,34 @@
                 type="button"
                 class="mobile-exercise-tab"
                 class:active={mobileFocusExercise === exercise}
-                class:complete={progress.percent === 100}
+                class:complete={progress.percent === 100 && !progress.notDone}
                 class:in-progress={progress.completed > 0 && progress.percent < 100}
+                class:not-done={progress.notDone}
+                class:holding={mobileExerciseHoldTarget === exercise}
                 class:skipped
                 style={`--exercise-progress: ${progress.percent * 3.6}deg`}
-                aria-label={`${exercise}: ${skipped ? 'пропуск по протоколу' : `${progress.completed} из ${progress.total} подходов`}`}
+                aria-label={`${exercise}: ${skipped
+                  ? 'пропуск по протоколу'
+                  : progress.notDone
+                    ? 'не выполнено, нажмите, чтобы вернуть в тренировку'
+                    : `${progress.completed} из ${progress.total} подходов, удерживайте, чтобы отметить невыполненным`}`}
                 aria-current={mobileFocusExercise === exercise ? 'step' : undefined}
-                onclick={() => focusMobileExercise(exercise)}
+                disabled={busyId === exercise}
+                onpointerdown={(event) => beginMobileExerciseHold(event, exercise)}
+                onpointerup={finishMobileExerciseHold}
+                onpointercancel={finishMobileExerciseHold}
+                onpointerleave={finishMobileExerciseHold}
+                oncontextmenu={(event) => event.preventDefault()}
+                onclick={() => void handleMobileExerciseClick(exercise)}
               >
                 <span class="mobile-exercise-ring" aria-hidden="true">
-                  <span>{progress.percent === 100 ? '✓' : skipped ? '—' : index + 1}</span>
+                  <span>{progress.notDone ? '×' : progress.percent === 100 ? '✓' : skipped ? '—' : index + 1}</span>
                 </span>
                 <span class="mobile-exercise-name">{exercise}</span>
               </button>
             {/each}
           </div>
-          <span class="mobile-swipe-hint" aria-hidden="true">свайп для перехода</span>
+          <span class="mobile-swipe-hint" aria-hidden="true">свайп — перейти · удержать иконку — не сделал</span>
         </nav>
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
@@ -4803,6 +4933,13 @@
       background: transparent;
       border: 0;
       cursor: pointer;
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
+
+    .mobile-exercise-tab:disabled {
+      cursor: wait;
+      opacity: 0.72;
     }
 
     .mobile-exercise-ring {
@@ -4816,6 +4953,7 @@
         var(--line-strong) var(--exercise-progress)
       );
       border-radius: 50%;
+      transition: box-shadow 160ms ease, transform 140ms ease;
     }
 
     .mobile-exercise-ring > span {
@@ -4865,6 +5003,40 @@
 
     .mobile-exercise-tab.skipped .mobile-exercise-ring > span {
       color: var(--muted);
+    }
+
+    .mobile-exercise-tab.not-done {
+      color: color-mix(in srgb, var(--danger) 78%, var(--muted));
+    }
+
+    .mobile-exercise-tab.not-done .mobile-exercise-ring {
+      background: var(--danger);
+      box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 22%, transparent);
+    }
+
+    .mobile-exercise-tab.not-done .mobile-exercise-ring > span {
+      color: var(--danger);
+    }
+
+    .mobile-exercise-tab.not-done.active .mobile-exercise-ring {
+      box-shadow:
+        0 0 0 2px #0b0e11,
+        0 0 0 3px var(--danger),
+        0 0 14px color-mix(in srgb, var(--danger) 22%, transparent);
+    }
+
+    .mobile-exercise-tab.holding .mobile-exercise-ring {
+      box-shadow:
+        0 0 0 2px #0b0e11,
+        0 0 0 3px var(--hazard),
+        0 0 18px color-mix(in srgb, var(--hazard) 28%, transparent);
+      transform: scale(0.82);
+      transition-duration: 650ms;
+      transition-timing-function: linear;
+    }
+
+    .mobile-exercise-tab.holding .mobile-exercise-name {
+      color: var(--hazard);
     }
 
     .mobile-exercise-tab:focus-visible {

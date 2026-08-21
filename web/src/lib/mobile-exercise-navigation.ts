@@ -1,5 +1,7 @@
 export type ExerciseMoveDirection = -1 | 1;
 
+export const MOBILE_EXERCISE_HOLD_MS = 650;
+
 export function adjacentExercise(
   exercises: string[],
   currentExercise: string | null,
@@ -22,4 +24,14 @@ export function horizontalSwipeDirection(
   const deltaY = endY - startY;
   if (Math.abs(deltaX) < minDistance || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return 0;
   return deltaX < 0 ? 1 : -1;
+}
+
+export function allPlannedSetsFailed(
+  plannedSetCount: number,
+  recordedSetCount: number,
+  failedSets: number[]
+): boolean {
+  if (plannedSetCount <= 0 || recordedSetCount < plannedSetCount) return false;
+  const failed = new Set(failedSets);
+  return Array.from({ length: plannedSetCount }, (_, index) => index).every((index) => failed.has(index));
 }
