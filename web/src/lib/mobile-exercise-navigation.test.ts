@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   adjacentExercise,
   allPlannedSetsFailed,
+  holdPointerMoved,
   horizontalSwipeDirection
 } from './mobile-exercise-navigation';
 
@@ -20,6 +21,11 @@ test('horizontalSwipeDirection accepts deliberate horizontal swipes only', () =>
   assert.equal(horizontalSwipeDirection(100, 100, 180, 92), -1);
   assert.equal(horizontalSwipeDirection(100, 100, 140, 100), 0);
   assert.equal(horizontalSwipeDirection(100, 100, 170, 190), 0);
+});
+
+test('holdPointerMoved tolerates finger jitter but cancels a drag', () => {
+  assert.equal(holdPointerMoved(100, 100, 106, 107), false);
+  assert.equal(holdPointerMoved(100, 100, 114, 100), true);
 });
 
 test('allPlannedSetsFailed requires every planned set to be recorded as failed', () => {

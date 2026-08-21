@@ -1,6 +1,6 @@
 export type ExerciseMoveDirection = -1 | 1;
 
-export const MOBILE_EXERCISE_HOLD_MS = 650;
+export const MOBILE_EXERCISE_HOLD_MS = 500;
 
 export function adjacentExercise(
   exercises: string[],
@@ -24,6 +24,16 @@ export function horizontalSwipeDirection(
   const deltaY = endY - startY;
   if (Math.abs(deltaX) < minDistance || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return 0;
   return deltaX < 0 ? 1 : -1;
+}
+
+export function holdPointerMoved(
+  startX: number,
+  startY: number,
+  currentX: number,
+  currentY: number,
+  tolerance = 12
+): boolean {
+  return Math.hypot(currentX - startX, currentY - startY) > tolerance;
 }
 
 export function allPlannedSetsFailed(

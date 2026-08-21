@@ -34,6 +34,7 @@
   import {
     adjacentExercise,
     allPlannedSetsFailed,
+    holdPointerMoved,
     horizontalSwipeDirection,
     MOBILE_EXERCISE_HOLD_MS,
     type ExerciseMoveDirection
@@ -91,6 +92,7 @@
   let mobileFocusSessionKey = $state('');
   let mobileExerciseHoldTarget = $state<string | null>(null);
   let mobileSwipeStart: { x: number; y: number } | null = null;
+  let mobileExerciseHoldStart: { pointerId: number; x: number; y: number } | null = null;
   let mobileExerciseHoldTimer: ReturnType<typeof setTimeout> | null = null;
   let suppressMobileExerciseClick = false;
 
@@ -180,6 +182,7 @@
     if (mobileExerciseHoldTimer) clearTimeout(mobileExerciseHoldTimer);
     mobileExerciseHoldTimer = null;
     mobileExerciseHoldTarget = null;
+    mobileExerciseHoldStart = null;
   }
 
   function beginMobileExerciseHold(event: PointerEvent, exerciseName: string) {
@@ -187,12 +190,28 @@
     clearMobileExerciseHold();
     suppressMobileExerciseClick = false;
     mobileExerciseHoldTarget = exerciseName;
+    mobileExerciseHoldStart = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    const target = event.currentTarget as HTMLElement;
+    if ('setPointerCapture' in target) {
+      try {
+        target.setPointerCapture(event.pointerId);
+      } catch {
+        // Some mobile browsers expose Pointer Events without pointer capture.
+      }
+    }
     mobileExerciseHoldTimer = setTimeout(() => {
       mobileExerciseHoldTimer = null;
       mobileExerciseHoldTarget = null;
+      mobileExerciseHoldStart = null;
       suppressMobileExerciseClick = true;
       void markExerciseNotDone(exerciseName);
     }, MOBILE_EXERCISE_HOLD_MS);
+  }
+
+  function moveMobileExerciseHold(event: PointerEvent) {
+    const start = mobileExerciseHoldStart;
+    if (!start || start.pointerId !== event.pointerId) return;
+    if (holdPointerMoved(start.x, start.y, event.clientX, event.clientY)) clearMobileExerciseHold();
   }
 
   function finishMobileExerciseHold() {
@@ -2034,18 +2053,18 @@
                 class:not-done={progress.notDone}
                 class:holding={mobileExerciseHoldTarget === exercise}
                 class:skipped
-                style={`--exercise-progress: ${progress.percent * 3.6}deg`}
+                style={`--exercise-progress: ${progress.percent * 3.6}deg; --exercise-hold-ms: ${MOBILE_EXERCISE_HOLD_MS}ms`}
                 aria-label={`${exercise}: ${skipped
                   ? 'пропуск по протоколу'
                   : progress.notDone
                     ? 'не выполнено, нажмите, чтобы вернуть в тренировку'
-                    : `${progress.completed} из ${progress.total} подходов, удерживайте, чтобы отметить невыполненным`}`}
+                    : `${progress.completed} из ${progress.total} подходов, удерживайте полсекунды, чтобы отметить невыполненным`}`}
                 aria-current={mobileFocusExercise === exercise ? 'step' : undefined}
                 disabled={busyId === exercise}
                 onpointerdown={(event) => beginMobileExerciseHold(event, exercise)}
+                onpointermove={moveMobileExerciseHold}
                 onpointerup={finishMobileExerciseHold}
                 onpointercancel={finishMobileExerciseHold}
-                onpointerleave={finishMobileExerciseHold}
                 oncontextmenu={(event) => event.preventDefault()}
                 onclick={() => void handleMobileExerciseClick(exercise)}
               >
@@ -2056,7 +2075,7 @@
               </button>
             {/each}
           </div>
-          <span class="mobile-swipe-hint" aria-hidden="true">свайп — перейти · удержать иконку — не сделал</span>
+          <span class="mobile-swipe-hint" aria-hidden="true">свайп — перейти · удержать иконку 0,5 с — не сделал</span>
         </nav>
         {#each slotExercises as exercise, index (exercise)}
           {@const entry = entryByExercise.get(exercise)}
@@ -4953,6 +4972,7 @@
         var(--line-strong) var(--exercise-progress)
       );
       border-radius: 50%;
+      touch-action: none;
       transition: box-shadow 160ms ease, transform 140ms ease;
     }
 
@@ -5031,7 +5051,7 @@
         0 0 0 3px var(--hazard),
         0 0 18px color-mix(in srgb, var(--hazard) 28%, transparent);
       transform: scale(0.82);
-      transition-duration: 650ms;
+      transition-duration: var(--exercise-hold-ms);
       transition-timing-function: linear;
     }
 
