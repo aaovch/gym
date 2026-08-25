@@ -54,6 +54,11 @@
 	} from '$lib/macro-constructor';
 	import RmLabels from '$lib/components/RmLabels.svelte';
 	import {
+		cellComparisonKey,
+		compareExercisePlan,
+		type ExercisePlanComparison
+	} from '$lib/mesocycle-comparison';
+	import {
 		importCyclePlanFromAuto,
 		saveCyclePlanState,
 		workoutStore
@@ -179,6 +184,31 @@
 				: mesos[mesos.length - 1].plan.id;
 		return mesos.find((meso) => meso.plan.id === pick) ?? null;
 	});
+
+	const previousMeso = $derived.by(() => {
+		if (!selectedMeso) return null;
+		const index = displayMesos.findIndex((meso) => meso.plan.id === selectedMeso.plan.id);
+		return index > 0 ? displayMesos[index - 1] : null;
+	});
+
+	const mesoComparisons = $derived.by(() => {
+		const comparisons = new Map<string, ExercisePlanComparison>();
+		if (!selectedMeso || !previousMeso) return comparisons;
+		const previousRows = new Map(previousMeso.protocolMatrix.map((row) => [row.exercise, row]));
+		for (const row of selectedMeso.protocolMatrix) {
+			const exerciseId = toExerciseId(row.exercise, keyMaps);
+			const comparison = compareExercisePlan(row, previousRows.get(row.exercise), {
+				currentSessions: selectedMeso.plan.exerciseSessions?.[exerciseId],
+				previousSessions: previousMeso.plan.exerciseSessions?.[exerciseId]
+			});
+			if (comparison) comparisons.set(row.exercise, comparison);
+		}
+		return comparisons;
+	});
+
+	const changedComparisonCount = $derived(
+		[...mesoComparisons.values()].filter((comparison) => comparison.hasChanges).length
+	);
 
 	const nextMicroToLog = $derived.by(() => {
 		if (!selectedMeso) return null;
@@ -1019,6 +1049,14 @@
 
 	function shortProtocolName(name: string): string {
 		return name.replace('4×микро', '4μ').replace('~80%', '80%');
+	}
+
+	function signedChange(value: number, suffix: string): string {
+		return `${value > 0 ? '+' : '−'}${fmtNum(Math.abs(value))}${suffix}`;
+	}
+
+	function sessionSetLabel(sessions: readonly (0 | 1)[]): string {
+		return sessions.map((session) => sessionColumnTitle(session)).join('+') || '—';
 	}
 
 	function sessionDayDate(micro: EnrichedMicrocycle, sessionIndex: 0 | 1): string | null {
@@ -2309,6 +2347,16 @@
 						Тренировки <strong>A</strong> и <strong>B</strong> — отдельные блоки: в каждом только
 						упражнения этого дня, колонки — микроциклы с датами.
 					</p>
+					{#if previousMeso && mesoComparisons.size > 0}
+						<div class="meso-comparison-summary">
+							<strong>{previousMeso.plan.label} → {selectedMeso.plan.label}</strong>
+							<span>
+								{changedComparisonCount > 0
+									? `изменения у ${changedComparisonCount} из ${mesoComparisons.size} общих упражнений`
+									: 'общие упражнения без изменений'}
+							</span>
+						</div>
+					{/if}
 					<div class="plan-sessions">
 						{#each [0, 1] as sessionIndex}
 							{@const slot = sessionIndex as 0 | 1}
@@ -2377,8 +2425,17 @@
 											<tbody>
 												{#each rows as row}
 													{@const rm = selectedMeso.anchorInfo[row.exercise]}
+													{@const comparison = mesoComparisons.get(row.exercise)}
 													<tr>
-														<td class="ex-name">{row.exercise}</td>
+														<td class="ex-name">
+															<span>{row.exercise}</span>
+															{#if comparison?.sessionChanged}
+																<small class="comparison-note">
+																	{sessionSetLabel(comparison.previousSessions)} →
+																	{sessionSetLabel(comparison.currentSessions)}
+																</small>
+															{/if}
+														</td>
 														<td class="rm-cell">
 															<RmLabels
 																anchor={row.anchor}
@@ -2386,11 +2443,30 @@
 																currentDate={rm?.current1rmDate}
 																stacked
 															/>
+															{#if comparison?.anchorDelta != null}
+																<small
+																	class="comparison-delta"
+																	class:up={comparison.anchorDelta > 0}
+																	class:down={comparison.anchorDelta < 0}
+																	title={`Изменение якоря по сравнению с ${previousMeso?.plan.label ?? 'предыдущим мезоциклом'}`}
+																>
+																	{signedChange(comparison.anchorDelta, ' кг')}
+																	{#if comparison.anchorPctDelta != null}
+																		· {signedChange(comparison.anchorPctDelta, '%')}
+																	{/if}
+																</small>
+															{/if}
 														</td>
 														<td class="proto-name" title={row.templateName}>
-															{shortProtocolName(row.templateName)}
+															<span>{shortProtocolName(row.templateName)}</span>
+															{#if comparison?.protocolChanged}
+																<small class="comparison-note" title={comparison.previousTemplateName}>
+																	был {shortProtocolName(comparison.previousTemplateName)}
+																</small>
+															{/if}
 														</td>
 														{#each row.cells as cell}
+															{@const cellComparison = comparison?.cells[cellComparisonKey(cell.microIndex, cell.sessionIndex)]}
 															<td
 																class="pct"
 																class:micro-group-start={cell.microIndex > 1}
@@ -2410,6 +2486,22 @@
 																		<span class="pct-val">{cell.pct != null ? `${cell.pct}%` : '—'}</span>
 																		{#if cell.targetWeight != null}
 																			<small>{fmtNum(cell.targetWeight)} кг</small>
+																		{/if}
+																		{#if cellComparison}
+																			<small
+																				class="cell-delta"
+																				class:up={(cellComparison.targetWeightDelta ?? cellComparison.pctDelta ?? 0) > 0}
+																				class:down={(cellComparison.targetWeightDelta ?? cellComparison.pctDelta ?? 0) < 0}
+																				title={`Изменение плана по сравнению с ${previousMeso?.plan.label ?? 'предыдущим мезоциклом'}`}
+																			>
+																				{#if cellComparison.newlyApplicable}
+																					новое
+																				{:else if cellComparison.targetWeightDelta != null}
+																					{signedChange(cellComparison.targetWeightDelta, ' кг')}
+																				{:else if cellComparison.pctDelta != null}
+																					{signedChange(cellComparison.pctDelta, ' п.п.')}
+																				{/if}
+																			</small>
 																		{/if}
 																	</div>
 																	<div class="cell-fact">
@@ -3475,6 +3567,26 @@
 		font-size: 0.82rem;
 	}
 
+	.meso-comparison-summary {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem 0.8rem;
+		flex-wrap: wrap;
+		margin: -0.1rem 0 0.9rem;
+		padding: 0.55rem 0.7rem;
+		border-left: 2px solid var(--meso-color);
+		background: color-mix(in srgb, var(--meso-color) 7%, transparent);
+		font-size: 0.72rem;
+	}
+
+	.meso-comparison-summary strong {
+		color: var(--text);
+	}
+
+	.meso-comparison-summary span {
+		color: var(--muted);
+	}
+
 	.plan-sessions {
 		display: grid;
 		gap: 1.25rem;
@@ -3566,6 +3678,38 @@
 		font-size: 0.78rem;
 		line-height: 1.25;
 		word-break: break-word;
+	}
+
+	.matrix .ex-name,
+	.matrix .rm-cell,
+	.matrix .proto-name {
+		vertical-align: middle;
+	}
+
+	.matrix .comparison-note,
+	.matrix .comparison-delta,
+	.matrix .cell-delta {
+		display: block;
+		margin-top: 0.22rem;
+		font-size: 0.6rem;
+		font-weight: 650;
+		line-height: 1.2;
+		color: var(--muted);
+		white-space: normal;
+	}
+
+	.matrix .comparison-delta.up,
+	.matrix .cell-delta.up {
+		color: var(--accent);
+	}
+
+	.matrix .comparison-delta.down,
+	.matrix .cell-delta.down {
+		color: #ff7d7d;
+	}
+
+	.matrix .cell-delta {
+		white-space: nowrap;
 	}
 
 	.matrix .rm-cell {

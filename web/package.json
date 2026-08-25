@@ -8,6 +8,7 @@
     "repair:data": "tsx scripts/repair-data.ts",
     "migrate:v4": "tsx scripts/migrate-v4.ts",
     "test:session-routing": "tsx --test src/lib/session-entry-routing.test.ts",
+    "test:meso-comparison": "tsx --test src/lib/mesocycle-comparison.test.ts",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "dev": "npm run sync:data && vite dev",
     "build": "npm run sync:data && vite build",
