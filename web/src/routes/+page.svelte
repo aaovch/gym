@@ -60,6 +60,7 @@
   import {
     extraEntriesForSession,
     plannedEntriesForSession,
+    preferredSessionInLatestMeso,
     preferredSessionForDate,
     type SessionRoutingRef
   } from '$lib/session-entry-routing';
@@ -1378,6 +1379,18 @@
     return { mesoId: best.mesoId, microId: best.microId, slot: best.index === 1 ? 'B' : 'A' };
   }
 
+  function findCurrentMesoSession(): SessionRoutingRef | null {
+    return preferredSessionInLatestMeso(planSessionSteps, (step) => {
+      const meso = mesocycles.find((item) => item.plan.id === step.mesoId);
+      const micro = meso?.microcycles.find((item) => item.plan.id === step.microId);
+      if (!meso || !micro) return false;
+      const index = step.slot === 'B' ? 1 : 0;
+      if (sessionSkippedFor(micro, index)) return false;
+      const { progress, hasExercises } = sessionProgressOf(meso, micro, index);
+      return hasExercises && progress < 100;
+    });
+  }
+
   let autoSelected = $state(false);
   let autoPicked = $state(false);
   let appliedUrlDate = $state<string | null>(null);
@@ -1426,7 +1439,10 @@
       autoSelected = true;
       return;
     }
-    const pick = preferredSessionForDate(planSessionSteps, view.entries, todayIso()) ?? findNearestIncomplete();
+    const pick =
+      findCurrentMesoSession() ??
+      preferredSessionForDate(planSessionSteps, view.entries, todayIso()) ??
+      findNearestIncomplete();
     if (pick) {
       mesoPick = pick.mesoId;
       microPick = pick.microId;

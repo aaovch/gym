@@ -15,6 +15,22 @@ export type SessionRoutingRef = {
 	date: string | null;
 };
 
+/**
+ * Главная страница должна оставаться в последнем (текущем) мезоцикле.
+ * Внутри него выбираем первую незакрытую тренировку, а когда все закрыты —
+ * последнюю тренировку блока вместо возврата к старым незаполненным сессиям.
+ */
+export function preferredSessionInLatestMeso(
+	sessions: readonly SessionRoutingRef[],
+	isIncomplete: (session: SessionRoutingRef) => boolean
+): SessionRoutingRef | null {
+	const latestMesoId = sessions.at(-1)?.mesoId;
+	if (!latestMesoId) return null;
+
+	const currentSessions = sessions.filter((session) => session.mesoId === latestMesoId);
+	return currentSessions.find(isIncomplete) ?? currentSessions.at(-1) ?? null;
+}
+
 function hasCurrentPlanLink(
 	entry: WorkoutEntry,
 	validMicroSessionIds: ReadonlySet<string>

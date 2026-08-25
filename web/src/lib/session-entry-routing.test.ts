@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
 	extraEntriesForSession,
 	plannedEntriesForSession,
+	preferredSessionInLatestMeso,
 	preferredSessionForDate,
 	type SessionEntryContext
 } from './session-entry-routing';
@@ -91,4 +92,27 @@ test('completed session with linked records remains preferred on its date', () =
 	const entries = [entry('b1', 'only-b', 'session-b'), entry('b2', 'shared', 'session-b')];
 
 	assert.equal(preferredSessionForDate(sessions, entries, '2026-08-09')?.id, 'session-b');
+});
+
+test('latest mesocycle opens its first incomplete session instead of an older dated session', () => {
+	const sessions = [
+		{ id: 'meso-12-b', mesoId: 'meso-12', microId: 'micro-4', slot: 'B' as const, date: '2026-08-20' },
+		{ id: 'meso-13-a', mesoId: 'meso-13', microId: 'micro-1', slot: 'A' as const, date: null },
+		{ id: 'meso-13-b', mesoId: 'meso-13', microId: 'micro-1', slot: 'B' as const, date: null }
+	];
+
+	assert.equal(
+		preferredSessionInLatestMeso(sessions, (session) => session.id === 'meso-13-a')?.id,
+		'meso-13-a'
+	);
+});
+
+test('latest mesocycle stays selected when all of its sessions are complete', () => {
+	const sessions = [
+		{ id: 'meso-12-b', mesoId: 'meso-12', microId: 'micro-4', slot: 'B' as const, date: '2026-08-20' },
+		{ id: 'meso-13-a', mesoId: 'meso-13', microId: 'micro-1', slot: 'A' as const, date: null },
+		{ id: 'meso-13-b', mesoId: 'meso-13', microId: 'micro-1', slot: 'B' as const, date: null }
+	];
+
+	assert.equal(preferredSessionInLatestMeso(sessions, () => false)?.id, 'meso-13-b');
 });
