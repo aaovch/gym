@@ -37,6 +37,7 @@
     holdPointerMoved,
     horizontalSwipeDirection,
     MOBILE_EXERCISE_HOLD_MS,
+    recordedSetRepeatAction,
     type ExerciseMoveDirection
   } from '$lib/mobile-exercise-navigation';
   import { randomUuid } from '$lib/id';
@@ -1277,6 +1278,15 @@
     }
   }
 
+  async function repeatRecordedSetAction(exerciseName: string, setIndex: number, failed: boolean) {
+    const isMobile = browser && window.matchMedia('(max-width: 680px)').matches;
+    if (recordedSetRepeatAction(isMobile, failed) === 'fail') {
+      await confirmSet(exerciseName, setIndex, true);
+      return;
+    }
+    await undoRecordedSet(exerciseName, setIndex);
+  }
+
   async function confirmPlanned(exerciseName: string) {
     undoNotice = null;
     if (protocolSkips.has(exerciseName)) return;
@@ -1565,21 +1575,29 @@
   {/if}
 {/snippet}
 
-{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, disabled: boolean, locked: boolean)}
+{#snippet setDoneButton(exercise: string, setIndex: number, done: boolean, failed: boolean, disabled: boolean, locked: boolean)}
   <div class="set-action-pair">
     {#if done}
       <button
         type="button"
         class="set-undo-btn"
-        aria-label="Отменить запись подхода {setIndex + 1}"
+        aria-label={failed
+          ? `Отменить запись подхода ${setIndex + 1}`
+          : `Изменить статус подхода ${setIndex + 1}`}
         {disabled}
-        title="Отменить запись подхода"
-        onclick={() => undoRecordedSet(exercise, setIndex)}
+        title={failed ? 'Отменить запись подхода' : 'Изменить статус подхода'}
+        onclick={() => repeatRecordedSetAction(exercise, setIndex, failed)}
       >
         <span class="set-action-icon">
-          {#if disabled}…{:else}<IconCheck size={18} stroke={3} aria-hidden="true" />{/if}
+          {#if disabled}
+            …
+          {:else if failed}
+            <IconX size={18} stroke={3} aria-hidden="true" />
+          {:else}
+            <IconCheck size={18} stroke={3} aria-hidden="true" />
+          {/if}
         </span>
-        <span class="set-action-label">Отменить</span>
+        <span class="set-action-label">{failed ? 'Отменить' : 'Не сделал'}</span>
       </button>
     {:else}
       <button
@@ -2281,13 +2299,13 @@
                                     {/if}
                                   </div>
                                 </div>
-                                {@render setDoneButton(exercise, setIndex, setDone, setBusy, setLocked)}
+                                {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
                               {:else}
                                 <span class="set-chip">
                                   <em>{setIndex + 1}</em>{setChipText(previewSets.kind, displaySet)}
                                 </span>
                                 <span class="set-source">{setDone ? (setFailed ? 'не выполнен' : 'факт') : 'план'}</span>
-                                {@render setDoneButton(exercise, setIndex, setDone, setBusy, setLocked)}
+                                {@render setDoneButton(exercise, setIndex, setDone, setFailed, setBusy, setLocked)}
                               {/if}
                             </div>
                           {/each}

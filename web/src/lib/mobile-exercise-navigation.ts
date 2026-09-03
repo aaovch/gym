@@ -2,6 +2,15 @@ export type ExerciseMoveDirection = -1 | 1;
 
 export const MOBILE_EXERCISE_HOLD_MS = 500;
 
+export type RecordedSetRepeatAction = 'fail' | 'undo';
+
+export function recordedSetRepeatAction(
+  isMobile: boolean,
+  alreadyFailed: boolean
+): RecordedSetRepeatAction {
+  return isMobile && !alreadyFailed ? 'fail' : 'undo';
+}
+
 export function adjacentExercise(
   exercises: string[],
   currentExercise: string | null,

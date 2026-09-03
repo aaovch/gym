@@ -4,7 +4,8 @@ import {
   adjacentExercise,
   allPlannedSetsFailed,
   holdPointerMoved,
-  horizontalSwipeDirection
+  horizontalSwipeDirection,
+  recordedSetRepeatAction
 } from './mobile-exercise-navigation';
 
 test('adjacentExercise moves freely between exercises without wrapping', () => {
@@ -33,4 +34,10 @@ test('allPlannedSetsFailed requires every planned set to be recorded as failed',
   assert.equal(allPlannedSetsFailed(5, 4, [0, 1, 2, 3]), false);
   assert.equal(allPlannedSetsFailed(5, 5, [0, 1, 3, 4]), false);
   assert.equal(allPlannedSetsFailed(0, 0, []), false);
+});
+
+test('recordedSetRepeatAction turns a completed mobile set into not done', () => {
+  assert.equal(recordedSetRepeatAction(true, false), 'fail');
+  assert.equal(recordedSetRepeatAction(true, true), 'undo');
+  assert.equal(recordedSetRepeatAction(false, false), 'undo');
 });
