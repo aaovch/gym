@@ -85,6 +85,7 @@ export function sessionToEntry(session: WorkoutSession): WorkoutEntry {
 		date: session.date,
 		parts,
 		sets,
+		primarySetCount: session.rows[0]?.sets.length ?? 0,
 		microSessionId: session.microSessionId,
 		...(failedSets.length ? { failedSets } : {})
 	};

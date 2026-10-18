@@ -4,8 +4,8 @@
 	import {
 		addExerciseToMeso,
 		addMicrocycle,
-		assignDate,
 		compareProtocolMatrixRows,
+		entriesForPlanSession,
 		emptyCyclePlan,
 		markAnchorManual,
 		removeMacrocycle,
@@ -13,7 +13,6 @@
 		removeMicrocycle,
 		removeExerciseFromMeso,
 		syncMesoExercises,
-		unassignDate,
 		updateExerciseProtocol,
 		updateMacrocycle,
 		updateMesocycle,
@@ -981,16 +980,6 @@
 		save(removeMicrocycle(plan, mesoId, microId));
 	}
 
-	function handleAssign(mesoId: string, microId: string, date: string) {
-		if (!plan || !date) return;
-		save(assignDate(plan, mesoId, microId, date));
-	}
-
-	function handleUnassign(date: string) {
-		if (!plan) return;
-		save(unassignDate(plan, date));
-	}
-
 	function handleMesoLabel(meso: EnrichedMesocycle, label: string) {
 		if (!plan) return;
 		save(updateMesocycle(plan, meso.plan.id, { label }));
@@ -1059,18 +1048,31 @@
 		return sessions.map((session) => sessionColumnTitle(session)).join('+') || '—';
 	}
 
+	function microRecordedDates(micro: EnrichedMicrocycle): string[] {
+		const ids = new Set(micro.plan.sessions.map((session) => session.id));
+		const validIds = new Set(cyclePlanView.mesocycles.flatMap((meso) => meso.microcycles.flatMap((item) => item.plan.sessions.map((session) => session.id))));
+		return [...new Set(view.entries.filter((entry) => entry.microSessionId && validIds.has(entry.microSessionId)
+			? ids.has(entry.microSessionId) : microDates(micro.plan).includes(entry.date)).map((entry) => entry.date))].sort();
+	}
+
 	function sessionDayDate(micro: EnrichedMicrocycle, sessionIndex: 0 | 1): string | null {
 		return sessionIndex === 0 ? (micro.dayA?.date ?? null) : (micro.dayB?.date ?? null);
+	}
+
+	function sessionDateLabel(micro: EnrichedMicrocycle, sessionIndex: 0 | 1): string {
+		const dates = plan ? [...new Set(entriesForPlanSession(plan, micro.plan, sessionIndex, view.entries).map((entry) => entry.date))].sort() : [];
+		if (dates.length > 1) return `${formatDateRu(dates[0])} – ${formatDateRu(dates.at(-1)!)}`;
+		const date = dates[0] ?? sessionDayDate(micro, sessionIndex);
+		return date ? formatDateRu(date) : '—';
 	}
 
 	function sessionAddUrl(
 		mesoId: string,
 		microId: string,
-		date: string | null,
 		sessionIndex: 0 | 1
 	): string {
 		const params = new URLSearchParams({
-			date: date ?? todayIso(),
+			date: todayIso(),
 			meso: mesoId,
 			micro: microId,
 			session: String(sessionIndex)
@@ -2398,9 +2400,9 @@
 																		class="day-link"
 																		class:a={slot === 0}
 																		class:b={slot === 1}
-																		href="{base}/?date={date}"
+																		href="{base}/?meso={selectedMeso.plan.id}&micro={micro.plan.id}&session={slot}"
 																	>
-																		{formatDateRu(date)}
+																		{sessionDateLabel(micro, slot)}
 																	</a>
 																{:else}
 																	<span class="day-missing">—</span>
@@ -2410,7 +2412,6 @@
 																	href={sessionAddUrl(
 																		selectedMeso.plan.id,
 																		micro.plan.id,
-																		date,
 																		slot
 																	)}
 																	title="Записать тренировку"
@@ -2612,7 +2613,7 @@
 					</div>
 
 					<div class="settings-block">
-						<h4>Распределение дней по μ</h4>
+						<h4>Микроциклы и записи</h4>
 						<div class="assign-grid">
 							{#each selectedMeso.microcycles as micro}
 								<div class="assign-card">
@@ -2627,30 +2628,12 @@
 										</button>
 									</div>
 									<div class="chip-row">
-										{#each microDates(micro.plan) as date}
-											<span class="chip">
-												{formatDateRu(date)}
-												<button type="button" class="chip-x" onclick={() => handleUnassign(date)}>×</button>
-											</span>
+										{#each microRecordedDates(micro) as date}
+											<span class="chip">{formatDateRu(date)}</span>
+										{:else}
+											<span class="muted">Пока нет записей</span>
 										{/each}
-										{#if microDates(micro.plan).length === 0}
-											<span class="muted">нет дней</span>
-										{/if}
 									</div>
-									{#if unassigned.length > 0}
-										<select
-											class="field-select"
-											onchange={(e) => {
-												handleAssign(selectedMeso.plan.id, micro.plan.id, e.currentTarget.value);
-												e.currentTarget.value = '';
-											}}
-										>
-											<option value="">+ добавить день</option>
-											{#each unassigned as date}
-												<option value={date}>{formatDateRu(date)}</option>
-											{/each}
-										</select>
-									{/if}
 								</div>
 							{/each}
 						</div>
@@ -3908,14 +3891,6 @@
 		border: none;
 		background: var(--surface-2);
 		font-size: 0.78rem;
-	}
-
-	.chip-x {
-		border: none;
-		background: transparent;
-		color: var(--danger);
-		padding: 0;
-		line-height: 1;
 	}
 
 	.exercise-settings {

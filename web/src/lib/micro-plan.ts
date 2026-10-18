@@ -11,6 +11,7 @@ export type PlannedExercisePlan = {
 export type MicroSessionPlan = {
 	id: string;
 	indexInMicro: 0 | 1;
+	/** Дата прежнего плана: только для чтения старых записей без связи. Новые факты живут в логах. */
 	date?: string;
 	/** Тренировка осознанно пропущена: не считается незаполненной и не выбирается автоматически. */
 	skipped?: boolean;

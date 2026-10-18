@@ -77,7 +77,7 @@
     activeMeso
       ? activeMeso.microcycles.reduce(
           (total, microcycle) =>
-            total + Number(Boolean(microcycle.dayA)) + Number(Boolean(microcycle.dayB)),
+            total + microcycle.sessionComplete.filter(Boolean).length,
           0
         )
       : 0

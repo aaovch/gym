@@ -1,6 +1,5 @@
 import { getGitHubToken } from './auth';
 import {
-	assignSessionToMicro,
 	autoMesocyclesAsView,
 	buildCyclePlanView,
 	bundledProtocolTemplates,
@@ -68,38 +67,6 @@ export type SaveExerciseLogInput = {
 	microSessionId?: string;
 	context?: SaveLogContext;
 };
-
-function microSessionContext(plan: CyclePlan, microSessionId: string): SaveLogContext | null {
-	for (const meso of plan.mesocycles) {
-		for (const micro of meso.microcycles) {
-			const session = micro.sessions.find((item) => item.id === microSessionId);
-			if (!session) continue;
-			return {
-				mesoId: meso.id,
-				microId: micro.id,
-				indexInMicro: session.indexInMicro
-			};
-		}
-	}
-	return null;
-}
-
-function planHasMicroSessionId(plan: CyclePlan | null, microSessionId: string | undefined): boolean {
-	if (!microSessionId) return false;
-	if (!plan) return true;
-	return Boolean(microSessionContext(plan, microSessionId));
-}
-
-function microSessionIdForDate(plan: CyclePlan | null, date: string): string | undefined {
-	if (!plan) return undefined;
-	for (const meso of plan.mesocycles) {
-		for (const micro of meso.microcycles) {
-			const session = micro.sessions.find((item) => item.date === date);
-			if (session) return session.id;
-		}
-	}
-	return undefined;
-}
 
 function emptyDatabase(): WorkoutDatabase {
 	return { version: 4, revision: 0, updatedAt: '', exercises: [], logs: [] };
@@ -366,13 +333,7 @@ class WorkoutStore {
 
 		const logToSave: ExerciseLog = {
 			...log,
-			microSessionId:
-				contextMicroSessionId ??
-				(planHasMicroSessionId(plan, log.microSessionId) ? log.microSessionId : undefined) ??
-				(existing?.date === log.date && planHasMicroSessionId(plan, existing.microSessionId)
-					? existing.microSessionId
-					: undefined) ??
-				microSessionIdForDate(plan, log.date)
+			microSessionId: contextMicroSessionId ?? log.microSessionId ?? existing?.microSessionId
 		};
 		const index = db.logs.findIndex((item) => item.id === log.id);
 		const logs =
@@ -381,15 +342,6 @@ class WorkoutStore {
 		this.database = { ...db, logs };
 		this.persistDatabase();
 
-		if (!context?.mesoId || !context?.microId) {
-			this.restorePlanLink(logToSave);
-			return logToSave;
-		}
-
-		if (!plan) return logToSave;
-
-		const next = assignSessionToMicro(plan, context.mesoId, context.microId, log.date, indexInMicro);
-		if (next !== plan) this.persistCyclePlan(next);
 		return logToSave;
 	}
 
@@ -403,23 +355,6 @@ class WorkoutStore {
 			input.microSessionId
 		);
 		return this.saveLog(log, input.context, db);
-	}
-
-	private restorePlanLink(log: ExerciseLog) {
-		const plan = this.cyclePlan;
-		if (!plan || !log.microSessionId) return;
-
-		const context = microSessionContext(plan, log.microSessionId);
-		if (!context) return;
-
-		const next = assignSessionToMicro(
-			plan,
-			context.mesoId,
-			context.microId,
-			log.date,
-			context.indexInMicro
-		);
-		if (next !== plan) this.persistCyclePlan(next);
 	}
 
 	async saveSession(
@@ -532,7 +467,7 @@ class WorkoutStore {
 	async repairWorkoutLinks() {
 		const result = repairWorkoutLinks(this.database, this.cyclePlan, this.view.entries, {
 			importPlanIfEmpty: true,
-			repairPlanDates: true
+			repairPlanDates: false
 		});
 		validateDatabasePlanLinks(result.database, result.plan);
 

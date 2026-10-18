@@ -12,7 +12,6 @@
     IconX
   } from '@tabler/icons-svelte';
   import {
-    assignSessionDate,
     exerciseProtocolSkipOnMicro,
     exerciseTargetOnMicro,
     exercisesForMicroSession,
@@ -29,7 +28,8 @@
     type PlannedExercisePlan
   } from '$lib/cycle-plan';
   import { sessionPlanByIndex } from '$lib/micro-plan';
-  import { completedRowSets } from '$lib/database';
+  import { completedEntrySets } from '$lib/database';
+  import { aggregateExerciseEntries, primaryProgressEntries, recordedSetLocation } from '$lib/session-exercise-progress';
   import { completionPhrase } from '$lib/completion-phrases';
   import {
     adjacentExercise,
@@ -68,7 +68,8 @@
   import { deleteSession, saveCyclePlanState, saveExerciseLog, saveLog, workoutStore } from '$lib/workout-store';
   import { toasts } from '$lib/toast.svelte';
 
-  let datePick = $state(todayIso());
+  let currentToday = $state(todayIso());
+  let datePick = $state<string | null>(null);
   let mesoPick = $state<string | null>(null);
   let microPick = $state<string | null>(null);
   let slotPick = $state<WorkoutSlot | null>(null);
@@ -321,17 +322,25 @@
   });
   const sessionHeadline = $derived.by(() => {
     if (!sessionReady || !activeSlot) return null;
-    if (plannedSessionDate) {
-      return plannedSessionDate === todayIso() ? 'Сегодня' : formatDateRu(plannedSessionDate);
-    }
     if (mesocycle && microcycle) {
-      return `${mesocycle.plan.label} · ${slotLabel(activeSlot)}`;
+      return `Микроцикл ${microcycle.plan.indexInMeso} · ${activeSlot}`;
     }
     return slotLabel(activeSlot);
   });
-  const workoutDate = $derived(
-    sessionReady ? (urlDate ?? plannedSessionDate ?? datePick) : (urlDate ?? datePick)
-  );
+  const workoutDate = $derived(datePick ?? currentToday);
+  function setRecordingDate(value: string) {
+    datePick = !value || value === todayIso() ? null : value;
+  }
+  $effect(() => {
+    if (!browser) return;
+    const refreshToday = () => { currentToday = todayIso(); };
+    window.addEventListener('focus', refreshToday);
+    document.addEventListener('visibilitychange', refreshToday);
+    return () => {
+      window.removeEventListener('focus', refreshToday);
+      document.removeEventListener('visibilitychange', refreshToday);
+    };
+  });
   const slotExercises = $derived.by(() => {
     if (!mesocycle || activeIndex == null) return [];
     return sortExercisesByAnchorDesc(
@@ -370,7 +379,7 @@
     return plannedEntriesForSession(view.entries, {
       activeMicroSessionId,
       validMicroSessionIds,
-      workoutDate,
+      workoutDate: plannedSessionDate ?? '',
       slotExercises
     })
       .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
@@ -382,7 +391,6 @@
   });
   const sessionSkipped = $derived(Boolean(activeSessionPlan?.skipped));
   let skipBusy = $state(false);
-  let plannedDateBusy = $state(false);
 
   function sessionExerciseOverride(exerciseName: string): PlannedExercisePlan | null {
     if (!activeSessionPlan) return null;
@@ -394,7 +402,19 @@
     return Boolean(sessionPlanByIndex(micro.plan, index)?.skipped);
   }
 
-  const entryByExercise = $derived(new Map(entriesForSession.map((entry) => [entry.exercise, entry])));
+  const progressEntries = $derived(primaryProgressEntries(entriesForSession, workoutStore.database.logs));
+  const entryByExercise = $derived(aggregateExerciseEntries(progressEntries));
+  const sessionRecordedDates = $derived([...new Set(entriesForSession.map((entry) => entry.date))].sort());
+
+  function recordedLogsFor(exerciseName: string): ExerciseLog[] {
+    const byId = new Map(workoutStore.database.logs.map((log) => [log.id, log]));
+    return progressEntries.filter((entry) => entry.exercise === exerciseName)
+      .flatMap((entry) => entry.id && byId.has(entry.id) ? [byId.get(entry.id)!] : []);
+  }
+
+  function exerciseRecordedDates(exerciseName: string): string {
+    return [...new Set(recordedLogsFor(exerciseName).map((log) => log.date))].map(formatDateRu).join(', ');
+  }
   const protocolSkips = $derived.by(() => {
     if (!mesocycle || !microcycle) return new Map<string, string | null>();
     const map = new Map<string, string | null>();
@@ -507,14 +527,14 @@
     return extraEntriesForSession(view.entries, {
       activeMicroSessionId,
       validMicroSessionIds,
-      workoutDate,
+      workoutDate: plannedSessionDate ?? '',
       slotExercises
     })
       .sort((a, b) => a.exercise.localeCompare(b.exercise, 'ru'));
   });
 
   function sessionDateForIndex(micro: EnrichedMicrocycle, index: 0 | 1): string | null {
-    return index === 0 ? (micro.dayA?.date ?? null) : (micro.dayB?.date ?? null);
+    return sessionPlanByIndex(micro.plan, index)?.date ?? null;
   }
 
   function sessionProgressPercent(
@@ -545,9 +565,7 @@
       workoutDate: sessionDate ?? '',
       slotExercises: exercises
     });
-    const sessionEntryByExercise = new Map(
-      sessionEntries.map((entry) => [entry.exercise, entry])
-    );
+    const sessionEntryByExercise = aggregateExerciseEntries(primaryProgressEntries(sessionEntries, workoutStore.database.logs));
 
     const logged = required.filter((exercise) => {
       const entry = sessionEntryByExercise.get(exercise);
@@ -601,12 +619,6 @@
     microPick = step.microId;
     slotPick = step.slot;
     pickerOpen = false;
-    const meso = mesocycles.find((item) => item.plan.id === step.mesoId);
-    const micro = meso?.microcycles.find((item) => item.plan.id === step.microId);
-    if (micro) {
-      const planned = sessionDateForIndex(micro, step.slot === 'B' ? 1 : 0);
-      datePick = planned ?? todayIso();
-    }
   }
 
   function goSessionStep(delta: -1 | 1) {
@@ -696,12 +708,10 @@
   }
 
   function entryComments(entry: WorkoutEntry): string[] {
-    const session = entry.id ? view.sessions.find((item) => item.id === entry.id) : null;
-    return (
-      session?.rows
-        .map((row) => row.comment?.trim())
-        .filter((comment): comment is string => Boolean(comment)) ?? []
-    );
+    const logs = entry.id ? workoutStore.database.logs.filter((log) => log.id === entry.id) : recordedLogsFor(entry.exercise);
+    return logs.flatMap((log) => log.blocks
+      .map((row) => row.comment?.trim())
+      .filter((comment): comment is string => Boolean(comment)));
   }
 
   function planStats(sets: ExerciseSet[]) {
@@ -743,24 +753,16 @@
     return { kind: input.kind, sets };
   }
 
-  function primaryLogRow(entry?: WorkoutEntry): SessionRow | null {
-    if (!entry?.id) return null;
-    return workoutStore.database.logs.find((item) => item.id === entry.id)?.blocks[0] ?? null;
-  }
-
   function loggedSetsFor(entry?: WorkoutEntry): ExerciseSet[] {
-    const row = primaryLogRow(entry);
-    return row?.sets ?? entry?.sets ?? [];
+    return entry?.sets ?? [];
   }
 
   function failedSetsFor(entry?: WorkoutEntry): number[] {
-    const row = primaryLogRow(entry);
-    return row?.failedSets ?? entry?.failedSets ?? [];
+    return entry?.failedSets ?? [];
   }
 
   function completedLoggedSetsFor(entry?: WorkoutEntry): ExerciseSet[] {
-	const row = primaryLogRow(entry);
-	return row ? completedRowSets(row) : [];
+    return entry ? completedEntrySets(entry) : [];
   }
 
   function plannedSetsForSession(
@@ -864,20 +866,21 @@
 
   async function nudgeRecordedSetWeight(exerciseName: string, setIndex: number, direction: 1 | -1) {
     const preview = adjustedPreviewSets(exerciseName);
-    const existing = entryByExercise.get(exerciseName);
-    const sets = loggedSetsFor(existing).map((set) => [...set] as ExerciseSet);
-    if (!preview || preview.kind !== 'strength' || !existing?.id || !sets[setIndex]) return;
-    const [weight, reps] = sets[setIndex];
+    const source = recordedSetLocation(recordedLogsFor(exerciseName), setIndex);
+    if (!preview || preview.kind !== 'strength' || !source) return;
+    const row = source.log.blocks[0];
+    const sets = row.sets.map((set) => [...set] as ExerciseSet);
+    const [weight, reps] = sets[source.index];
     const nextWeight = Math.max(WEIGHT_STEP, Math.round((weight + direction * WEIGHT_STEP) * 2) / 2);
-    sets[setIndex] = [nextWeight, reps];
+    sets[source.index] = [nextWeight, reps];
     await saveSetsFor(
       exerciseName,
       preview.kind,
       sets,
       '',
       true,
-      existing.id,
-      failedSetsFor(existing)
+      source.log.id,
+      row.failedSets ?? []
     );
   }
 
@@ -1098,7 +1101,7 @@
       };
       await saveExerciseLog({
         exerciseName,
-        date: workoutDate,
+        date: existingLog?.date ?? workoutDate,
         rows: [row, ...(existingLog?.blocks.slice(1) ?? [])],
         id: existingId ?? randomUuid(),
         context: {
@@ -1117,6 +1120,15 @@
     }
   }
 
+  async function appendSetsFor(exerciseName: string, kind: ExerciseKind, sets: ExerciseSet[], failed = false) {
+    if (!sets.length) return;
+    const existing = recordedLogsFor(exerciseName).filter((log) => log.date === workoutDate).at(-1);
+    const row = existing?.blocks[0];
+    const previous = row?.sets ?? [];
+    const failedSets = [...(row?.failedSets ?? []), ...(failed ? sets.map((_, index) => previous.length + index) : [])];
+    await saveSetsFor(exerciseName, kind, [...previous, ...sets], '', true, existing?.id, failedSets);
+  }
+
   function currentPlanDraftRecordedSets(): number {
     return planDraft ? loggedSetsFor(entryByExercise.get(planDraft.exercise)).length : 0;
   }
@@ -1126,12 +1138,10 @@
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview?.sets.length) return;
     const existing = entryByExercise.get(exerciseName);
-    const storedLog = existing?.id
-      ? workoutStore.database.logs.find((item) => item.id === existing.id)
-      : undefined;
+    const logs = recordedLogsFor(exerciseName);
     const recordedSets = loggedSetsFor(existing);
 
-    if (storedLog && storedLog.blocks.length > 1) {
+    if (logs.some((log) => log.blocks.length > 1)) {
       focusMobileExercise(exerciseName);
       toasts.error('В упражнении есть дополнительные блоки. Отметьте подходы внутри карточки.');
       return;
@@ -1147,18 +1157,12 @@
       return;
     }
 
-    const sets = preview.sets.map((plannedSet, index) => [
-      ...(recordedSets[index] ?? plannedSet)
-    ] as ExerciseSet);
-    await saveSetsFor(
-      exerciseName,
-      preview.kind,
-      sets,
-      '',
-      true,
-      existing?.id,
-      sets.map((_, index) => index)
-    );
+    for (const log of logs) {
+      const sets = log.blocks[0].sets;
+      await saveSetsFor(exerciseName, preview.kind, sets, '', true, log.id, sets.map((_, index) => index));
+      if (error) return;
+    }
+    await appendSetsFor(exerciseName, preview.kind, preview.sets.slice(recordedSets.length), true);
     if (!error) {
       if (browser && 'vibrate' in navigator) navigator.vibrate(35);
       toasts.info(`Не выполнено: ${exerciseName}`);
@@ -1168,12 +1172,11 @@
   async function restoreExerciseNotDone(exerciseName: string) {
     if (busyId !== null) return;
     const existing = entryByExercise.get(exerciseName);
-    if (!existing?.id || !mobileExerciseProgress(exerciseName).notDone) return;
-    const storedLog = workoutStore.database.logs.find((item) => item.id === existing.id);
-    const row = storedLog?.blocks[0];
+    if (!existing || !mobileExerciseProgress(exerciseName).notDone) return;
+    const logs = recordedLogsFor(exerciseName);
 
     focusMobileExercise(exerciseName, 'auto');
-    if (!storedLog || storedLog.blocks.length !== 1 || row?.comment?.trim()) {
+    if (!logs.length || logs.some((log) => log.blocks.length !== 1 || log.blocks[0]?.comment?.trim())) {
       toasts.error('В записи есть комментарий или дополнительные данные. Восстановите её через редактор.');
       return;
     }
@@ -1181,7 +1184,7 @@
     busyId = exerciseName;
     error = '';
     try {
-      await deleteSession(existing.id);
+      for (const log of logs) await deleteSession(log.id);
       toasts.success(`Возвращено в тренировку: ${exerciseName}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Не удалось вернуть упражнение';
@@ -1198,33 +1201,23 @@
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
     const existing = entryByExercise.get(exerciseName);
-    const recordedSets = loggedSetsFor(existing).map((set) => [...set] as ExerciseSet);
-    if (setIndex > recordedSets.length || !preview.sets[setIndex]) return;
-    if (setIndex === recordedSets.length) {
+    const recordedCount = loggedSetsFor(existing).length;
+    if (setIndex > recordedCount || !preview.sets[setIndex]) return;
+    if (setIndex === recordedCount) {
       const plannedSet = preview.sets[setIndex];
       const actualSet: ExerciseSet = preview.kind === 'strength'
         ? [pendingActualWeight(exerciseName, setIndex, plannedSet[0]), plannedSet[1]]
         : [...plannedSet] as ExerciseSet;
-      recordedSets.push(actualSet);
+      await appendSetsFor(exerciseName, preview.kind, [actualSet], failed);
+    } else {
+      const source = recordedSetLocation(recordedLogsFor(exerciseName), setIndex);
+      if (!source) return;
+      const row = source.log.blocks[0];
+      const nextFailedSets = new Set(row.failedSets ?? []);
+      if (failed) nextFailedSets.add(source.index);
+      else nextFailedSets.delete(source.index);
+      await saveSetsFor(exerciseName, preview.kind, row.sets, '', true, source.log.id, [...nextFailedSets].sort((a, b) => a - b));
     }
-    const nextFailedSets = new Set(
-      failedSetsFor(existing).filter((index) => index >= 0 && index < recordedSets.length)
-    );
-    if (failed) nextFailedSets.add(setIndex);
-    else nextFailedSets.delete(setIndex);
-    const doneAll = recordedSets.length >= preview.sets.length;
-    const message = doneAll
-      ? `Записано: ${exerciseName}`
-      : `${failed ? 'Не выполнен' : 'Подход'} ${setIndex + 1} · ${exerciseName}`;
-    await saveSetsFor(
-      exerciseName,
-      preview.kind,
-      recordedSets,
-      message,
-      true,
-      existing?.id,
-      [...nextFailedSets].sort((a, b) => a - b)
-    );
     if (!error) {
       delete pendingActualWeights[`${exerciseInteractionKey(exerciseName)}:${setIndex}`];
     }
@@ -1232,15 +1225,20 @@
 
   async function undoRecordedSet(exerciseName: string, setIndex: number) {
     const preview = adjustedPreviewSets(exerciseName);
-    const existing = entryByExercise.get(exerciseName);
-    if (!preview || !existing?.id) return;
-    const recordedSets = loggedSetsFor(existing).map((set) => [...set] as ExerciseSet);
-    if (setIndex < 0 || setIndex >= recordedSets.length) return;
+    const source = recordedSetLocation(recordedLogsFor(exerciseName), setIndex);
+    if (!preview || !source) return;
+    const existing = source.log;
+    const row = existing.blocks[0];
+    const recordedSets = row.sets.map((set) => [...set] as ExerciseSet);
+    if (recordedSets.length === 1 && (existing.blocks.length > 1 || row.comment?.trim())) {
+      toasts.info('В записи есть комментарий или дополнительные блоки. Измените её через редактор записи.');
+      return;
+    }
 
-    recordedSets.splice(setIndex, 1);
-    const nextFailedSets = failedSetsFor(existing)
-      .filter((index) => index !== setIndex)
-      .map((index) => (index > setIndex ? index - 1 : index));
+    recordedSets.splice(source.index, 1);
+    const nextFailedSets = (row.failedSets ?? [])
+      .filter((index) => index !== source.index)
+      .map((index) => (index > source.index ? index - 1 : index));
 
     if (recordedSets.length) {
       await saveSetsFor(
@@ -1293,15 +1291,8 @@
     const preview = adjustedPreviewSets(exerciseName);
     if (!preview) return;
     const existing = entryByExercise.get(exerciseName);
-    await saveSetsFor(
-      exerciseName,
-      preview.kind,
-      preview.sets,
-      `Записано: ${exerciseName}`,
-      false,
-      existing?.id,
-      failedSetsFor(existing)
-    );
+    await appendSetsFor(exerciseName, preview.kind, preview.sets.slice(loggedSetsFor(existing).length));
+    if (!error) toasts.success(`Записано: ${exerciseName}`);
   }
 
   async function confirmAllPlanned() {
@@ -1315,15 +1306,8 @@
       for (const exerciseName of targets) {
         const preview = adjustedPreviewSets(exerciseName);
         if (!preview?.sets.length) continue;
-        await saveSetsFor(
-          exerciseName,
-          preview.kind,
-          preview.sets,
-          '',
-          true,
-          entryByExercise.get(exerciseName)?.id,
-          failedSetsFor(entryByExercise.get(exerciseName))
-        );
+        await appendSetsFor(exerciseName, preview.kind,
+          preview.sets.slice(loggedSetsFor(entryByExercise.get(exerciseName)).length));
         if (!error) saved += 1;
         if (error) break;
       }
@@ -1457,11 +1441,6 @@
       mesoPick = pick.mesoId;
       microPick = pick.microId;
       slotPick = pick.slot;
-      const micro = mesocycles
-        .find((meso) => meso.plan.id === pick.mesoId)
-        ?.microcycles.find((item) => item.plan.id === pick.microId);
-      const plannedDate = micro ? sessionDateForIndex(micro, pick.slot === 'B' ? 1 : 0) : null;
-      datePick = plannedDate ?? todayIso();
       autoPicked = true;
     }
     autoSelected = true;
@@ -1501,41 +1480,6 @@
       toasts.error(message);
     } finally {
       skipBusy = false;
-    }
-  }
-
-  async function changePlannedSessionDate(nextDate: string) {
-    if (!nextDate || !mesocycle || !microcycle || activeIndex == null) return;
-    if (nextDate === plannedSessionDate) return;
-    if (!usingManualPlan) {
-      toasts.error('Сначала откройте и сохраните план в разделе «План».');
-      return;
-    }
-    const basePlan = workoutStore.view.cyclePlanView.plan;
-    if (!basePlan) {
-      toasts.error('Сначала откройте и сохраните план в разделе «План».');
-      return;
-    }
-    const mesoId = mesocycle.plan.id;
-    const microId = microcycle.plan.id;
-    const idx = activeIndex;
-    plannedDateBusy = true;
-    error = '';
-    try {
-      saveCyclePlanState(assignSessionDate(basePlan, mesoId, microId, nextDate, idx));
-      datePick = nextDate;
-      if (browser && urlDate) {
-        const nextUrl = new URL(page.url);
-        nextUrl.searchParams.set('date', nextDate);
-        await goto(nextUrl, { replaceState: true, noScroll: true, keepFocus: true });
-      }
-      toasts.success(`Дата тренировки изменена: ${formatDateRu(nextDate)}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Не удалось изменить дату тренировки';
-      error = message;
-      toasts.error(message);
-    } finally {
-      plannedDateBusy = false;
     }
   }
 
@@ -1665,7 +1609,7 @@
       <div class="eyebrow">
         {sessionReady ? 'Тренировка' : 'Обзор'}
         {#if autoPicked && sessionReady}
-          <span class="auto-badge">авто · ближайшая незаполненная</span>
+          <span class="auto-badge">авто · текущая незаполненная</span>
         {/if}
       </div>
       <h1>
@@ -1680,7 +1624,7 @@
           {loggedPlanned}/{requiredSlotExercises.length} упражнений · {mesocycle.plan.label} ·
           {slotLabel(activeSlot)}
         {:else}
-          Укажите мезоцикл, микроцикл и сессию A или B — появится план и записи по этому дню.
+          Укажите мезоцикл, микроцикл и сессию A или B — появится план и все её записи.
         {/if}
       </p>
     </div>
@@ -1747,16 +1691,9 @@
                 </span>
               </h2>
               <div class="deck-meta">
-                <label class="deck-plan-date" title="Изменить дату этой тренировки в плане">
-                  <span>Дата в плане</span>
-                  <input
-                    type="date"
-                    value={plannedSessionDate ?? ''}
-                    aria-label="Дата {slotLabel(activeSlot)} в плане"
-                    disabled={plannedDateBusy || !usingManualPlan}
-                    onchange={(event) => void changePlannedSessionDate(event.currentTarget.value)}
-                  />
-                </label>
+                {#if sessionRecordedDates.length}
+                  <span class="muted">Записи: {sessionRecordedDates.map(formatDateRu).join(', ')}</span>
+                {/if}
                 {#if sessionSkipped}
                   <span class="skip-flag">пропущена</span>
                 {/if}
@@ -1786,14 +1723,18 @@
               </div>
 
               <label class="deck-date">
-                <span>Запись</span>
+                <span>Дата записи</span>
                 <input
                   type="date"
                   value={workoutDate}
-                  oninput={(event) => (datePick = event.currentTarget.value)}
+                  aria-label="Дата новых записей"
+                  onchange={(event) => setRecordingDate(event.currentTarget.value)}
                   list="workout-dates"
                 />
               </label>
+              {#if datePick}
+                <button type="button" class="text-button" onclick={() => (datePick = null)}>Сегодня</button>
+              {/if}
 
               <button
                 type="button"
@@ -1894,16 +1835,9 @@
                 <span class="deck-part deck-slot">{slotLabel(activeSlot)}</span>
               </h2>
               <div class="training-plan-meta">
-                <label class="deck-plan-date" title="Изменить дату этой тренировки в плане">
-                  <span>Дата в плане</span>
-                  <input
-                    type="date"
-                    value={plannedSessionDate ?? ''}
-                    aria-label="Дата {slotLabel(activeSlot)} в плане"
-                    disabled={plannedDateBusy || !usingManualPlan}
-                    onchange={(event) => void changePlannedSessionDate(event.currentTarget.value)}
-                  />
-                </label>
+                {#if sessionRecordedDates.length}
+                  <span class="muted">Записи: {sessionRecordedDates.map(formatDateRu).join(', ')}</span>
+                {/if}
                 {#if sessionSkipped}
                   <span class="skip-flag">пропущена</span>
                 {/if}
@@ -2194,6 +2128,22 @@
                 <div>
                   <span class="mobile-exercise-eyebrow">Тренировка {activeSlot}</span>
                   <h3>{exercise}</h3>
+                  {#if !fullyLogged}
+                    <div class="mobile-record-date">
+                      <label>
+                        <span>Дата записи</span>
+                        <input type="date" value={workoutDate}
+                          aria-label="Дата новых записей для {exercise}"
+                          onchange={(event) => setRecordingDate(event.currentTarget.value)} />
+                      </label>
+                      {#if datePick}
+                        <button type="button" class="text-button" onclick={() => (datePick = null)}>Сегодня</button>
+                      {/if}
+                    </div>
+                  {/if}
+                  {#if entry}
+                    <p class="exercise-record-dates">{fullyLogged ? 'Записано' : 'Начато'}: {exerciseRecordedDates(exercise)}</p>
+                  {/if}
                   {#if protocolSkip && !entry}
                     <div class="plan-meta protocol-skip">
                       <span class="protocol-skip-badge">Пропускаем в этом μ</span>
@@ -2435,17 +2385,19 @@
                       <span class="plan-action-short">План</span>
                     </button>
                     {#if entry}
-                      <a class="text-button exercise-record-action" href={addUrl(exercise, entry.id)}>Изменить запись</a>
-                      {#if entry.id}
+                      {#each recordedLogsFor(exercise) as log (log.id)}
+                        <a class="text-button exercise-record-action" href={addUrl(exercise, log.id)}>
+                          Изменить запись{recordedLogsFor(exercise).length > 1 ? ` · ${formatDateRu(log.date)}` : ''}
+                        </a>
                         <button
                           type="button"
                           class="text-button danger exercise-record-action"
-                          disabled={busyId === entry.id}
-                          onclick={() => removeEntry(entry.id)}
+                          disabled={busyId === log.id}
+                          onclick={() => removeEntry(log.id)}
                         >
-                          {busyId === entry.id ? '…' : 'Удалить запись'}
+                          {busyId === log.id ? '…' : `Удалить запись${recordedLogsFor(exercise).length > 1 ? ` · ${formatDateRu(log.date)}` : ''}`}
                         </button>
-                      {/if}
+                      {/each}
                     {/if}
                   {/if}
                 </div>
@@ -2656,6 +2608,13 @@
 </div>
 
 <style>
+  .mobile-record-date { display: none; }
+  @media (max-width: 680px) {
+    .mobile-record-date { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+    .mobile-record-date label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+    .mobile-record-date input { width: 134px; min-height: 34px; padding: 5px 7px; color: var(--text); background: var(--surface); border: 1px solid var(--line); font: inherit; color-scheme: dark; }
+  }
+  .exercise-record-dates { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
   .dashboard.session-active {
     padding-bottom: 48px;
   }
@@ -2819,46 +2778,6 @@
     font-weight: 600;
   }
 
-  .deck-plan-date {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .deck-plan-date input {
-    width: 126px;
-    min-height: 0;
-    padding: 2px 4px;
-    color: var(--muted-strong);
-    background: transparent;
-    border: 0;
-    border-bottom: 1px dashed color-mix(in srgb, var(--muted) 65%, transparent);
-    border-radius: 0;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: none;
-    cursor: pointer;
-  }
-
-  .deck-plan-date input:hover,
-  .deck-plan-date input:focus-visible {
-    color: var(--text);
-    border-bottom-color: var(--accent);
-    outline: none;
-  }
-
-  .deck-plan-date input:disabled {
-    cursor: wait;
-    opacity: 0.55;
-  }
 
   .training-plan-meta {
     display: flex;

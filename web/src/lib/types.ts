@@ -60,6 +60,8 @@ export type WorkoutEntry = {
 	date: string;
 	parts: string[];
 	sets: ExerciseSet[];
+	/** Число подходов основного задания; дополнительные блоки не закрывают план. */
+	primarySetCount?: number;
 	microSessionId?: string;
 	/** Индексы подходов, помеченных как невыполненные (failed). */
 	failedSets?: number[];

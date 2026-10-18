@@ -1,6 +1,5 @@
 import type { CyclePlan } from './cycle-plan';
-import { importPlanFromAuto, refreshAllMesoAnchors, repairMicroDatesFromAuto } from './cycle-plan';
-import { buildWorkoutKeyMaps } from './exercise-keys';
+import { importPlanFromAuto, repairMicroDatesFromAuto } from './cycle-plan';
 import { buildMicrocycleOverview, type MicrocycleOverview } from './microcycle';
 import { logsToSessions } from './json-store';
 import type { ExerciseLog, WorkoutDatabase, WorkoutEntry } from './types';
@@ -49,7 +48,8 @@ export function repairLogMicroSessionIds(
 	let unlinked = 0;
 
 	const logs = db.logs.map((log) => {
-		if (log.microSessionId && lookup.sessionIds.size === 0) return log;
+		// Явная существующая связь важнее даты: один A/B выполняется в несколько дней.
+		if (log.microSessionId && (lookup.sessionIds.size === 0 || lookup.sessionIds.has(log.microSessionId))) return log;
 
 		const day = overview.byDate.get(log.date);
 		const msId =
@@ -89,7 +89,7 @@ export function repairWorkoutLinks(
 	} = {}
 ): WorkoutLinkRepairResult {
 	const importPlanIfEmpty = options.importPlanIfEmpty ?? true;
-	const repairPlanDates = options.repairPlanDates ?? true;
+	const repairPlanDates = options.repairPlanDates ?? false;
 
 	let nextPlan = plan;
 	let planImported = false;
@@ -115,14 +115,6 @@ export function repairWorkoutLinks(
 		unlinked: logsUnlinked
 	} = repairLogMicroSessionIds(database, nextPlan, overview);
 
-	let anchorsRefreshed = false;
-	if (nextPlan) {
-		const keyMaps = buildWorkoutKeyMaps(linkedDb.exercises, entries);
-		const refreshed = refreshAllMesoAnchors(nextPlan, entries, true, keyMaps);
-		anchorsRefreshed = JSON.stringify(refreshed) !== JSON.stringify(plan);
-		nextPlan = refreshed;
-	}
-
 	return {
 		database: linkedDb,
 		plan: nextPlan,
@@ -130,7 +122,7 @@ export function repairWorkoutLinks(
 		logsUnlinked,
 		planImported,
 		planDatesRepaired,
-		anchorsRefreshed
+		anchorsRefreshed: false
 	};
 }
 

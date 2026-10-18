@@ -190,8 +190,8 @@ export const SCHEMA_ENTITIES: SchemaEntity[] = [
 		fields: [
 			{ name: 'id', type: 'string', description: 'Идентификатор' },
 			{ name: 'label', type: 'string', description: 'Название мезо' },
-			{ name: 'startDate', type: 'string', description: 'Runtime: первая назначенная дата' },
-			{ name: 'endDate', type: 'string', description: 'Runtime: последняя назначенная дата' },
+			{ name: 'startDate', type: 'string', description: 'Runtime: первая дата фактических записей' },
+			{ name: 'endDate', type: 'string', description: 'Runtime: последняя дата фактических записей' },
 			{ name: 'microcycles', type: 'MicrocyclePlan[]', description: '2 сессии A/B на каждый μ' },
 			{ name: 'templateId', type: 'string', description: 'Протокол по умолчанию для мезо' },
 			{ name: 'anchor1rm', type: 'Record<exerciseId, kg>', description: 'Якорные 1ПМ на старт мезо' },
@@ -243,11 +243,11 @@ export const SCHEMA_ENTITIES: SchemaEntity[] = [
 		stored: true,
 		source: 'microcycles[].sessions[]',
 		description:
-			'Элемент микроцикла — один визит в зал. indexInMicro 0 = «A», 1 = «B» (только UI, не в логах).',
+			'Тренировка плана, которую можно выполнять в несколько дней. indexInMicro 0 = «A», 1 = «B». Даты выполнения хранятся в ExerciseLog.',
 		fields: [
 			{ name: 'id', type: 'string', description: 'ms-xxxxxxxx, ссылка из ExerciseLog.microSessionId' },
 			{ name: 'indexInMicro', type: '0 | 1', description: 'Слот A/B' },
-			{ name: 'date', type: 'string', description: 'Назначенная дата YYYY-MM-DD', optional: true }
+			{ name: 'date', type: 'string', description: 'Дата прежнего плана для совместимости со старыми записями', optional: true }
 		],
 		relations: ['ExerciseLog.microSessionId']
 	},
