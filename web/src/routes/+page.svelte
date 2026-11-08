@@ -158,19 +158,22 @@
     return completionPhrase(`${exerciseInteractionKey(exerciseName)}:${workoutDate}`);
   }
 
-  function scrollMobileExerciseIntoView(node: HTMLElement, exerciseName: string | null) {
+  function centerSelectedTab(node: HTMLElement, exerciseName: string | null) {
     const centerActiveExercise = () => {
-      const target = node.querySelector<HTMLElement>('.mobile-exercise-tab.active');
+      const target = node.querySelector<HTMLElement>('[aria-current="step"]');
       if (!target) return;
-      const left = target.offsetLeft - (node.clientWidth - target.clientWidth) / 2;
-      node.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+      const left = node.scrollLeft + target.getBoundingClientRect().left - node.getBoundingClientRect().left
+        - (node.clientWidth - target.clientWidth) / 2;
+      node.scrollTo({ left });
     };
-    requestAnimationFrame(centerActiveExercise);
+    const observer = new ResizeObserver(centerActiveExercise);
+    observer.observe(node);
     return {
       update(nextExerciseName: string | null) {
         if (nextExerciseName !== exerciseName) requestAnimationFrame(centerActiveExercise);
         exerciseName = nextExerciseName;
-      }
+      },
+      destroy() { observer.disconnect(); }
     };
   }
 
@@ -488,13 +491,6 @@
       return !isExerciseFullyLogged(exercise, entry) && Boolean(adjustedPreviewSets(exercise));
     })
   );
-  const sessionProgress = $derived(
-    requiredSlotExercises.length
-      ? Math.round((loggedPlanned / requiredSlotExercises.length) * 100)
-      : slotExercises.length && protocolSkips.size === slotExercises.length
-        ? 100
-        : 0
-  );
   const availableDates = $derived([...new Set(view.entries.map((entry) => entry.date))].sort().reverse());
 
   const protocolHints = $derived.by(() => {
@@ -567,14 +563,17 @@
     });
     const sessionEntryByExercise = aggregateExerciseEntries(primaryProgressEntries(sessionEntries, workoutStore.database.logs));
 
-    const logged = required.filter((exercise) => {
+    let recordedShare = 0;
+    for (const exercise of required) {
       const entry = sessionEntryByExercise.get(exercise);
-      if (!entry) return false;
+      const count = loggedSetsFor(entry).length;
+      if (!count) continue;
       const planned = plannedSetsForSession(meso, micro, index, exercise);
-      return planned ? loggedSetsFor(entry).length >= planned.sets.length : loggedSetsFor(entry).length > 0;
-    }).length;
-
-    return Math.round((logged / required.length) * 100);
+      recordedShare += planned ? Math.min(1, count / planned.sets.length) : 1;
+    }
+    if (recordedShare === 0) return 0;
+    if (recordedShare === required.length) return 100;
+    return Math.max(1, Math.min(99, Math.round(100 * recordedShare / required.length)));
   }
 
   function sessionProgressFor(micro: EnrichedMicrocycle, index: 0 | 1): number {
@@ -582,8 +581,8 @@
     return sessionProgressPercent(mesocycle, micro, index);
   }
 
-  const planSessionSteps = $derived.by((): SessionRoutingRef[] => {
-    const steps: SessionRoutingRef[] = [];
+  const planSessionSteps = $derived.by(() => {
+    const steps: (SessionRoutingRef & { microNumber: number; mesoLabel: string; progress: number; skipped: boolean })[] = [];
     for (const meso of mesocycles) {
       for (const micro of meso.microcycles) {
         for (const slot of ['A', 'B'] as const) {
@@ -592,6 +591,10 @@
           if (!session) continue;
           steps.push({
             id: session.id,
+            microNumber: micro.plan.indexInMeso,
+            mesoLabel: meso.plan.label,
+            progress: sessionProgressPercent(meso, micro, index),
+            skipped: Boolean(session.skipped),
             mesoId: meso.plan.id,
             microId: micro.plan.id,
             slot,
@@ -613,7 +616,14 @@
     );
   });
 
+  const sessionProgress = $derived(planSessionSteps[currentSessionStepIndex]?.progress ?? 0);
+  const sessionSwitchBusy = $derived(busyId !== null || bulkBusy || planEditBusy || planQuickBusy !== null);
+
   function applySessionStep(step: Pick<SessionRoutingRef, 'mesoId' | 'microId' | 'slot'>) {
+    if (sessionSwitchBusy) return;
+    planDraft = null;
+    undoNotice = null;
+    clearMobileExerciseHold();
     autoPicked = false;
     mesoPick = step.mesoId;
     microPick = step.microId;
@@ -1650,6 +1660,35 @@
       <a class="button button-primary" href="{base}/cycles">Создать макроцикл</a>
     </section>
   {:else}
+    {#if sessionReady && mesocycle && microcycle && currentSessionStepIndex >= 0}
+      <nav class="session-browser" aria-label="Тренировки плана">
+        <div class="session-browser-heading">
+          <strong>{mesocycle.plan.label} · Микроцикл {microcycle.plan.indexInMeso} · {activeSlot}</strong>
+          <span>{currentSessionStepIndex + 1} / {planSessionSteps.length}</span>
+        </div>
+        <button type="button" aria-label="Предыдущая тренировка" disabled={sessionSwitchBusy || currentSessionStepIndex === 0} onclick={() => goSessionStep(-1)}>‹</button>
+        <div class="session-track" use:centerSelectedTab={activeMicroSessionId}>
+          {#each planSessionSteps as step (step.id)}
+            {@const status = step.skipped ? 'Пропуск' : step.progress === 100 ? 'Всё отмечено' : `Отмечено ${step.progress}%`}
+            <button
+              type="button"
+              aria-label={`${step.mesoLabel}, микроцикл ${step.microNumber}, тренировка ${step.slot}. ${status}`}
+              title={status}
+              aria-current={activeMicroSessionId === step.id ? 'step' : undefined}
+              disabled={sessionSwitchBusy}
+              onclick={() => applySessionStep(step)}
+            >
+              <span>{step.microNumber} · {step.slot}</span>
+              <small>{step.skipped ? 'Пропуск' : step.progress === 100 ? '✓ 100%' : `${step.progress}%`}</small>
+              {#if !step.skipped}
+                <span class="session-meter" aria-hidden="true"><i style:width={`${step.progress}%`}></i></span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+        <button type="button" aria-label="Следующая тренировка" disabled={sessionSwitchBusy || currentSessionStepIndex === planSessionSteps.length - 1} onclick={() => goSessionStep(1)}>›</button>
+      </nav>
+    {/if}
     <section class="card training-card">
       {#if sessionReady && mesocycle && microcycle && activeSlot && !pickerOpen}
         <div
@@ -2052,7 +2091,7 @@
         ontouchcancel={() => (mobileSwipeStart = null)}
       >
         <nav class="mobile-exercise-nav" aria-label="Упражнения текущей тренировки">
-          <div class="mobile-exercise-track" use:scrollMobileExerciseIntoView={mobileFocusExercise}>
+          <div class="mobile-exercise-track" use:centerSelectedTab={mobileFocusExercise}>
             {#each slotExercises as exercise, index (exercise)}
               {@const progress = mobileExerciseProgress(exercise)}
               {@const skipped = protocolSkips.has(exercise) && progress.completed === 0}
@@ -2608,6 +2647,55 @@
 </div>
 
 <style>
+  .session-browser { display: none; }
+  @media (max-width: 680px) {
+    .session-browser {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) 44px;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      padding: 8px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+    .session-browser-heading {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 0 4px;
+      font-size: 12px;
+    }
+    .session-browser-heading span { color: var(--muted); white-space: nowrap; }
+    .session-track { display: flex; gap: 4px; overflow-x: auto; }
+    .session-browser button {
+      min-width: 44px;
+      min-height: 44px;
+      flex: none;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+      font: inherit;
+    }
+    .session-track button {
+      display: grid;
+      align-content: center;
+      gap: 2px;
+      position: relative;
+      padding: 4px 8px 7px;
+    }
+    .session-track small { color: var(--muted-strong); font-size: 11px; }
+    .session-meter {
+      position: absolute;
+      inset: auto 4px 3px;
+      height: 3px;
+      background: var(--line);
+    }
+    .session-meter i { display: block; height: 100%; background: var(--accent); }
+    .session-browser button[aria-current] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+    .session-browser button:disabled { opacity: .4; }
+  }
   .mobile-record-date { display: none; }
   @media (max-width: 680px) {
     .mobile-record-date { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
@@ -4899,7 +4987,7 @@
     }
 
     .page-header.compact,
-    .training-card,
+    .session-active .training-card,
     .session-toolbar,
     .section-heading,
     .day-log {
